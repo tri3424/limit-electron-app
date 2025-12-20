@@ -1,9 +1,8 @@
-name: Build Windows Installer
+name: Build Windows EXE
 
 on:
   push:
-    branches:
-      - main
+    branches: [ main ]
   workflow_dispatch:
 
 jobs:
@@ -11,7 +10,7 @@ jobs:
     runs-on: windows-latest
 
     steps:
-      - name: Checkout repository
+      - name: Checkout repo
         uses: actions/checkout@v4
 
       - name: Setup Node.js
@@ -22,12 +21,12 @@ jobs:
       - name: Install dependencies
         run: npm install
 
-      - name: Build app
+      - name: Build EXE
         run: npm run electron:build:win
 
-      - name: Upload installer
+      - name: Upload EXE
         uses: actions/upload-artifact@v4
         with:
-          name: Limit-Windows-Installer
-          path: dist/*.exe
+          name: Limit-Windows-EXE
+          path: dist_electron/**/*.exe
 
