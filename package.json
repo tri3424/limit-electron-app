@@ -6,6 +6,7 @@
   "type": "module",
   "main": "electron/main.cjs",
   "author": "Subhadeep Choudhury",
+  "homepage": "./",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
@@ -124,7 +125,12 @@
       "electron/**/*"
     ],
     "win": {
-      "target": "nsis",
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        }
+      ],
       "icon": "build/icon.ico"
     },
     "nsis": {
