@@ -116,7 +116,7 @@
   "build": {
     "appId": "com.subhadeep.limit",
     "productName": "Limit",
-    "artifactName": "Limit-Setup-${version}.${ext}",
+    "artifactName": "Limit-Setup-${version}.exe",
     "directories": {
       "output": "dist"
     },
