@@ -7,38 +7,36 @@ on:
 
 jobs:
   build-windows:
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
 
     steps:
-      # Step 1: Checkout repository
+      # 1. Checkout code
       - name: Checkout repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
-      # Step 2: Setup Node.js
+      # 2. Setup Node.js
       - name: Setup Node.js
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: 20
 
-      # Step 3: Install dependencies
+      # 3. Install dependencies
       - name: Install dependencies
         run: npm install
 
-      # Step 4: Build the app
-      - name: Build Vite + Electron app
+      # 4. Build frontend + electron
+      - name: Build app
         run: npm run build
 
-      # Step 5: Package Windows installer using electron-builder
-      - name: Package Windows installer
+      # 5. Build Windows installer (.exe)
+      - name: Build Windows installer
         run: npx electron-builder --win --x64 --publish never
         env:
-          CSC_LINK: ""
-          CSC_KEY_PASSWORD: ""
+          CSC_IDENTITY_AUTO_DISCOVERY: false
 
-      # Step 6: Upload the generated .exe installer
+      # 6. Upload installer
       - name: Upload Windows Installer
         uses: actions/upload-artifact@v4
         with:
           name: Windows-Installer
           path: dist/*.exe
-
