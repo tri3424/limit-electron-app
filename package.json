@@ -2,6 +2,7 @@
   "name": "limit",
   "private": true,
   "version": "1.0.9",
+  "description": "Limit Desktop Application",
   "type": "module",
   "main": "electron/main.cjs",
   "author": "Subhadeep Choudhury",
@@ -12,7 +13,8 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "electron:dev": "concurrently \"vite\" \"wait-on http://localhost:8080 && electron .\"",
-    "electron:build": "vite build && electron-builder"
+    "electron:build": "vite build && electron-builder",
+    "electron:build:win": "vite build && electron-builder --win --x64"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",
@@ -114,6 +116,13 @@
     "appId": "com.subhadeep.limit",
     "productName": "Limit",
     "artifactName": "Limit-Setup-${version}.${ext}",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "dist/**/*",
+      "electron/**/*"
+    ],
     "win": {
       "target": "nsis",
       "icon": "build/icon.ico"
@@ -122,10 +131,6 @@
       "oneClick": false,
       "perMachine": false,
       "allowToChangeInstallationDirectory": true,
-      "installerSidebar": "build/installer-sidebar.bmp",
-      "uninstallerSidebar": "build/installer-sidebar.bmp",
-      "installerHeaderIcon": "build/icon.ico",
-      "include": "build/installer.nsh",
       "runAfterFinish": true
     }
   }
