@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+  workflow_dispatch:
 
 jobs:
   build-windows:
@@ -22,13 +23,11 @@ jobs:
         run: npm install
 
       - name: Build app
-        run: npm run build
-
-      - name: Build Windows installer
-        run: npx electron-builder --win --x64 --publish never
+        run: npm run electron:build:win
 
       - name: Upload installer
         uses: actions/upload-artifact@v4
         with:
-          name: Windows-Installer
+          name: Limit-Windows-Installer
           path: dist/*.exe
+
