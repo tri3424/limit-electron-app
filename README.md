@@ -1,4 +1,4 @@
-# ExamMaster - Desktop Exam & Practice Platform
+# Limit - Desktop Exam & Practice Platform
 
 A production-grade, desktop-only web application for creating, managing, and taking exams and practice tests with robust offline support, accurate timers, and exam integrity features.
 
