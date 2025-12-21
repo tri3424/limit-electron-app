@@ -28,5 +28,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: Limit-Windows-EXE
-          path: dist_electron/**/*.exe
+          path: dist/*.exe
 
