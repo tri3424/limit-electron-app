@@ -122,8 +122,10 @@
       "buildResources": "build-resources"
     },
     "files": [
-      "dist/**/*",
-      "electron/**/*"
+      "app-dist/**/*",
+      "electron/**/*",
+      "package.json",
+      "node_modules/**/*"
     ],
     "win": {
       "target": [
