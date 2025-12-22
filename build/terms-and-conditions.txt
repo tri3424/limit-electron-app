@@ -1,41 +1,45 @@
 LIMIT DESKTOP APPLICATION – TERMS & CONDITIONS
 
+(Yes, These Exist. No, They’re Not That Boring.)
+
 Effective Date: 2025-12-21
 
-IMPORTANT: PLEASE READ THESE TERMS CAREFULLY. BY INSTALLING OR USING THE SOFTWARE, YOU AGREE TO THESE TERMS.
+1. Acceptance of Terms (The “By Using This, You Agree” Part)
 
-1. ACCEPTANCE OF TERMS
-By installing, copying, accessing, or using the Limit desktop application (the “Software”), you agree to be bound by these Terms & Conditions (“Terms”). If you do not agree, do not install or use the Software.
+Welcome to the LIMIT Desktop Application, also known throughout this document as “the Software.” By installing, opening, launching, clicking, typing, scrolling, staring at, or otherwise using the Software in any meaningful way, you are agreeing to these Terms & Conditions. If you do not agree with them, that’s completely okay—just don’t install or use the Software. Continuing to use it means you’ve read this, understood it (or at least skimmed it), and said “sure, why not.”
 
-2. LICENSE GRANT
-Subject to your compliance with these Terms, you are granted a limited, non-exclusive, non-transferable, revocable license to install and use the Software for personal, non-commercial study and practice purposes.
+2. License Grant (What You’re Allowed to Do)
 
-3. RESTRICTIONS
-You agree that you will not:
-- Reverse engineer, decompile, disassemble, or otherwise attempt to derive the source code of the Software except to the extent permitted by applicable law.
-- Modify, adapt, translate, or create derivative works from the Software.
-- Distribute, sell, rent, lease, sublicense, or otherwise make the Software available to any third party.
-- Bypass, disable, or interfere with any security-related features or usage controls.
+As long as you follow these Terms and behave like a reasonable human, you are granted a limited, non-exclusive, non-transferable, and revocable license to install and use the Software. This license is strictly for personal, non-commercial study and practice purposes. In simpler terms, you can use the Software to learn and improve, but you don’t own it, you can’t sell it, and you definitely can’t pretend it’s yours and redistribute it to the internet like a free giveaway.
 
-4. USER DATA AND LOCAL STORAGE
-The Software may store study content, progress data, settings, and related information locally on your device. You are responsible for:
-- Maintaining backups of your data.
-- Protecting your device and access credentials.
+3. Restrictions (Things That Will Make This License Disappear)
 
-5. ACADEMIC INTEGRITY
-The Software is intended to support learning and exam preparation. You are solely responsible for complying with your institution’s academic integrity policies and any applicable rules for assessments or examinations.
+While we admire curiosity, there are some things you agree not to do. You may not reverse engineer, decompile, disassemble, or attempt to figure out how the Software works internally by force, magic, or questionable tutorials. You may not modify, adapt, translate, or create derivative works from the Software, and you may not distribute, sell, rent, lease, sublicense, or otherwise share it with third parties. You also agree not to bypass, disable, or interfere with any security features or usage controls. Basically, please don’t break it, clone it, or outsmart it.
 
-6. UPDATES AND CHANGES
-The Software may be updated from time to time. These Terms may also be updated. If Terms are updated, you may be required to accept the revised Terms to continue installation or use.
+4. User Data and Local Storage (Your Stuff, Your Responsibility)
 
-7. DISCLAIMER OF WARRANTIES
-THE SOFTWARE IS PROVIDED “AS IS” AND “AS AVAILABLE” WITHOUT WARRANTIES OF ANY KIND, WHETHER EXPRESS, IMPLIED, OR STATUTORY, INCLUDING BUT NOT LIMITED TO IMPLIED WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, AND NON-INFRINGEMENT.
+The Software may store study content, progress data, settings, and other related information locally on your device. This data stays on your machine, not floating around in the cloud. You are responsible for maintaining backups if you care about that data and for protecting your device, files, and access credentials. If something gets deleted, corrupted, or lost due to device failure, user error, or cosmic misfortune, that one’s unfortunately on you.
 
-8. LIMITATION OF LIABILITY
-TO THE MAXIMUM EXTENT PERMITTED BY LAW, IN NO EVENT SHALL THE AUTHORS OR DISTRIBUTORS BE LIABLE FOR ANY INDIRECT, INCIDENTAL, SPECIAL, CONSEQUENTIAL, OR PUNITIVE DAMAGES, OR ANY LOSS OF DATA, PROFITS, OR BUSINESS ARISING OUT OF OR RELATED TO YOUR USE OF THE SOFTWARE.
+5. Academic Integrity (Please Don’t Cheat)
 
-9. TERMINATION
-These Terms are effective until terminated. Your rights under these Terms terminate automatically if you fail to comply. Upon termination, you must stop using the Software and delete all copies in your possession.
+The Software is designed to support learning, practice, and exam preparation. It is not responsible for how you use it during assessments, exams, or evaluations. You are solely responsible for complying with your institution’s academic integrity policies and any applicable rules. If you misuse the Software in ways that violate exam rules, that’s between you and your institution—not us.
 
-10. CONTACT
-If you have questions about these Terms, contact the publisher via the official distribution channel used to obtain the Software.
+6. Updates and Changes (Nothing Stays the Same Forever)
+
+From time to time, the Software may receive updates, improvements, bug fixes, or new features. These updates may happen automatically or require manual installation. The Terms themselves may also be updated occasionally. If the Terms change, you may be asked to accept the revised version in order to continue using the Software. Using the Software after an update means you’re agreeing to the latest version of these Terms, whether you noticed the changes or not.
+
+7. Disclaimer of Warranties (No Promises, Sorry)
+
+The Software is provided “as is” and “as available,” without any warranties of any kind. This includes, but is not limited to, implied warranties of merchantability, fitness for a particular purpose, or non-infringement. We make no guarantees that the Software will be perfect, flawless, bug-free, or always behave exactly how you expect. Sometimes software has bad days too.
+
+8. Limitation of Liability (We’re Not Paying for Your Laptop)
+
+To the maximum extent permitted by law, the authors and distributors of the Software will not be liable for any indirect, incidental, special, consequential, or punitive damages. This includes, but is not limited to, loss of data, loss of profits, loss of productivity, or business interruptions arising from your use of—or inability to use—the Software. If something goes wrong, we sympathize, but we are not financially responsible.
+
+9. Termination (When This Relationship Ends)
+
+These Terms remain in effect until they are terminated. Your rights under these Terms will automatically end if you fail to comply with any part of them. Upon termination, you must immediately stop using the Software and delete all copies in your possession. No dramatic breakup speech required—just uninstall and move on.
+
+10. Contact (If You’re Still Reading and Have Questions)
+
+If you have questions, concerns, or just feel like saying hello regarding these Terms, you can contact the publisher through the official distribution channel from which you obtained the Software. Carrier pigeons, smoke signals, and telepathy are currently unsupported.

@@ -1664,7 +1664,7 @@ export default function RichTextEditor({ value, onChange, placeholder, className
       }}>
         <DialogContent
           aria-describedby={undefined}
-          className="w-[96vw] max-w-4xl h-[86vh] flex flex-col overflow-hidden rounded-3xl border border-border/70 bg-gradient-to-br from-background via-muted/20 to-background shadow-2xl"
+          className="w-[96vw] max-w-4xl h-[90vh] flex flex-col overflow-hidden rounded-3xl border border-border/70 bg-gradient-to-br from-background via-muted/20 to-background shadow-2xl"
           onOpenAutoFocus={(e) => {
             e.preventDefault();
             requestAnimationFrame(() => {
@@ -1673,15 +1673,15 @@ export default function RichTextEditor({ value, onChange, placeholder, className
           }}
         >
           <DialogHeader className="pb-5 border-b flex-shrink-0">
-            <div className="flex items-center justify-between">
-              <div>
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <div className="min-w-0">
                 <DialogTitle className="text-2xl tracking-tight">{editingKatexElement ? 'Edit Equation' : 'Insert Equation'}</DialogTitle>
                 <DialogDescription>
                   Type your KaTeX/LaTeX syntax here. Use the preview icon to open the rendered equation in a separate modal.
                 </DialogDescription>
               </div>
               {/* Top Navigation Bar - Icon Only Buttons with Colors */}
-              <div className="flex flex-wrap items-center gap-2 bg-muted/30 rounded-2xl px-3 py-2 border border-border/50 shadow-sm">
+              <div className="flex flex-nowrap items-center gap-2 bg-muted/30 rounded-2xl px-3 py-2 border border-border/50 shadow-sm overflow-x-auto show-scrollbar whitespace-nowrap sm:max-w-[56vw] w-full sm:w-auto">
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <Button
@@ -1789,9 +1789,9 @@ export default function RichTextEditor({ value, onChange, placeholder, className
               </div>
             </div>
           </DialogHeader>
-          <div className="flex-1 min-h-0 p-5">
-            <div className="flex flex-col h-full min-h-0 rounded-3xl border border-border/60 bg-card/80 p-5 shadow-xl">
-              <div className="flex flex-col min-h-0 flex-1 bg-muted/20 rounded-2xl p-4 border border-border/60 shadow-inner">
+          <div className="flex-1 min-h-0 p-4">
+            <div className="flex flex-col h-full min-h-0 rounded-3xl border border-border/60 bg-card/80 p-4 shadow-xl">
+              <div className="flex flex-col min-h-0 flex-1 bg-muted/20 rounded-2xl p-3 border border-border/60 shadow-inner">
                 <label className="block text-sm font-semibold text-foreground mb-2">LaTeX Input</label>
                 <textarea
                   ref={equationInputRef}
@@ -1808,7 +1808,7 @@ export default function RichTextEditor({ value, onChange, placeholder, className
               </div>
             </div>
           </div>
-          <DialogFooter className="flex flex-wrap gap-2 flex-shrink-0 border-t pt-4 mt-4">
+          <DialogFooter className="flex flex-wrap gap-2 flex-shrink-0 border-t pt-3">
             <Button
               type="button"
               variant="ghost"

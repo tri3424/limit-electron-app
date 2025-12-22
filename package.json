@@ -143,7 +143,7 @@
       "perMachine": false,
       "allowToChangeInstallationDirectory": true,
       "runAfterFinish": true,
-      "include": "build/empty-installer.nsh",
+      "include": "build/installer.nsh",
       "license": "build/terms-and-conditions.txt"
     }
   }

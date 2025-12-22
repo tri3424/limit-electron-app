@@ -95,10 +95,19 @@ export default function Questions() {
 
   const filteredQuestions = (questions?.filter(q => {
     const s = searchQuery.trim().toLowerCase();
+    const questionPlainText = extractPlainText(q.text || '').toLowerCase();
+    const explanationPlainText = extractPlainText(q.explanation || '').toLowerCase();
+    const optionsPlainText = (q.options || [])
+      .map((o) => extractPlainText(o.text || ''))
+      .join(' ')
+      .toLowerCase();
+    const tags = (q.tags || []).map((t) => String(t));
     const matchesSearch = !s
       ? true
-      : q.text.toLowerCase().includes(s) ||
-        q.tags.some(t => t.toLowerCase().includes(s)) ||
+      : questionPlainText.includes(s) ||
+        explanationPlainText.includes(s) ||
+        optionsPlainText.includes(s) ||
+        tags.some(t => t.toLowerCase().includes(s)) ||
         (q.code ? q.code.toLowerCase().includes(s) : false) ||
         doesQuestionMatchNormalizedSearch(
           q,
@@ -108,7 +117,7 @@ export default function Questions() {
           globalGlossaryTokens
         );
     const matchesType = typeFilter === 'all' || q.type === typeFilter;
-    const matchesTag = tagFilter === 'all' || q.tags.includes(tagFilter);
+    const matchesTag = tagFilter === 'all' || tags.includes(tagFilter);
     return matchesSearch && matchesType && matchesTag;
   }) || []).slice().sort((a, b) => {
     const aCreated = a.metadata?.createdAt ?? 0;

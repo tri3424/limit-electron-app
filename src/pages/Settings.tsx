@@ -745,7 +745,7 @@ export default function Settings() {
           setPendingImport(null);
         }
       }}>
-        <DialogContent className="max-w-md">
+        <DialogContent className="w-[96vw] max-w-3xl">
           <DialogHeader>
             <DialogTitle>Import Questions</DialogTitle>
             <DialogDescription>
@@ -770,13 +770,13 @@ export default function Settings() {
               file, choose whether to skip them or keep separate copies with new question codes.
             </p>
           </div>
-          <DialogFooter className="flex flex-col sm:flex-row sm:justify-between gap-2">
-            <div className="flex flex-col text-xs text-muted-foreground space-y-1 sm:text-left text-center">
+          <DialogFooter className="flex flex-col gap-4 sm:gap-3">
+            <div className="w-full rounded-md border bg-muted/20 p-3 text-xs text-muted-foreground space-y-1">
               <span>Import strategy for matching questions:</span>
               <span>• <strong>Skip</strong>: only new questions are imported.</span>
               <span>• <strong>Keep with new codes</strong>: duplicates are imported as separate questions.</span>
             </div>
-            <div className="flex flex-col sm:flex-row gap-2 sm:items-center sm:justify-end">
+            <div className="flex flex-col sm:flex-row flex-wrap gap-2 sm:items-center sm:justify-end">
               <Button
                 variant="outline"
                 onClick={() => {

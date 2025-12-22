@@ -1,8 +1,5 @@
 !include "MUI2.nsh"
 
-!define MUI_HEADERIMAGE
-!define MUI_HEADERIMAGE_BITMAP "${BUILD_RESOURCES_DIR}/installer-header.bmp"
-!define MUI_HEADERIMAGE_RIGHT
 !define MUI_COMPONENTSPAGE_SMALLDESC
 !define MUI_BRANDINGTEXT "Limit: Tends To Infinity"
 !define MUI_WELCOMEPAGE_TITLE "Welcome to the Limit Installer"

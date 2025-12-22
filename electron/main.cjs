@@ -33,13 +33,32 @@ function createWindow() {
     autoHideMenuBar: true,
   });
 
+  mainWindow.webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL) => {
+    console.error('[did-fail-load]', { errorCode, errorDescription, validatedURL });
+  });
+
+  mainWindow.webContents.on('render-process-gone', (_event, details) => {
+    console.error('[render-process-gone]', details);
+  });
+
   if (isDev) {
     // Vite dev server
     mainWindow.loadURL(process.env.VITE_DEV_SERVER_URL || 'http://localhost:8080');
   } else {
     // Load built index.html from Vite build
     const appPath = app.getAppPath();
-    const indexPath = path.join(appPath, 'app-dist', 'index.html');
+    const candidateIndexPaths = [
+      path.join(appPath, 'app-dist', 'index.html'),
+      path.join(__dirname, '..', 'app-dist', 'index.html'),
+    ];
+
+    const indexPath = candidateIndexPaths.find((p) => fs.existsSync(p));
+    if (!indexPath) {
+      console.error('[startup] Could not find app-dist/index.html. Tried:', candidateIndexPaths);
+      mainWindow.loadURL('data:text/plain;charset=utf-8,' + encodeURIComponent('Limit failed to start: missing app-dist/index.html'));
+      return;
+    }
+
     mainWindow.loadFile(indexPath);
   }
 
