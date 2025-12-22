@@ -32,7 +32,11 @@ export default function ModulesPage() {
 		if (!raw) return '—';
 		let text = raw;
 		try {
-			text = new DOMParser().parseFromString(raw, 'text/html').body.textContent || raw;
+			const doc = new DOMParser().parseFromString(raw, 'text/html');
+			// KaTeX includes hidden MathML + annotation text containing the original LaTeX source.
+			// If we take textContent directly, we end up showing commands like "\\times" in previews.
+			doc.body.querySelectorAll('.katex-mathml, annotation, .tk-katex-controls, [data-katex-action]').forEach((el) => el.remove());
+			text = doc.body.textContent || raw;
 		} catch {
 			text = raw;
 		}
@@ -687,9 +691,10 @@ export default function ModulesPage() {
 													</button>
 												)}
 											</div>
-											<div className="font-medium text-foreground">
-												{getQuestionPreview(q.text, 180)}
-											</div>
+											<div
+												className="font-medium text-foreground content-html line-clamp-2"
+												dangerouslySetInnerHTML={{ __html: prepareContentForDisplay(q.text) }}
+											/>
 											<div className="flex flex-wrap gap-1">
 												{q.tags.slice(0, 6).map((t) => (<Badge key={t} variant="outline">{t}</Badge>))}
 											</div>

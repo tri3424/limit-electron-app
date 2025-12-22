@@ -77,6 +77,10 @@ export function prepareContentForDisplay(value?: string | null): string {
     const parser = new DOMParser();
     const doc = parser.parseFromString(normalized, 'text/html');
 
+    doc.body
+      .querySelectorAll('.katex-mathml, annotation, .tk-katex-controls, [data-katex-action]')
+      .forEach((el) => el.remove());
+
     // Remove inline font sizing/family styles that can cause inconsistent rendering
     // between options when content is pasted from different sources.
     const elements = doc.body.querySelectorAll<HTMLElement>('[style], font');

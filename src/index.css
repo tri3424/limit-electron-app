@@ -426,6 +426,22 @@ All colors MUST be HSL.
     display: inline-block;
   }
 
+  .tk-katex-wrapper {
+    display: inline-flex;
+    align-items: baseline;
+    vertical-align: baseline;
+    position: relative;
+    top: -0.08em;
+  }
+
+  .tk-katex-wrapper .katex {
+    vertical-align: baseline;
+  }
+
+  .katex {
+    font-size: 1em;
+  }
+
   .tk-katex-wrapper [data-katex-action] {
     display: none;
   }

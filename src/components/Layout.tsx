@@ -47,7 +47,7 @@ export function Layout({ children }: LayoutProps) {
   const isModuleEditor = location.pathname.includes('/modules/') && (location.pathname.includes('/edit') || location.pathname.includes('/new'));
   
   return (
-    <div className={cn("flex flex-col h-[100dvh] overflow-hidden", isModuleRunner ? "bg-white" : "bg-background")}>
+    <div className={cn("flex flex-col h-screen min-h-0 overflow-hidden", isModuleRunner ? "bg-white" : "bg-background")}>
       {/* Top Navigation */}
       <header className="sticky top-0 z-40 border-b border-border/70 bg-gradient-to-r from-primary via-accent to-primary text-primary-foreground shadow-sm backdrop-blur supports-[backdrop-filter]:bg-opacity-90">
         <div className="max-w-7xl mx-auto h-16 md:h-18 px-3 md:px-4 flex items-center justify-between">

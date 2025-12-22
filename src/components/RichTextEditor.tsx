@@ -6,7 +6,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Bold, Italic, Underline, Strikethrough, Undo2, Redo2, AlignLeft, AlignCenter, AlignRight, Sigma, Image as ImageIcon, Eraser, Copy, Loader2, RefreshCcw, Search, PlusCircle, BookOpen, Library, Code2, Eye, Pencil, Trash2, X } from 'lucide-react';
+import { Bold, Italic, Underline, Strikethrough, Undo2, Redo2, AlignLeft, AlignCenter, AlignRight, Sigma, Image as ImageIcon, Eraser, Copy, Loader2, RefreshCcw, Search, PlusCircle, BookOpen, Library, Code2, Eye, Pencil, Trash2, X, Superscript, Subscript } from 'lucide-react';
 import { toast } from 'sonner';
 import ReactMarkdown, { Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -14,6 +14,19 @@ import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
 import katex from 'katex';
 import 'katex/dist/katex.min.css';
+
+function stripEditorOnlyMarkup(html: string): string {
+  if (!html) return '';
+  if (typeof window === 'undefined') return html;
+  try {
+    const container = document.createElement('div');
+    container.innerHTML = html;
+    container.querySelectorAll('.tk-katex-controls, [data-katex-action]').forEach((el) => el.remove());
+    return container.innerHTML;
+  } catch {
+    return html;
+  }
+}
 
 type Props = {
   value: string;
@@ -356,6 +369,41 @@ export default function RichTextEditor({ value, onChange, placeholder, className
         behavior: 'smooth',
       });
     }
+  };
+
+  const toggleScript = (kind: 'sub' | 'sup') => {
+    if (ref.current) ref.current.focus();
+    ensureCaretInEditor();
+    restoreSelection();
+
+    const sel = window.getSelection();
+    const range = sel && sel.rangeCount > 0 ? sel.getRangeAt(0) : null;
+    const container = range ? range.startContainer : null;
+    const elementContainer =
+      container && container.nodeType === Node.ELEMENT_NODE
+        ? (container as Element)
+        : container?.parentElement;
+
+    const tagName = kind === 'sub' ? 'sub' : 'sup';
+    const currentTag = elementContainer?.closest(tagName) as HTMLElement | null;
+
+    // If caret is already within <sub>/<sup>, a second click should exit back to normal text.
+    if (currentTag && range && range.collapsed) {
+      const exitRange = document.createRange();
+      exitRange.setStartAfter(currentTag);
+      exitRange.collapse(true);
+      sel?.removeAllRanges();
+      sel?.addRange(exitRange);
+      selectionRef.current = exitRange.cloneRange();
+
+      if (ref.current) {
+        const cleaned = stripEditorOnlyMarkup(ref.current.innerHTML.replace(/\u200B/g, ''));
+        onChange(cleaned);
+      }
+      return;
+    }
+
+    doExec(kind === 'sub' ? 'subscript' : 'superscript');
   };
 
   // Extract placeholders from a syntax (like a, b in \frac{a}{b})
@@ -751,11 +799,11 @@ export default function RichTextEditor({ value, onChange, placeholder, className
   // Create a wrapper element around a KaTeX equation with hover edit/delete controls
   const createKatexWrapper = (latexSource: string, isDisplayMode: boolean): HTMLElement => {
     const wrapper = document.createElement(isDisplayMode ? 'div' : 'span');
-    wrapper.className = `tk-katex-wrapper inline-block relative group ${isDisplayMode ? 'block my-2' : 'align-middle mx-0.5'}`;
+    wrapper.className = `tk-katex-wrapper relative group ${isDisplayMode ? 'block my-2' : 'inline-flex items-baseline align-baseline mx-0.5'}`;
     wrapper.setAttribute('data-latex', latexSource);
 
     const katexContainer = document.createElement('span');
-    katexContainer.className = 'tk-katex-node inline-block';
+    katexContainer.className = 'tk-katex-node inline-flex items-baseline';
 
     try {
       const html = katex.renderToString(latexSource, { displayMode: isDisplayMode });
@@ -770,7 +818,7 @@ export default function RichTextEditor({ value, onChange, placeholder, className
     }
 
     const controls = document.createElement('div');
-    controls.className = 'pointer-events-none absolute -top-3 right-0 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity duration-150';
+    controls.className = 'tk-katex-controls pointer-events-none absolute -top-3 right-0 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity duration-150';
 
     const editBtn = document.createElement('button');
     editBtn.type = 'button';
@@ -816,7 +864,7 @@ export default function RichTextEditor({ value, onChange, placeholder, className
             selectionRef.current = range.cloneRange();
           }
 
-          onChange(ref.current.innerHTML);
+          onChange(stripEditorOnlyMarkup(ref.current.innerHTML));
         }
         setEditingKatexElement(null);
       } else {
@@ -839,7 +887,7 @@ export default function RichTextEditor({ value, onChange, placeholder, className
         }
         
         if (ref.current) {
-          onChange(ref.current.innerHTML);
+          onChange(stripEditorOnlyMarkup(ref.current.innerHTML));
         }
       }
       
@@ -878,7 +926,7 @@ export default function RichTextEditor({ value, onChange, placeholder, className
         style.backgroundColor = '';
       }
     });
-    onChange(node.innerHTML);
+    onChange(stripEditorOnlyMarkup(node.innerHTML));
   };
 
   useEffect(() => {
@@ -1262,7 +1310,7 @@ export default function RichTextEditor({ value, onChange, placeholder, className
     document.execCommand(cmd, false, value);
     // update value
     if (ref.current) {
-      const cleaned = ref.current.innerHTML.replace(/\u200B/g, '');
+      const cleaned = stripEditorOnlyMarkup(ref.current.innerHTML.replace(/\u200B/g, ''));
       if (cleaned !== ref.current.innerHTML) {
         ref.current.innerHTML = cleaned;
         // keep caret at end after cleanup
@@ -1315,6 +1363,18 @@ export default function RichTextEditor({ value, onChange, placeholder, className
             </Tooltip>
             <Tooltip>
               <TooltipTrigger asChild>
+                <Button type="button" variant="ghost" size="icon" onMouseDown={(e)=>{e.preventDefault(); if(ref.current) ref.current.focus(); restoreSelection();}} onClick={() => toggleScript('sup')} aria-label="Superscript"><Superscript className="h-4 w-4" /></Button>
+              </TooltipTrigger>
+              <TooltipContent>Superscript</TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button type="button" variant="ghost" size="icon" onMouseDown={(e)=>{e.preventDefault(); if(ref.current) ref.current.focus(); restoreSelection();}} onClick={() => toggleScript('sub')} aria-label="Subscript"><Subscript className="h-4 w-4" /></Button>
+              </TooltipTrigger>
+              <TooltipContent>Subscript</TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
                 <Button type="button" variant="ghost" size="icon" onMouseDown={(e)=>{e.preventDefault(); if(ref.current) ref.current.focus(); restoreSelection();}} onClick={() => doExec('strikeThrough')} aria-label="Strikethrough"><Strikethrough className="h-4 w-4" /></Button>
               </TooltipTrigger>
               <TooltipContent>Strikethrough (Ctrl+S)</TooltipContent>
@@ -1356,7 +1416,7 @@ export default function RichTextEditor({ value, onChange, placeholder, className
                               style.backgroundColor = '';
                             }
                           });
-                          onChange(ref.current.innerHTML);
+                          onChange(stripEditorOnlyMarkup(ref.current.innerHTML));
                         }
                       } else {
                         // If no selection, clear all backgrounds in editor
@@ -1369,7 +1429,7 @@ export default function RichTextEditor({ value, onChange, placeholder, className
                               style.backgroundColor = '';
                             }
                           });
-                          onChange(ref.current.innerHTML);
+                          onChange(stripEditorOnlyMarkup(ref.current.innerHTML));
                         }
                       }
                     }
@@ -1471,7 +1531,7 @@ export default function RichTextEditor({ value, onChange, placeholder, className
               if (ref.current) ref.current.focus();
               restoreSelection();
               insertHtmlAtCursor(`<img src="${src}" alt="" />`);
-              if (ref.current) onChange(ref.current.innerHTML);
+              if (ref.current) onChange(stripEditorOnlyMarkup(ref.current.innerHTML));
               if (fileInputRef.current) fileInputRef.current.value = '';
             };
             reader.readAsDataURL(file);
@@ -1509,9 +1569,8 @@ export default function RichTextEditor({ value, onChange, placeholder, className
                     restoreSelection();
                     insertHtmlAtCursor(`<img src="${src}" alt="" />`);
                     if (ref.current) {
-                      const cleaned = ref.current.innerHTML.replace(/\u200B/g, '');
-                      ref.current.innerHTML = cleaned;
-                      onChange(cleaned);
+                      stripBackgroundStyles(ref.current);
+                      onChange(stripEditorOnlyMarkup(ref.current.innerHTML));
                     }
                   };
                   reader.readAsDataURL(blob);
@@ -1533,9 +1592,7 @@ export default function RichTextEditor({ value, onChange, placeholder, className
           }
           if (ref.current) {
             stripBackgroundStyles(ref.current);
-            const cleaned = ref.current.innerHTML.replace(/\u200B/g, '');
-            ref.current.innerHTML = cleaned;
-            onChange(cleaned);
+            onChange(stripEditorOnlyMarkup(ref.current.innerHTML));
           }
         }}
         onInput={(e) => {
@@ -1543,11 +1600,9 @@ export default function RichTextEditor({ value, onChange, placeholder, className
 
           if (ref.current) {
             stripBackgroundStyles(ref.current);
-            const cleaned = ref.current.innerHTML.replace(/\u200B/g, '');
-            onChange(cleaned);
+            onChange(stripEditorOnlyMarkup(ref.current.innerHTML));
           } else {
-            const cleaned = targetHtml.replace(/\u200B/g, '');
-            onChange(cleaned);
+            onChange(stripEditorOnlyMarkup(targetHtml));
           }
         }}
         onFocus={() => {
@@ -1573,6 +1628,63 @@ export default function RichTextEditor({ value, onChange, placeholder, className
           }
         }}
         onKeyDown={(e) => {
+          if (e.key === 'ArrowLeft' || e.key === 'ArrowRight' || e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+            const sel = window.getSelection();
+            const range = sel && sel.rangeCount > 0 ? sel.getRangeAt(0) : null;
+            if (range && range.collapsed) {
+              const container = range.startContainer;
+              const elementContainer =
+                container.nodeType === Node.ELEMENT_NODE
+                  ? (container as Element)
+                  : container.parentElement;
+
+              let scriptTag = (elementContainer?.closest('sub') || elementContainer?.closest('sup')) as HTMLElement | null;
+              while (scriptTag?.parentElement) {
+                const parentTag = scriptTag.parentElement.tagName.toLowerCase();
+                if (parentTag === 'sub' || parentTag === 'sup') {
+                  scriptTag = scriptTag.parentElement;
+                  continue;
+                }
+                break;
+              }
+              if (scriptTag) {
+                e.preventDefault();
+                const next = document.createRange();
+                const exitBefore = e.key === 'ArrowLeft' || e.key === 'ArrowUp';
+                if (exitBefore) {
+                  next.setStartBefore(scriptTag);
+                } else {
+                  // Create a normal-text insertion point after the script tag,
+                  // otherwise some browsers keep the typing context inside <sub>/<sup>
+                  // and create nested tags like <sub><sub>&nbsp;</sub></sub>.
+                  const zwsp = document.createTextNode('\u200B');
+                  if (scriptTag.nextSibling) {
+                    scriptTag.parentNode?.insertBefore(zwsp, scriptTag.nextSibling);
+                  } else {
+                    scriptTag.parentNode?.appendChild(zwsp);
+                  }
+                  next.setStart(zwsp, 1);
+                }
+                next.collapse(true);
+                sel?.removeAllRanges();
+                sel?.addRange(next);
+                selectionRef.current = next.cloneRange();
+
+                // Ensure sub/sup formatting is turned off for subsequent typing.
+                try {
+                  if (document.queryCommandState('subscript')) {
+                    document.execCommand('subscript');
+                  }
+                  if (document.queryCommandState('superscript')) {
+                    document.execCommand('superscript');
+                  }
+                } catch {
+                  // ignore
+                }
+                return;
+              }
+            }
+          }
           // Keyboard shortcuts for formatting
           if (e.ctrlKey || e.metaKey) {
             if (e.key === 'b') {
@@ -1643,7 +1755,7 @@ export default function RichTextEditor({ value, onChange, placeholder, className
                 selectionRef.current = newRange.cloneRange();
                 
                 if (ref.current) {
-                  onChange(ref.current.innerHTML);
+                  onChange(stripEditorOnlyMarkup(ref.current.innerHTML));
                 }
               }
             }
