@@ -14,6 +14,8 @@ export interface TagUsage {
   conceptHints: string[];
   avgMathDensity: number;
   avgTokenLength: number;
+  coTags: Record<string, number>;
+  avgUpdatedAt: number;
 }
 
 type SerializedTagUsage = TagUsage;
@@ -88,6 +90,8 @@ function deserializeModel(data: SerializedTagUsage[]): Map<string, TagUsage> {
         conceptHints: entry.conceptHints || [],
         avgMathDensity: entry.avgMathDensity ?? 0,
         avgTokenLength: entry.avgTokenLength ?? 0,
+        coTags: entry.coTags || {},
+        avgUpdatedAt: entry.avgUpdatedAt ?? 0,
       },
     ])
   );
@@ -320,8 +324,12 @@ export async function buildTagModel(forceRefresh = false): Promise<Map<string, T
 
     const analysis = analyzeQuestionText(question.text || '', question.type);
 
+    const normalizedTags = Array.from(
+      new Set(question.tags.map((t) => (t || '').trim()).filter(Boolean))
+    );
+
     // For each tag on this question, update the model
-    for (const tagName of question.tags) {
+    for (const tagName of normalizedTags) {
       const key = tagName.toLowerCase();
       const existing = model.get(key) || {
         tagName,
@@ -332,6 +340,8 @@ export async function buildTagModel(forceRefresh = false): Promise<Map<string, T
         conceptHints: [],
         avgMathDensity: 0,
         avgTokenLength: 0,
+        coTags: {},
+        avgUpdatedAt: 0,
       };
 
       const affinity = ensureTypeAffinity(existing.typeAffinity);
@@ -339,6 +349,18 @@ export async function buildTagModel(forceRefresh = false): Promise<Map<string, T
 
       const prevCount = existing.questionCount;
       const nextCount = prevCount + 1;
+
+      const questionUpdatedAt = question.metadata?.updatedAt ?? 0;
+      const updatedAt =
+        (existing.avgUpdatedAt * prevCount + questionUpdatedAt) / nextCount;
+
+      const coTags = { ...(existing.coTags || {}) };
+      for (const other of normalizedTags) {
+        if (!other) continue;
+        const otherKey = other.toLowerCase();
+        if (otherKey === key) continue;
+        coTags[otherKey] = (coTags[otherKey] || 0) + 1;
+      }
 
       const updated: TagUsage = {
         tagName,
@@ -349,6 +371,8 @@ export async function buildTagModel(forceRefresh = false): Promise<Map<string, T
         conceptHints: mergeRankedTerms(existing.conceptHints, analysis.conceptHints, CONCEPT_LIMIT, 1.5),
         avgMathDensity: (existing.avgMathDensity * prevCount + analysis.mathDensity) / nextCount,
         avgTokenLength: (existing.avgTokenLength * prevCount + analysis.tokenCount) / nextCount,
+        coTags,
+        avgUpdatedAt: updatedAt,
       };
 
       model.set(key, updated);
@@ -374,7 +398,8 @@ function extractTextFromHtml(html: string): string {
  */
 function calculateRelevance(
   analysis: QuestionAnalysis,
-  tagUsage: TagUsage
+  tagUsage: TagUsage,
+  selectedTags?: string[]
 ): number {
   const affinity = ensureTypeAffinity(tagUsage.typeAffinity);
   const totalAffinity = ALL_TYPES.reduce((sum, type) => sum + (affinity[type] || 0), 0) || 1;
@@ -395,6 +420,28 @@ function calculateRelevance(
   );
   score += (1 - lengthDelta) * 0.05;
 
+  if (selectedTags && selectedTags.length > 0) {
+    const normalizedSelected = selectedTags
+      .map((t) => (t || '').trim().toLowerCase())
+      .filter(Boolean);
+    if (normalizedSelected.length > 0) {
+      const co = tagUsage.coTags || {};
+      let coScore = 0;
+      for (const st of normalizedSelected) {
+        coScore += (co[st] || 0) / Math.max(1, tagUsage.questionCount);
+      }
+      coScore = coScore / normalizedSelected.length;
+      score += Math.min(coScore, 1) * 0.25;
+    }
+  }
+
+  if (tagUsage.avgUpdatedAt) {
+    const now = Date.now();
+    const ageDays = Math.max(0, (now - tagUsage.avgUpdatedAt) / (1000 * 60 * 60 * 24));
+    const recencyBoost = Math.max(0, 1 - ageDays / 365);
+    score += recencyBoost * 0.05;
+  }
+
   // Reliability boost for tags backed by more data
   const reliabilityBoost = Math.min(tagUsage.questionCount / 20, 0.1);
   score += reliabilityBoost;
@@ -409,7 +456,10 @@ export async function suggestTagsAdvanced(
   questionText: string,
   questionType: Question['type'],
   availableTags: Tag[],
-  maxSuggestions: number = 5
+  maxSuggestions: number = 5,
+  context?: {
+    selectedTags?: string[];
+  }
 ): Promise<string[]> {
   if (!questionText.trim() || !availableTags || availableTags.length === 0) {
     return [];
@@ -425,7 +475,7 @@ export async function suggestTagsAdvanced(
   for (const [tagKey, tagName] of tagMap.entries()) {
     const tagUsage = model.get(tagKey);
     if (tagUsage) {
-      const score = calculateRelevance(analysis, tagUsage);
+      const score = calculateRelevance(analysis, tagUsage, context?.selectedTags);
       if (score >= 0.25) {
         scoredTags.push({ tagName, score });
       }

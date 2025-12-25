@@ -21,6 +21,7 @@ import ModuleRunner from "./pages/ModuleRunner";
 import DailyLimitReached from "./pages/DailyLimitReached";
 import { HOME_ROUTE, LOGIN_ROUTE } from "./constants/routes";
 import { setupCodeBlockCopy } from "./utils/codeBlockCopy";
+import { startSemanticBackgroundQueue } from "./lib/semanticQueue";
 
 const queryClient = new QueryClient();
 
@@ -30,6 +31,8 @@ const App = () => {
     initializeSettings();
     // Setup code block copy functionality
     setupCodeBlockCopy();
+    // Start offline semantic analysis in the background (CPU-throttled)
+    startSemanticBackgroundQueue();
   }, []);
 
   const router = createHashRouter([

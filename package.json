@@ -124,8 +124,12 @@
     "files": [
       "app-dist/**/*",
       "electron/**/*",
+      "native/**/*",
       "package.json",
       "node_modules/**/*"
+    ],
+    "asarUnpack": [
+      "native/**"
     ],
     "win": {
       "target": [

@@ -6,4 +6,16 @@ contextBridge.exposeInMainWorld('examProctor', {
   captureAppScreenshot: async (payload) => {
     return ipcRenderer.invoke('exam:captureAppScreenshot', payload);
   },
+	  captureFullPageScreenshot: async () => {
+	    return ipcRenderer.invoke('exam:captureFullPageScreenshot');
+	  },
+	  captureViewportScreenshot: async () => {
+	    return ipcRenderer.invoke('exam:captureViewportScreenshot');
+	  },
+});
+
+contextBridge.exposeInMainWorld('offlineAi', {
+  embedText: async (payload) => {
+    return ipcRenderer.invoke('offlineAi:embed', payload);
+  },
 });

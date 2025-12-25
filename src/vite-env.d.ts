@@ -13,6 +13,20 @@ declare global {
 				attemptId: string;
 				questionId?: string;
 			}>;
+			captureFullPageScreenshot?: () => Promise<{ dataUrl: string }>;
+			captureViewportScreenshot?: () => Promise<{ dataUrl: string }>;
+		};
+		offlineAi?: {
+			embedText: (payload: {
+				text: string;
+				modelId?: string;
+				seed?: number;
+				threads?: number;
+			}) => Promise<{
+				modelId: string;
+				dims: number;
+				vector: number[];
+			}>;
 		};
 	}
 }

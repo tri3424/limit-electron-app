@@ -1,5 +1,35 @@
 @import 'katex/dist/katex.min.css';
 
+/* Ensure KaTeX matches surrounding text sizing and baseline alignment everywhere */
+.katex,
+.katex-display,
+.katex-inline {
+  font-size: 1em;
+  line-height: 1.2;
+}
+
+@layer base {
+  :root {
+    --tk-katex-inline-baseline-shift: -0.08em;
+  }
+}
+
+.tk-katex-wrapper {
+  font-size: 1em;
+  line-height: 1.2;
+}
+
+/* Inline equations can look slightly raised when surrounding text uses a different font.
+   Nudge them down very slightly while keeping display equations unaffected. */
+.tk-katex-wrapper:not(.block) {
+  vertical-align: var(--tk-katex-inline-baseline-shift);
+  align-items: baseline;
+}
+
+.tk-katex-wrapper .katex {
+  vertical-align: baseline;
+}
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -256,6 +286,12 @@ All colors MUST be HSL.
     font-size: 1.12em;
   }
 
+  .tk-question-text,
+  .mcq-option-text {
+    font-size: 0.9em;
+    line-height: 1.55;
+  }
+
   /* Prevent copying in quiz pages */
   .select-none img,
   .select-none .katex,
@@ -342,7 +378,7 @@ All colors MUST be HSL.
   .tk-question-text .katex,
   .tk-question-text .katex-display > .katex,
   .tk-question-text .katex-inline > .katex {
-    font-size: 0.92em;
+    font-size: 1.16em;
   }
 
   .tk-richtext-editor .katex,

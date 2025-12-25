@@ -8,12 +8,11 @@ import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
-import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { ExamTimerDisplay } from '@/components/ExamTimerDisplay';
 import { MatchingQuestionSortable } from '@/components/MatchingQuestionSortable';
+import TypingAnswerMathInput, { renderTypingAnswerMathToHtml } from '@/components/TypingAnswerMathInput';
 import {
 	Tooltip,
 	TooltipContent,
@@ -24,7 +23,7 @@ import { checkDailyLimit } from '@/lib/dailyLimit';
 import { getLastQuestionIndex, setLastQuestionIndex, clearProgress } from '@/lib/progressTracking';
 import { useModule } from '@/hooks/useModules';
 import { useExamTimer } from '@/hooks/useExamTimer';
-import { db, Attempt, Module, Question, TimerState, IntegrityEvent, PerQuestionAttempt, GlobalGlossaryEntry, normalizeGlossaryMeaning, normalizeGlossaryWord } from '@/lib/db';
+import { db, Attempt, Module, Question, TimerState, IntegrityEvent, GlobalGlossaryEntry, normalizeGlossaryMeaning, normalizeGlossaryWord } from '@/lib/db';
 import { closeIntegrityChannel, incrementVisibilityLoss, logIntegrityEvent } from '@/utils/integrity';
 import { recordDailyStats } from '@/lib/statsHelpers';
 import { useAuth } from '@/contexts/AuthContext';
@@ -35,10 +34,184 @@ import { toast } from 'sonner';
 
 const FOCUS_WARNING_TIMEOUT = 8000;
 
+async function captureAppVisualStateScreenshotDataUrl(): Promise<string> {
+	// Electron: capture the app window viewport as actually rendered (fonts/SVG preserved).
+	if (typeof window !== 'undefined' && window.examProctor?.captureViewportScreenshot) {
+		const res = await window.examProctor.captureViewportScreenshot();
+		if (res && typeof res.dataUrl === 'string' && res.dataUrl.startsWith('data:image/')) {
+			return res.dataUrl;
+		}
+		throw new Error('Viewport screenshot failed');
+	}
+
+	// Browser/localhost fallback: DOM clone -> SVG foreignObject -> canvas, cropped to current viewport.
+	const root = document.documentElement;
+	const docWidth = Math.max(root.scrollWidth, document.body?.scrollWidth ?? 0, root.clientWidth);
+	const docHeight = Math.max(root.scrollHeight, document.body?.scrollHeight ?? 0, root.clientHeight);
+	const viewportWidth = Math.max(1, window.innerWidth);
+	const viewportHeight = Math.max(1, window.innerHeight);
+	const scrollX = window.scrollX || 0;
+	const scrollY = window.scrollY || 0;
+	const clone = root.cloneNode(true) as HTMLElement;
+
+	const originalWalker = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT);
+	const cloneWalker = document.createTreeWalker(clone, NodeFilter.SHOW_ELEMENT);
+	let originalNode = originalWalker.nextNode() as Element | null;
+	let cloneNode = cloneWalker.nextNode() as Element | null;
+
+	while (originalNode && cloneNode) {
+		const style = window.getComputedStyle(originalNode);
+		let cssText = '';
+		for (let i = 0; i < style.length; i++) {
+			const prop = style[i];
+			cssText += `${prop}:${style.getPropertyValue(prop)};`;
+		}
+		(cloneNode as HTMLElement).setAttribute('style', cssText);
+
+		originalNode = originalWalker.nextNode() as Element | null;
+		cloneNode = cloneWalker.nextNode() as Element | null;
+	}
+
+	await (document as any).fonts?.ready;
+
+	const serialized = new XMLSerializer().serializeToString(clone);
+	const svg = `<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="${viewportWidth}" height="${viewportHeight}">
+	<foreignObject x="0" y="0" width="100%" height="100%">
+		<div xmlns="http://www.w3.org/1999/xhtml" style="width:${docWidth}px;height:${docHeight}px;transform:translate(${-scrollX}px,${-scrollY}px);">${serialized}</div>
+	</foreignObject>
+</svg>`;
+
+	const img = new Image();
+	img.decoding = 'async';
+	img.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+	await img.decode();
+
+	const dpr = Math.max(1, window.devicePixelRatio || 1);
+	const canvas = document.createElement('canvas');
+	canvas.width = Math.round(viewportWidth * dpr);
+	canvas.height = Math.round(viewportHeight * dpr);
+	const ctx = canvas.getContext('2d');
+	if (!ctx) {
+		throw new Error('Canvas 2D context not available');
+	}
+	ctx.scale(dpr, dpr);
+	const bg = window.getComputedStyle(document.body).backgroundColor || window.getComputedStyle(root).backgroundColor || '#ffffff';
+	ctx.fillStyle = bg;
+	ctx.fillRect(0, 0, viewportWidth, viewportHeight);
+	ctx.drawImage(img, 0, 0, viewportWidth, viewportHeight);
+	return canvas.toDataURL('image/png');
+}
+
+async function captureFullContentScreenshotDataUrl(): Promise<string> {
+	const root = document.documentElement;
+	const totalHeight = Math.max(root.scrollHeight, document.body?.scrollHeight ?? 0);
+	const viewportWidth = Math.max(1, window.innerWidth);
+	const viewportHeight = Math.max(1, window.innerHeight);
+	const steps = Math.max(1, Math.ceil(totalHeight / viewportHeight));
+
+	// Electron: stitch multiple real viewport captures. This preserves fonts/SVG, but requires
+	// temporary scrolling (restored before opening the report modal).
+	if (typeof window !== 'undefined' && window.examProctor?.captureViewportScreenshot) {
+		const originalScrollX = window.scrollX;
+		const originalScrollY = window.scrollY;
+		const tiles: { y: number; dataUrl: string; width: number; height: number }[] = [];
+		let scale = 1;
+		try {
+			for (let i = 0; i < steps; i++) {
+				const y = Math.min(i * viewportHeight, Math.max(0, totalHeight - viewportHeight));
+				window.scrollTo(originalScrollX, y);
+				await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+				const res = await window.examProctor.captureViewportScreenshot();
+				const dataUrl = res?.dataUrl;
+				if (!dataUrl || typeof dataUrl !== 'string' || !dataUrl.startsWith('data:image/')) {
+					throw new Error('Viewport screenshot failed');
+				}
+				const img = new Image();
+				img.decoding = 'async';
+				img.src = dataUrl;
+				await img.decode();
+				if (i === 0) {
+					scale = viewportWidth > 0 ? img.naturalWidth / viewportWidth : 1;
+					if (!Number.isFinite(scale) || scale <= 0) scale = 1;
+				}
+				tiles.push({ y, dataUrl, width: img.naturalWidth, height: img.naturalHeight });
+			}
+		} finally {
+			window.scrollTo(originalScrollX, originalScrollY);
+		}
+
+		const canvas = document.createElement('canvas');
+		canvas.width = tiles[0]?.width ?? Math.round(viewportWidth * (window.devicePixelRatio || 1));
+		canvas.height = Math.max(1, Math.round(totalHeight * scale));
+		const ctx = canvas.getContext('2d');
+		if (!ctx) throw new Error('Canvas 2D context not available');
+		ctx.fillStyle = '#ffffff';
+		ctx.fillRect(0, 0, canvas.width, canvas.height);
+		for (const tile of tiles) {
+			const img = new Image();
+			img.decoding = 'async';
+			img.src = tile.dataUrl;
+			await img.decode();
+			ctx.drawImage(img, 0, Math.round(tile.y * scale), tile.width, tile.height);
+		}
+		return canvas.toDataURL('image/png');
+	}
+
+	// Browser/localhost: tile the DOM-clone renderer without scrolling by adjusting the translate.
+	const docWidth = Math.max(root.scrollWidth, document.body?.scrollWidth ?? 0, root.clientWidth);
+	const docHeight = Math.max(root.scrollHeight, document.body?.scrollHeight ?? 0, root.clientHeight);
+	const dpr = Math.max(1, window.devicePixelRatio || 1);
+	const canvas = document.createElement('canvas');
+	canvas.width = Math.round(viewportWidth * dpr);
+	canvas.height = Math.round(totalHeight * dpr);
+	const ctx = canvas.getContext('2d');
+	if (!ctx) throw new Error('Canvas 2D context not available');
+	ctx.scale(dpr, dpr);
+	const bg = window.getComputedStyle(document.body).backgroundColor || window.getComputedStyle(root).backgroundColor || '#ffffff';
+	ctx.fillStyle = bg;
+	ctx.fillRect(0, 0, viewportWidth, totalHeight);
+
+	const clone = root.cloneNode(true) as HTMLElement;
+	const originalWalker = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT);
+	const cloneWalker = document.createTreeWalker(clone, NodeFilter.SHOW_ELEMENT);
+	let originalNode = originalWalker.nextNode() as Element | null;
+	let cloneNode = cloneWalker.nextNode() as Element | null;
+	while (originalNode && cloneNode) {
+		const style = window.getComputedStyle(originalNode);
+		let cssText = '';
+		for (let i = 0; i < style.length; i++) {
+			const prop = style[i];
+			cssText += `${prop}:${style.getPropertyValue(prop)};`;
+		}
+		(cloneNode as HTMLElement).setAttribute('style', cssText);
+		originalNode = originalWalker.nextNode() as Element | null;
+		cloneNode = cloneWalker.nextNode() as Element | null;
+	}
+	await (document as any).fonts?.ready;
+	const serialized = new XMLSerializer().serializeToString(clone);
+
+	for (let i = 0; i < steps; i++) {
+		const y = Math.min(i * viewportHeight, Math.max(0, totalHeight - viewportHeight));
+		const svg = `<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="${viewportWidth}" height="${viewportHeight}">
+	<foreignObject x="0" y="0" width="100%" height="100%">
+		<div xmlns="http://www.w3.org/1999/xhtml" style="width:${docWidth}px;height:${docHeight}px;transform:translate(0px,${-y}px);">${serialized}</div>
+	</foreignObject>
+</svg>`;
+		const img = new Image();
+		img.decoding = 'async';
+		img.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+		await img.decode();
+		ctx.drawImage(img, 0, y, viewportWidth, viewportHeight);
+	}
+
+	return canvas.toDataURL('image/png');
+}
+
 export default function ModuleRunner() {
 	const { id } = useParams();
 	const navigate = useNavigate();
-	const { user, isAdmin } = useAuth();
 	const moduleEntity = useModule(id);
 	const globalGlossaryEntries = useLiveQuery(
 		() => db.globalGlossary.toArray(),
@@ -53,22 +226,6 @@ export default function ModuleRunner() {
 		endUtc: number;
 		durationMinutes: number;
 	} | null>(null);
-
-	const [now, setNow] = useState(() => Date.now());
-	const [baseWall] = useState(() => Date.now());
-	const [basePerf] = useState(() => (typeof performance !== 'undefined' ? performance.now() : 0));
-
-	useEffect(() => {
-		const id = window.setInterval(() => {
-			if (typeof performance !== 'undefined') {
-				const elapsed = performance.now() - basePerf;
-				setNow(baseWall + elapsed);
-			} else {
-				setNow(Date.now());
-			}
-		}, 1000);
-		return () => window.clearInterval(id);
-	}, [basePerf, baseWall]);
 
 	useEffect(() => {
 		let cancelled = false;
@@ -398,11 +555,11 @@ function ExamRunner({ moduleData, baseQuestions, onExit, examConfig, glossaryEnt
 						await db.attempts.delete(existing.id);
 					} else if (ordered.length > 0) {
 						// Determine next index based on which questions have answers
-						const answers = existing.answers ?? {};
+						const answers = (existing.answers ?? {}) as Record<string, unknown>;
 						let nextIndex = 0;
 						for (let i = 0; i < ordered.length; i++) {
 							const q = ordered[i];
-							const ans = (answers as any)[q.id];
+							const ans = answers[q.id];
 							const hasAnswer =
 								ans !== undefined &&
 								ans !== null &&
@@ -617,7 +774,7 @@ function ExamSession({
 	const nowUtcForWindow = Date.now();
 	const scheduledWindowTotalMs = examConfig ? Math.max(examConfig.endUtc - examConfig.startUtc, 0) : 0;
 	const scheduledRemainingMs = examConfig ? Math.max(examConfig.endUtc - nowUtcForWindow, 0) : 0;
-	const timerMode: 'perModule' = 'perModule';
+	const timerMode = 'perModule' as const;
 	// Prefer a positive stored timerState duration; otherwise fall back to configuredExpectedDurationMs,
 	// but clamp by the scheduled exam window so that remaining time is aligned with wall clock.
 	const baseExpectedDurationMs =
@@ -666,6 +823,7 @@ function ExamSession({
 		try {
 			if (window.sessionStorage.getItem(key) === '1') return;
 		} catch {
+			void 0;
 		}
 
 		const trigger = () => {
@@ -673,6 +831,7 @@ function ExamSession({
 			try {
 				window.sessionStorage.setItem(key, '1');
 			} catch {
+				void 0;
 			}
 		};
 
@@ -809,6 +968,9 @@ function ExamSession({
 	const examContentRef = useRef<HTMLDivElement | null>(null);
 	const [reportDialogOpen, setReportDialogOpen] = useState(false);
 	const [reportMessage, setReportMessage] = useState('');
+	const [reportScreenshotDataUrl, setReportScreenshotDataUrl] = useState<string | undefined>(undefined);
+	const [isCapturingReportScreenshot, setIsCapturingReportScreenshot] = useState(false);
+	const [reportScreenshotError, setReportScreenshotError] = useState<string | null>(null);
 	const [isSubmittingReport, setIsSubmittingReport] = useState(false);
 	const [submittedQuestionIds, setSubmittedQuestionIds] = useState<Set<string>>(new Set());
 
@@ -820,25 +982,49 @@ function ExamSession({
 		try {
 			setIsSubmittingReport(true);
 			const now = Date.now();
-			await db.errorReports.add({
-				id: uuidv4(),
-				status: 'new',
-				message: reportMessage.trim(),
-				createdAt: now,
-				updatedAt: now,
-				route: location.pathname,
-				moduleId: moduleData.id,
-				moduleTitle: moduleData.title,
-				questionId: currentQuestion?.id,
-				questionCode: currentQuestion?.code,
-				questionTags: currentQuestion?.tags,
-				attemptId: attempt.id,
-				phase: moduleData.type === 'practice' ? 'practice' : (phase ?? 'unknown'),
-				reporterUserId: user?.id,
-				reporterUsername: user?.username,
+			let screenshotDataUrl: string | undefined = reportScreenshotDataUrl;
+			if (!screenshotDataUrl) {
+				try {
+					screenshotDataUrl = await captureFullContentScreenshotDataUrl();
+				} catch (e) {
+					console.error('Failed to capture screenshot for report:', e);
+					setReportScreenshotError('Screenshot capture failed');
+				}
+			}
+			await db.transaction('rw', db.errorReports, async () => {
+				await db.errorReports.add({
+					id: uuidv4(),
+					status: 'new',
+					message: reportMessage.trim(),
+					screenshotDataUrl,
+					createdAt: now,
+					updatedAt: now,
+					route: location.pathname,
+					moduleId: moduleData.id,
+					moduleTitle: moduleData.title,
+					questionId: currentQuestion?.id,
+					questionCode: currentQuestion?.code,
+					questionTags: currentQuestion?.tags,
+					attemptId: attempt.id,
+					currentQuestionIndex: safeCurrentIndex,
+					scrollY: window.scrollY,
+					viewportWidth: window.innerWidth,
+					viewportHeight: window.innerHeight,
+					phase: moduleData.type === 'practice' ? 'practice' : (phase ?? 'unknown'),
+					appState: {
+						phase,
+						attemptCompleted: attempt.completed,
+						timerMode,
+						remainingTimeMs: remainingTimeRef.current,
+					},
+					reporterUserId: user?.id,
+					reporterUsername: user?.username,
+				});
 			});
 			setReportDialogOpen(false);
 			setReportMessage('');
+			setReportScreenshotDataUrl(undefined);
+			setReportScreenshotError(null);
 			toast.success('Report sent');
 		} catch (e) {
 			console.error(e);
@@ -846,7 +1032,27 @@ function ExamSession({
 		} finally {
 			setIsSubmittingReport(false);
 		}
-	}, [attempt.id, currentQuestion, location.pathname, moduleData.id, moduleData.title, phase, reportMessage, user?.id, user?.username]);
+	}, [attempt.completed, attempt.id, currentQuestion, location.pathname, moduleData.id, moduleData.title, phase, reportMessage, reportScreenshotDataUrl, timerMode, user?.id, user?.username]);
+
+	const openReportDialogWithCapture = useCallback(async () => {
+		if (isCapturingReportScreenshot) return;
+		// Ensure the screenshot does not include the report dialog overlay.
+		setReportDialogOpen(false);
+		await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+		setReportScreenshotDataUrl(undefined);
+		setReportScreenshotError(null);
+		setIsCapturingReportScreenshot(true);
+		try {
+			const url = await captureFullContentScreenshotDataUrl();
+			setReportScreenshotDataUrl(url);
+		} catch (e) {
+			console.error('Failed to capture screenshot for report preview:', e);
+			setReportScreenshotError('Screenshot capture failed');
+		} finally {
+			setIsCapturingReportScreenshot(false);
+			setReportDialogOpen(true);
+		}
+	}, [isCapturingReportScreenshot]);
 	
 	// Count how many questions have been submitted (not just answered)
 	const answeredCount = useMemo(() => {
@@ -1018,7 +1224,6 @@ function ExamSession({
 
 	// Finalize with unanswered autosubmitted (used by timer expiry, focus loss, and user submit)
 	// Note: keep dependencies minimal so this callback stays stable during the exam.
-	// eslint-disable-next-line react-hooks/exhaustive-deps
 	const autosubmitUnansweredAndFinalize = useCallback(async (reason: string) => {
 		// Prevent multiple simultaneous finalizations
 		if (isFinalizingRef.current) return;
@@ -1111,7 +1316,7 @@ function ExamSession({
 				const ans = sourceAnswers[q.id];
 				// Check if answer exists and is not empty string
 				const hasAnswer = ans !== undefined && ans !== null && ans !== '' && 
-					(Array.isArray(ans) ? (ans as string[]).length > 0 : true);
+					(!Array.isArray(ans) || (ans as string[]).length > 0);
 				const scoring = hasAnswer 
 					? evaluateScore(q, ans) 
 					: { isCorrect: false, scorePercent: 0, correctParts: 0, totalParts: getTotalPartsForQuestion(q) };
@@ -1566,18 +1771,19 @@ function ExamSession({
   // Setup BroadcastChannel after handlers are defined
   useEffect(() => {
     let channel: BroadcastChannel | null = null;
-    let onMessage: ((e: MessageEvent) => Promise<void>) | null = null;
+    let onMessage: ((e: MessageEvent) => void) | null = null;
     try {
       channel = new BroadcastChannel('exam-sync');
       bcRef.current = channel;
-      onMessage = async (e: MessageEvent) => {
+      onMessage = (e: MessageEvent) => {
         try {
-          const msg: any = e.data;
-          if (!msg || typeof msg !== 'object') return;
+          const data: unknown = e.data;
+          if (!data || typeof data !== 'object') return;
+          const msg = data as { attemptId?: unknown; type?: unknown; finalizationReason?: unknown };
           if (msg.attemptId !== attemptRef.current.id) return;
           if (msg.type === 'FINAL_GRACE_TRIGGER') {
             if (isLeader) {
-              await autosubmitUnansweredAndFinalize('final_grace');
+              void autosubmitUnansweredAndFinalize('final_grace');
             }
           } else if (msg.type === 'ATTEMPT_FINALIZED') {
             // Only auto-exit for non user-initiated finalizations
@@ -1592,14 +1798,14 @@ function ExamSession({
           console.error('Error handling broadcast message', err);
         }
       };
-      channel.addEventListener('message', onMessage as any);
+      channel.addEventListener('message', onMessage);
     } catch (err) {
       console.error('Failed to create BroadcastChannel', err);
     }
     return () => {
       if (channel && onMessage) {
         try {
-          channel.removeEventListener('message', onMessage as any);
+          channel.removeEventListener('message', onMessage);
           channel.close();
         } catch (err) {
           // Ignore errors when closing channel
@@ -1663,7 +1869,9 @@ function ExamSession({
 							<Button
 								variant="outline"
 								size="sm"
-								onClick={() => setReportDialogOpen(true)}
+								onClick={() => {
+									void openReportDialogWithCapture();
+								}}
 								className="bg-white"
 							>
 								<Bug className="h-4 w-4 mr-2" />
@@ -1711,7 +1919,17 @@ function ExamSession({
 				<div className="border-b border-white" />
 			</div>
 
-			<Dialog open={reportDialogOpen} onOpenChange={setReportDialogOpen}>
+			<Dialog
+				open={reportDialogOpen}
+				onOpenChange={(open) => {
+					setReportDialogOpen(open);
+					if (!open) {
+						setReportScreenshotDataUrl(undefined);
+						setIsCapturingReportScreenshot(false);
+						setReportScreenshotError(null);
+					}
+				}}
+			>
 				<DialogContent className="max-w-lg">
 					<DialogHeader>
 						<DialogTitle>Report an issue</DialogTitle>
@@ -1720,6 +1938,38 @@ function ExamSession({
 						</DialogDescription>
 					</DialogHeader>
 					<div className="space-y-3">
+						<div className="space-y-1">
+							<div className="flex items-center justify-between gap-3">
+								<div className="text-xs text-muted-foreground">Screenshot</div>
+								<Button
+									variant="outline"
+									size="sm"
+									disabled={isCapturingReportScreenshot}
+									onClick={() => {
+										void openReportDialogWithCapture();
+									}}
+								>
+									Retry
+								</Button>
+							</div>
+							{reportScreenshotDataUrl ? (
+								<div className="max-h-[40vh] overflow-auto rounded-md border">
+									<img
+										src={reportScreenshotDataUrl}
+										alt="Report screenshot preview"
+										className="w-full h-auto"
+									/>
+								</div>
+							) : (
+								<div className="rounded-md border p-3 text-xs text-muted-foreground">
+									{isCapturingReportScreenshot
+										? 'Capturing screenshot…'
+										: reportScreenshotError
+											? reportScreenshotError
+											: 'Screenshot will appear here.'}
+								</div>
+							)}
+						</div>
 						<div className="space-y-1">
 							<div className="text-xs text-muted-foreground">Issue description</div>
 							<Textarea
@@ -1734,7 +1984,11 @@ function ExamSession({
 						<Button type="button" variant="outline" onClick={() => setReportDialogOpen(false)}>
 							Cancel
 						</Button>
-						<Button type="button" onClick={submitErrorReport} disabled={isSubmittingReport}>
+						<Button
+							type="button"
+							onClick={submitErrorReport}
+							disabled={isSubmittingReport || isCapturingReportScreenshot || (!reportScreenshotDataUrl && !reportScreenshotError)}
+						>
 							{isSubmittingReport ? 'Sending…' : 'Send report'}
 						</Button>
 					</DialogFooter>
@@ -1763,7 +2017,7 @@ function ExamSession({
 							if (currentQuestion.type !== 'fill_blanks') {
 								return (
 									<div
-										className="text-xl md:text-2xl leading-relaxed content-html tk-question-text"
+										className="text-base md:text-lg leading-relaxed content-html tk-question-text"
 										dangerouslySetInnerHTML={{ __html: prepareContentForDisplay(currentQuestion.text) }}
 									/>
 								);
@@ -1774,7 +2028,7 @@ function ExamSession({
 							if (!meta.length) {
 								return (
 									<div
-										className="text-xl md:text-2xl leading-relaxed content-html tk-question-text"
+										className="text-lg md:text-xl leading-relaxed content-html tk-question-text"
 										dangerouslySetInnerHTML={{ __html: prepareContentForDisplay(currentQuestion.text) }}
 									/>
 								);
@@ -1836,20 +2090,25 @@ function ExamSession({
 													}`}>
 														{optionLabel}
 													</span>
-													<span className="flex-1 min-w-0 text-lg leading-relaxed content-html mcq-option-text" dangerouslySetInnerHTML={{ __html: prepareContentForDisplay(opt.text) }} />
+													<span className="flex-1 min-w-0 text-base md:text-lg leading-relaxed content-html mcq-option-text" dangerouslySetInnerHTML={{ __html: prepareContentForDisplay(opt.text) }} />
 												</button>
 											);
 										})}
 									</div>
 								)}
 								{currentQuestion.type === 'text' && (
-									<Input
-										value={(answers[currentQuestion.id] as string) || ''}
-										onChange={(e) => handleAnswerChange(e.target.value)}
-										disabled={showFeedback}
-										placeholder="Type your answer..."
-										className="w-full max-w-sm h-12 px-3 text-lg border border-border/90 rounded-none"
-									/>
+									<div className="w-full max-w-sm">
+										<TypingAnswerMathInput
+											value={(answers[currentQuestion.id] as string) || ''}
+											onChange={(v) => handleAnswerChange(v)}
+											enableScripts={
+												(currentQuestion.correctAnswers ?? []).some((a) => (a ?? '').includes('^') || (a ?? '').includes('_'))
+											}
+											disabled={showFeedback}
+											placeholder="Type Your Answer Here..."
+											className="h-12 px-3 text-lg border-2 border-border rounded-none"
+										/>
+									</div>
 								)}
 								{currentQuestion.type === 'matching' && currentQuestion.matching && currentQuestion.matching.pairs.length > 0 && (
 									<MatchingQuestionSortable
@@ -2059,7 +2318,7 @@ function ExamSession({
 															return (
 																<div
 																	key={opt.id}
-																	className={`text-left rounded-md border p-3 flex items-start gap-2 whitespace-normal break-words ${feedbackClass}`}
+																	className={`text-left rounded-md border-2 p-3 flex items-start gap-2 whitespace-normal break-words ${feedbackClass}`}
 																>
 																<span className="font-semibold">{optionLabel}.</span>
 																<span className="flex-1 min-w-0 text-lg leading-relaxed content-html mcq-option-text" dangerouslySetInnerHTML={{ __html: prepareContentForDisplay(opt.text) }} />
@@ -2103,7 +2362,14 @@ function ExamSession({
 												</div>
 											) : (
 												<div className="rounded-md border bg-white px-3 py-2 min-h-[2rem]">
-													{Array.isArray(userAns) ? userAns.join(', ') : (userAns ?? '')}
+													{q.type === 'text' ? (
+														<span
+															className="content-html"
+															dangerouslySetInnerHTML={{ __html: renderTypingAnswerMathToHtml(String(userAns ?? '')) }}
+														/>
+													) : (
+														Array.isArray(userAns) ? userAns.join(', ') : (userAns ?? '')
+													)}
 												</div>
 											)}
 										</div>
@@ -2150,7 +2416,21 @@ function ExamSession({
 												</div>
 											) : q.correctAnswers && q.correctAnswers.length > 0 ? (
 												<div className="rounded-md border-2 border-green-600 bg-green-50 px-3 py-2">
-													<div className="font-medium">{q.correctAnswers.join(', ')}</div>
+													{q.type === 'text' ? (
+														<div className="font-medium">
+															{q.correctAnswers.map((ans, idx) => (
+																<span key={idx}>
+																	{idx > 0 ? ', ' : ''}
+																	<span
+																		className="content-html"
+																		dangerouslySetInnerHTML={{ __html: renderTypingAnswerMathToHtml(ans) }}
+																	/>
+																</span>
+															))}
+														</div>
+													) : (
+														<div className="font-medium">{q.correctAnswers.join(', ')}</div>
+													)}
 												</div>
 											) : null}
 										</div>
@@ -2550,7 +2830,7 @@ function FillBlanksPassage({
 	const doc = parser.parseFromString(`<div>${question.text}</div>`, 'text/html');
 	const container = doc.body.firstElementChild;
 
-		const renderNode = (node: ChildNode, key: string): any => {
+		const renderNode = (node: ChildNode, key: string): React.ReactNode => {
 		if (node.nodeType === Node.TEXT_NODE) {
 			return node.textContent;
 		}
@@ -2614,8 +2894,8 @@ function FillBlanksPassage({
 		const children = Array.from(el.childNodes).map((child, index) =>
 			renderNode(child, `${key}-${index}`)
 		);
-		const Tag: any = el.tagName.toLowerCase();
-		const baseProps: any = {};
+		const Tag = el.tagName.toLowerCase() as keyof JSX.IntrinsicElements;
+		const baseProps: Record<string, unknown> = {};
 		if (el.className) baseProps.className = el.className;
 		const voidTags = new Set(['br', 'hr', 'img', 'input', 'meta', 'link', 'source', 'track', 'area', 'base', 'col', 'embed', 'param', 'wbr']);
 		if (voidTags.has(Tag)) {
@@ -2671,6 +2951,7 @@ interface PracticeRunnerProps {
 
 function PracticeRunner({ moduleData, baseQuestions, onExit, glossaryEntries, glossaryEnabled }: PracticeRunnerProps) {
 	const navigate = useNavigate();
+	const location = useLocation();
 	const { user } = useAuth();
 	const [index, setIndex] = useState(0);
 	const [answers, setAnswers] = useState<Record<string, string | string[]>>({});
@@ -2685,6 +2966,9 @@ function PracticeRunner({ moduleData, baseQuestions, onExit, glossaryEntries, gl
 	const practiceContentRef = useRef<HTMLDivElement | null>(null);
 	const [reportDialogOpen, setReportDialogOpen] = useState(false);
 	const [reportMessage, setReportMessage] = useState('');
+	const [reportScreenshotDataUrl, setReportScreenshotDataUrl] = useState<string | undefined>(undefined);
+	const [isCapturingReportScreenshot, setIsCapturingReportScreenshot] = useState(false);
+	const [reportScreenshotError, setReportScreenshotError] = useState<string | null>(null);
 	const [isSubmittingReport, setIsSubmittingReport] = useState(false);
 
 	useEffect(() => {
@@ -2785,25 +3069,48 @@ function PracticeRunner({ moduleData, baseQuestions, onExit, glossaryEntries, gl
 		try {
 			setIsSubmittingReport(true);
 			const now = Date.now();
-			await db.errorReports.add({
-				id: uuidv4(),
-				status: 'new',
-				message: reportMessage.trim(),
-				createdAt: now,
-				updatedAt: now,
-				route: location.pathname,
-				moduleId: moduleData.id,
-				moduleTitle: moduleData.title,
-				questionId: current?.id,
-				questionCode: current?.code,
-				questionTags: current?.tags,
-				attemptId: undefined,
-				phase: 'practice',
-				reporterUserId: user?.id,
-				reporterUsername: user?.username,
+			let screenshotDataUrl: string | undefined = reportScreenshotDataUrl;
+			if (!screenshotDataUrl) {
+				try {
+					screenshotDataUrl = await captureAppVisualStateScreenshotDataUrl();
+				} catch (e) {
+					console.error('Failed to capture screenshot for report:', e);
+					setReportScreenshotError('Screenshot capture failed');
+				}
+			}
+			await db.transaction('rw', db.errorReports, async () => {
+				await db.errorReports.add({
+					id: uuidv4(),
+					status: 'new',
+					message: reportMessage.trim(),
+					screenshotDataUrl,
+					createdAt: now,
+					updatedAt: now,
+					route: location.pathname,
+					moduleId: moduleData.id,
+					moduleTitle: moduleData.title,
+					questionId: current?.id,
+					questionCode: current?.code,
+					questionTags: current?.tags,
+					attemptId: undefined,
+					currentQuestionIndex: index,
+					scrollY: window.scrollY,
+					viewportWidth: window.innerWidth,
+					viewportHeight: window.innerHeight,
+					phase: 'practice',
+					appState: {
+						index,
+						total,
+						showInstant,
+					},
+					reporterUserId: user?.id,
+					reporterUsername: user?.username,
+				});
 			});
 			setReportDialogOpen(false);
 			setReportMessage('');
+			setReportScreenshotDataUrl(undefined);
+			setReportScreenshotError(null);
 			toast.success('Report sent');
 		} catch (e) {
 			console.error(e);
@@ -2811,7 +3118,29 @@ function PracticeRunner({ moduleData, baseQuestions, onExit, glossaryEntries, gl
 		} finally {
 			setIsSubmittingReport(false);
 		}
-	}, [current, moduleData.id, moduleData.title, reportMessage, user?.id, user?.username]);
+	}, [current, index, location.pathname, moduleData.id, moduleData.title, reportMessage, reportScreenshotDataUrl, showInstant, total, user?.id, user?.username]);
+
+	const openReportDialogWithCapture = useCallback(async () => {
+		if (isCapturingReportScreenshot) return;
+		// Ensure the screenshot does not include the report dialog overlay.
+		setReportDialogOpen(false);
+		await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+		setReportScreenshotDataUrl(undefined);
+		setReportScreenshotError(null);
+		setIsCapturingReportScreenshot(true);
+		void (async () => {
+			try {
+				const url = await captureFullContentScreenshotDataUrl();
+				setReportScreenshotDataUrl(url);
+			} catch (e) {
+				console.error('Failed to capture screenshot for report preview:', e);
+				setReportScreenshotError('Screenshot capture failed');
+			} finally {
+				setIsCapturingReportScreenshot(false);
+				setReportDialogOpen(true);
+			}
+		})();
+	}, [isCapturingReportScreenshot]);
 
 	const handleAnswerChange = (value: string | string[]) => {
 		if (!current) return;
@@ -2865,7 +3194,9 @@ function PracticeRunner({ moduleData, baseQuestions, onExit, glossaryEntries, gl
 			if (updated) {
 				await recordDailyStats(updated, moduleData);
 			}
-		} catch {}
+		} catch {
+			void 0;
+		}
 		setLastWasCorrect(isCorrect);
 		setShowFeedback(true);
 	};
@@ -2878,7 +3209,9 @@ function PracticeRunner({ moduleData, baseQuestions, onExit, glossaryEntries, gl
 					<Button
 						variant="outline"
 						size="sm"
-						onClick={() => setReportDialogOpen(true)}
+						onClick={() => {
+							void openReportDialogWithCapture();
+						}}
 						className="bg-white"
 					>
 						<Bug className="h-4 w-4 mr-2" />
@@ -2888,7 +3221,18 @@ function PracticeRunner({ moduleData, baseQuestions, onExit, glossaryEntries, gl
 				<div className="border-b border-white" />
 			</div>
 
-			<Dialog open={reportDialogOpen} onOpenChange={setReportDialogOpen}>
+			<Dialog
+				open={reportDialogOpen}
+				onOpenChange={(open) => {
+					setReportDialogOpen(open);
+					if (!open) {
+						setReportScreenshotDataUrl(undefined);
+						setIsCapturingReportScreenshot(false);
+						setReportScreenshotError(null);
+						return;
+					}
+				}}
+			>
 				<DialogContent className="max-w-lg">
 					<DialogHeader>
 						<DialogTitle>Report an issue</DialogTitle>
@@ -2897,6 +3241,38 @@ function PracticeRunner({ moduleData, baseQuestions, onExit, glossaryEntries, gl
 						</DialogDescription>
 					</DialogHeader>
 					<div className="space-y-3">
+						<div className="space-y-1">
+							<div className="flex items-center justify-between gap-3">
+								<div className="text-xs text-muted-foreground">Screenshot</div>
+								<Button
+									variant="outline"
+									size="sm"
+									disabled={isCapturingReportScreenshot}
+									onClick={() => {
+										void openReportDialogWithCapture();
+									}}
+								>
+									Retry
+								</Button>
+							</div>
+							{reportScreenshotDataUrl ? (
+								<div className="max-h-[40vh] overflow-auto rounded-md border">
+									<img
+										src={reportScreenshotDataUrl}
+										alt="Report screenshot preview"
+										className="w-full h-auto"
+									/>
+								</div>
+							) : (
+								<div className="rounded-md border p-3 text-xs text-muted-foreground">
+									{isCapturingReportScreenshot
+										? 'Capturing screenshot…'
+										: reportScreenshotError
+											? reportScreenshotError
+											: 'Screenshot will appear here.'}
+								</div>
+							)}
+						</div>
 						<div className="space-y-1">
 							<div className="text-xs text-muted-foreground">Issue description</div>
 							<Textarea
@@ -2911,7 +3287,11 @@ function PracticeRunner({ moduleData, baseQuestions, onExit, glossaryEntries, gl
 						<Button type="button" variant="outline" onClick={() => setReportDialogOpen(false)}>
 							Cancel
 						</Button>
-						<Button type="button" onClick={submitErrorReport} disabled={isSubmittingReport}>
+						<Button
+							type="button"
+							onClick={submitErrorReport}
+							disabled={isSubmittingReport || isCapturingReportScreenshot || (!reportScreenshotDataUrl && !reportScreenshotError)}
+						>
 							{isSubmittingReport ? 'Sending…' : 'Send report'}
 						</Button>
 					</DialogFooter>
@@ -2936,13 +3316,13 @@ function PracticeRunner({ moduleData, baseQuestions, onExit, glossaryEntries, gl
 					<>
 						{(() => {
 							if (!current || current.type !== 'fill_blanks') {
-								return <div className="text-xl md:text-2xl font-medium content-html tk-question-text" dangerouslySetInnerHTML={{ __html: prepareContentForDisplay(current?.text || '') }} />;
+								return <div className="text-xl md:text-2xl font-normal content-html tk-question-text" dangerouslySetInnerHTML={{ __html: prepareContentForDisplay(current?.text || '') }} />;
 							}
 							const meta = current.fillBlanks?.blanks?.length
 								? current.fillBlanks.blanks
 								: getFillBlanksMetaFromText(current);
 							if (!meta.length) {
-								return <div className="text-xl md:text-2xl font-medium content-html tk-question-text" dangerouslySetInnerHTML={{ __html: prepareContentForDisplay(current.text) }} />;
+								return <div className="text-xl md:text-2xl font-normal content-html tk-question-text" dangerouslySetInnerHTML={{ __html: prepareContentForDisplay(current.text) }} />;
 							}
 							const qWithMeta: Question = {
 								...current,
@@ -3008,15 +3388,20 @@ function PracticeRunner({ moduleData, baseQuestions, onExit, glossaryEntries, gl
 									})}
 								</div>
 							)}
-								{current.type === 'text' && (
-									<Input
+							{current.type === 'text' && (
+								<div className="w-full max-w-sm">
+									<TypingAnswerMathInput
 										value={(answers[current.id] as string) || ''}
-										onChange={(e) => handleAnswerChange(e.target.value)}
+										onChange={(v) => handleAnswerChange(v)}
+										enableScripts={
+											(current.correctAnswers ?? []).some((a) => (a ?? '').includes('^') || (a ?? '').includes('_'))
+										}
 										disabled={showFeedback}
-										placeholder="Type your answer..."
-										className="w-full max-w-sm h-12 px-3 text-lg border border-border/90 rounded-none"
+										placeholder="Type Your Answer Here..."
+										className="h-12 px-3 text-lg border-2 border-border rounded-none"
 									/>
-								)}
+								</div>
+							)}
 								{current.type === 'matching' && current.matching && current.matching.pairs.length > 0 && (
 									<MatchingQuestionSortable
 										question={current}
@@ -3130,18 +3515,21 @@ function PracticeRunner({ moduleData, baseQuestions, onExit, glossaryEntries, gl
 									</div>
 								)}
 								{current.type === 'text' && current.correctAnswers && current.correctAnswers.length > 0 && (
-									<div className="bg-white border border-border rounded-md p-3">
-										<div className="text-sm font-semibold text-green-700 mb-2">Correct Answer:</div>
-										<div className="text-lg">
-											{current.correctAnswers.map((ans, idx) => (
-												<span key={idx}>
-													{idx > 0 && ', '}
-													<span className="font-semibold">{ans}</span>
-												</span>
-											))}
-										</div>
+								<div className="bg-white border border-border rounded-md p-3">
+									<div className="text-sm font-semibold text-green-700 mb-2">Correct Answer:</div>
+									<div className="text-lg">
+										{current.correctAnswers.map((ans, idx) => (
+											<span key={idx}>
+												{idx > 0 && ', '}
+												<span
+													className="font-semibold content-html"
+													dangerouslySetInnerHTML={{ __html: renderTypingAnswerMathToHtml(ans) }}
+												/>
+											</span>
+										))}
 									</div>
-								)}
+								</div>
+							)}
 								{current.explanation && (
 									<div className="bg-white border border-border rounded-md p-3">
 										<div className="text-base font-semibold mb-1">Explanation</div>
@@ -3179,14 +3567,15 @@ function PracticeRunner({ moduleData, baseQuestions, onExit, glossaryEntries, gl
 	);
 }
 
-function evaluateScore(q: Question, answer: any): { isCorrect: boolean; scorePercent: number; correctParts: number; totalParts: number } {
+function evaluateScore(q: Question, answer: unknown): { isCorrect: boolean; scorePercent: number; correctParts: number; totalParts: number } {
 	// Multiple choice uses option IDs; require exact set match
 	if (q.type === 'mcq') {
 		if (!q.correctAnswers || q.correctAnswers.length === 0) {
 			return { isCorrect: false, scorePercent: 0, correctParts: 0, totalParts: 0 };
 		}
 		const expected = new Set(q.correctAnswers);
-		const given = new Set(Array.isArray(answer) ? answer : [answer].filter(Boolean));
+		const givenValues = Array.isArray(answer) ? answer : [answer];
+		const given = new Set(givenValues.filter((v): v is string => typeof v === 'string' && v.length > 0));
 		let isCorrect = expected.size === given.size;
 		if (isCorrect) {
 			for (const v of expected) {
@@ -3245,7 +3634,7 @@ function evaluateScore(q: Question, answer: any): { isCorrect: boolean; scorePer
 	if (!q.correctAnswers || q.correctAnswers.length === 0) {
 		return { isCorrect: false, scorePercent: 0, correctParts: 0, totalParts: 0 };
 	}
-	const ans = (answer || '').toString().trim().toLowerCase();
+	const ans = (typeof answer === 'string' ? answer : '').toString().trim().toLowerCase();
 	const isCorrect = q.correctAnswers.some((c) => c.trim().toLowerCase() === ans);
 	const scorePercent = isCorrect ? 100 : 0;
 	return { isCorrect, scorePercent, correctParts: isCorrect ? 1 : 0, totalParts: 1 };
@@ -3261,7 +3650,7 @@ function getTotalPartsForQuestion(q: Question): number {
 	return 1;
 }
 
-function evaluateCorrect(q: Question, answer: any): boolean {
+function evaluateCorrect(q: Question, answer: unknown): boolean {
 	const scoring = evaluateScore(q, answer);
 	return scoring.isCorrect;
 }

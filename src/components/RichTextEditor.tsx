@@ -6,7 +6,8 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Bold, Italic, Underline, Strikethrough, Undo2, Redo2, AlignLeft, AlignCenter, AlignRight, Sigma, Image as ImageIcon, Eraser, Copy, Loader2, RefreshCcw, Search, PlusCircle, BookOpen, Library, Code2, Eye, Pencil, Trash2, X, Superscript, Subscript } from 'lucide-react';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import { Bold, Italic, Underline, Strikethrough, Undo2, Redo2, AlignLeft, AlignCenter, AlignRight, Sigma, Image as ImageIcon, Eraser, Copy, Loader2, RefreshCcw, Search, PlusCircle, BookOpen, Library, Code2, Eye, Pencil, Trash2, X, Superscript, Subscript, FileText } from 'lucide-react';
 import { toast } from 'sonner';
 import ReactMarkdown, { Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -26,6 +27,34 @@ function stripEditorOnlyMarkup(html: string): string {
   } catch {
     return html;
   }
+}
+
+function ensureNormalCaretAnchorAfter(node: Node): Text {
+  const next = node.nextSibling;
+  if (next && next.nodeType === Node.ELEMENT_NODE) {
+    const el = next as HTMLElement;
+    if (el.getAttribute('data-tk-after-katex') === '1') {
+      const t = el.firstChild;
+      if (t && t.nodeType === Node.TEXT_NODE) return t as Text;
+    }
+  }
+
+  const span = document.createElement('span');
+  span.setAttribute('data-tk-after-katex', '1');
+  span.style.fontFamily = 'inherit';
+  span.style.fontSize = 'inherit';
+  span.style.fontWeight = 'inherit';
+  span.style.fontStyle = 'inherit';
+  span.style.letterSpacing = 'inherit';
+  span.style.whiteSpace = 'pre-wrap';
+  span.textContent = '\u200B';
+
+  if (node.parentNode) {
+    if (next) node.parentNode.insertBefore(span, next);
+    else node.parentNode.appendChild(span);
+  }
+
+  return (span.firstChild as Text) || document.createTextNode('');
 }
 
 type Props = {
@@ -72,6 +101,46 @@ function isDescendant(parent: Node | null, child: Node | null) {
   return false;
 }
 
+function getCaretTextOffsetIn(root: HTMLElement): number {
+  const sel = window.getSelection();
+  if (!sel || sel.rangeCount === 0) return 0;
+  const range = sel.getRangeAt(0);
+  if (!isDescendant(root, range.startContainer)) return root.textContent?.length ?? 0;
+
+  const pre = range.cloneRange();
+  pre.selectNodeContents(root);
+  pre.setEnd(range.startContainer, range.startOffset);
+  return pre.toString().length;
+}
+
+function setCaretTextOffsetIn(root: HTMLElement, offset: number) {
+  const sel = window.getSelection();
+  if (!sel) return;
+
+  let remaining = offset;
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null);
+  let node = walker.nextNode() as Text | null;
+  while (node) {
+    const len = node.nodeValue?.length ?? 0;
+    if (remaining <= len) {
+      const r = document.createRange();
+      r.setStart(node, remaining);
+      r.collapse(true);
+      sel.removeAllRanges();
+      sel.addRange(r);
+      return;
+    }
+    remaining -= len;
+    node = walker.nextNode() as Text | null;
+  }
+
+  const r = document.createRange();
+  r.selectNodeContents(root);
+  r.collapse(false);
+  sel.removeAllRanges();
+  sel.addRange(r);
+}
+
 // Strip background-related styles from an element subtree
 function stripBackgroundStyles(root: HTMLElement) {
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT, null);
@@ -109,10 +178,6 @@ const SNIPPET_PRESETS = [
   { label: 'Fraction', snippet: '\\frac{a}{b}', category: 'Fractions' },
   { label: 'Mixed fraction', snippet: '1\\frac{1}{2}', category: 'Fractions' },
   { label: 'Continued fraction', snippet: '\\cfrac{1}{2+\\cfrac{1}{2}}', category: 'Fractions' },
-  // Roots
-  { label: 'Square root', snippet: '\\sqrt{x}', category: 'Roots' },
-  { label: 'Nth root', snippet: '\\sqrt[n]{x}', category: 'Roots' },
-  { label: 'Cubic root', snippet: '\\sqrt[3]{x}', category: 'Roots' },
   // Sums and Products
   { label: 'Summation', snippet: '\\sum_{i=1}^{n} i', category: 'Sums & Products' },
   { label: 'Product', snippet: '\\prod_{i=1}^{n} i', category: 'Sums & Products' },
@@ -310,12 +375,57 @@ export default function RichTextEditor({ value, onChange, placeholder, className
   const [syntaxEditorOpen, setSyntaxEditorOpen] = useState(false);
   const [editingSyntax, setEditingSyntax] = useState<{ snippet: string; label: string } | null>(null);
   const [syntaxPlaceholders, setSyntaxPlaceholders] = useState<Record<string, string>>({});
+  const [promptPickerOpen, setPromptPickerOpen] = useState(false);
+  const [promptSearch, setPromptSearch] = useState('');
+  const [questionPrompts, setQuestionPrompts] = useState<{ id: string; title: string; content: string }[]>([]);
   const selectionRef = useRef<Range | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const guideContentRef = useRef<HTMLDivElement | null>(null);
   const highlightedGuideNodesRef = useRef<HTMLElement[]>([]);
   const equationInputRef = useRef<HTMLTextAreaElement | null>(null);
   const syntaxScrollRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!promptPickerOpen) return;
+    try {
+      const raw = window.localStorage.getItem('questionPrompts');
+      if (!raw) {
+        setQuestionPrompts([]);
+        return;
+      }
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        setQuestionPrompts(
+          parsed
+            .filter((p) => p && typeof p.id === 'string')
+            .map((p) => ({ id: String(p.id), title: String(p.title ?? ''), content: String(p.content ?? '') }))
+        );
+      } else {
+        setQuestionPrompts([]);
+      }
+    } catch {
+      setQuestionPrompts([]);
+    }
+  }, [promptPickerOpen]);
+
+  const insertPrompt = useCallback(
+    (content: string) => {
+      if (!content.trim()) return;
+      if (ref.current) ref.current.focus();
+      ensureCaretInEditor();
+      restoreSelection();
+      try {
+        document.execCommand('insertText', false, content);
+      } catch {
+        insertHtmlAtCursor(content);
+      }
+      if (ref.current) {
+        stripBackgroundStyles(ref.current);
+        onChange(stripEditorOnlyMarkup(ref.current.innerHTML));
+      }
+    },
+    [onChange]
+  );
 
   const clearAllContent = () => {
     if (!ref.current) return;
@@ -688,8 +798,6 @@ export default function RichTextEditor({ value, onChange, placeholder, className
 
           if (snippet.includes('\\frac') || snippet.includes('\\cfrac') || snippet.includes('\\dfrac')) {
             category = 'Fractions';
-          } else if (snippet.includes('\\sqrt')) {
-            category = 'Roots';
           } else if (snippet.includes('\\sum') || snippet.includes('\\prod') || snippet.includes('\\coprod')) {
             category = 'Sums & Products';
           } else if (snippet.includes('\\int')) {
@@ -801,9 +909,12 @@ export default function RichTextEditor({ value, onChange, placeholder, className
     const wrapper = document.createElement(isDisplayMode ? 'div' : 'span');
     wrapper.className = `tk-katex-wrapper relative group ${isDisplayMode ? 'block my-2' : 'inline-flex items-baseline align-baseline mx-0.5'}`;
     wrapper.setAttribute('data-latex', latexSource);
+    wrapper.setAttribute('contenteditable', 'false');
 
-    const katexContainer = document.createElement('span');
-    katexContainer.className = 'tk-katex-node inline-flex items-baseline';
+    // Add a container for the KaTeX output
+    const katexContainer = document.createElement(isDisplayMode ? 'div' : 'span');
+    katexContainer.className = isDisplayMode ? 'katex-display' : 'katex-inline';
+    katexContainer.setAttribute('contenteditable', 'false');
 
     try {
       const html = katex.renderToString(latexSource, { displayMode: isDisplayMode });
@@ -853,9 +964,10 @@ export default function RichTextEditor({ value, onChange, placeholder, className
         if (editingKatexElement.parentNode) {
           editingKatexElement.parentNode.replaceChild(newWrapper, editingKatexElement);
 
-          // Set selection after the new element
+          // Ensure the caret is placed into normal text after the equation
+          const afterText = ensureNormalCaretAnchorAfter(newWrapper);
           const range = document.createRange();
-          range.setStartAfter(newWrapper);
+          range.setStart(afterText, afterText.data.length);
           range.collapse(true);
           const sel = window.getSelection();
           if (sel) {
@@ -879,7 +991,10 @@ export default function RichTextEditor({ value, onChange, placeholder, className
           const range = sel.getRangeAt(0);
           range.deleteContents();
           range.insertNode(wrapper);
-          range.setStartAfter(wrapper);
+
+          // Ensure the caret is placed into normal text after the equation
+          const afterText = ensureNormalCaretAnchorAfter(wrapper);
+          range.setStart(afterText, afterText.data.length);
           range.collapse(true);
           sel.removeAllRanges();
           sel.addRange(range);
@@ -930,9 +1045,15 @@ export default function RichTextEditor({ value, onChange, placeholder, className
   };
 
   useEffect(() => {
-    if (ref.current && ref.current.innerHTML !== value) {
-      ref.current.innerHTML = value || '';
+    if (!ref.current) return;
+    if (ref.current.innerHTML === (value || '')) return;
+
+    const isFocused = document.activeElement === ref.current;
+    if (isFocused) {
+      return;
     }
+
+    ref.current.innerHTML = value || '';
   }, [value]);
 
   // Normalize any existing KaTeX equations so they get hover edit/delete controls
@@ -941,9 +1062,12 @@ export default function RichTextEditor({ value, onChange, placeholder, className
     if (!editor) return;
 
     let changed = false;
+    const isFocused = document.activeElement === editor;
     const katexNodes = Array.from(
       editor.querySelectorAll<HTMLElement>('.katex, .katex-display, .katex-inline')
     );
+
+    const wrapperNodes = Array.from(editor.querySelectorAll<HTMLElement>('.tk-katex-wrapper'));
 
     katexNodes.forEach((node) => {
       const existingWrapper = node.closest('.tk-katex-wrapper') as HTMLElement | null;
@@ -955,9 +1079,7 @@ export default function RichTextEditor({ value, onChange, placeholder, className
         node.textContent ??
         '';
 
-      const isDisplay =
-        node.classList.contains('katex-display') ||
-        node.tagName.toLowerCase() === 'div';
+      const isDisplay = node.classList.contains('katex-display') || node.tagName.toLowerCase() === 'div';
 
       const wrapper = createKatexWrapper(latexSource.trim(), isDisplay);
       const parent = node.parentNode;
@@ -967,12 +1089,35 @@ export default function RichTextEditor({ value, onChange, placeholder, className
       changed = true;
     });
 
+    // If wrappers exist but controls are missing (e.g. editor-only markup was stripped
+    // after an inline edit), rebuild the wrapper so hover edit/delete buttons work.
+    wrapperNodes.forEach((wrapper) => {
+      const hasKatexNode = !!wrapper.querySelector('.katex');
+      if (!hasKatexNode) return;
+
+      const hasEdit = !!wrapper.querySelector('[data-katex-action="edit"]');
+      const hasDelete = !!wrapper.querySelector('[data-katex-action="delete"]');
+      if (hasEdit && hasDelete) return;
+
+      const latexSource = extractLatexFromKatex(wrapper) ?? wrapper.getAttribute('data-latex') ?? '';
+      if (!latexSource.trim()) return;
+
+      const isDisplay = wrapper.tagName.toLowerCase() === 'div';
+      const newWrapper = createKatexWrapper(latexSource.trim(), isDisplay);
+      const parent = wrapper.parentNode;
+      if (!parent) return;
+      parent.replaceChild(newWrapper, wrapper);
+      changed = true;
+    });
+
     if (changed) {
       const cleaned = editor.innerHTML.replace(/\u200B/g, '');
       if (editor.innerHTML !== cleaned) {
         editor.innerHTML = cleaned;
       }
-      onChange(cleaned);
+      if (!isFocused) {
+        onChange(cleaned);
+      }
     }
   }, [value]);
 
@@ -984,25 +1129,25 @@ export default function RichTextEditor({ value, onChange, placeholder, className
       if (dataLatex) {
         return dataLatex;
       }
-      
+
       // KaTeX stores the original LaTeX in an annotation element (if available)
       const annotation = katexElement.querySelector('annotation[encoding="application/x-tex"]');
       if (annotation) {
         return annotation.textContent || null;
       }
-      
+
       // Try alternative annotation selector
       const altAnnotation = katexElement.querySelector('.katex-html annotation');
       if (altAnnotation) {
         return altAnnotation.textContent || null;
       }
-      
+
       // Fallback: try to find any annotation
       const anyAnnotation = katexElement.querySelector('annotation');
       if (anyAnnotation) {
         return anyAnnotation.textContent || null;
       }
-      
+
       return null;
     } catch {
       return null;
@@ -1496,9 +1641,27 @@ export default function RichTextEditor({ value, onChange, placeholder, className
           </Tooltip>
           <Tooltip>
             <TooltipTrigger asChild>
-              <Button type="button" variant="ghost" size="icon" onMouseDown={(e)=>{e.preventDefault();}} onClick={clearAllContent} aria-label="Clear all"><Eraser className="h-4 w-4" /></Button>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  const sel = window.getSelection();
+                  if (sel && sel.rangeCount > 0) {
+                    selectionRef.current = sel.getRangeAt(0).cloneRange();
+                  }
+                }}
+                onClick={() => {
+                  setPromptSearch('');
+                  setPromptPickerOpen(true);
+                }}
+                aria-label="Insert prompt"
+              >
+                <FileText className="h-4 w-4" />
+              </Button>
             </TooltipTrigger>
-            <TooltipContent>Clear all</TooltipContent>
+            <TooltipContent>Insert prompt</TooltipContent>
           </Tooltip>
           <Tooltip>
             <TooltipTrigger asChild>
@@ -1547,6 +1710,59 @@ export default function RichTextEditor({ value, onChange, placeholder, className
         </div>
       </div>
 
+      <Dialog open={promptPickerOpen} onOpenChange={setPromptPickerOpen}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Insert prompt</DialogTitle>
+            <DialogDescription>Select a prompt from Settings to insert at the cursor.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <Input
+              value={promptSearch}
+              onChange={(e) => setPromptSearch(e.target.value)}
+              placeholder="Search prompts..."
+            />
+            <ScrollArea className="h-72 rounded-md border">
+              <div className="p-2 space-y-2">
+                {questionPrompts
+                  .filter((p) => {
+                    const q = promptSearch.trim().toLowerCase();
+                    if (!q) return true;
+                    return (
+                      (p.title ?? '').toLowerCase().includes(q) ||
+                      (p.content ?? '').toLowerCase().includes(q)
+                    );
+                  })
+                  .map((p) => (
+                    <button
+                      key={p.id}
+                      type="button"
+                      className="w-full text-left rounded-md border bg-background p-3 hover:bg-muted/50"
+                      onClick={() => {
+                        insertPrompt(p.content);
+                        setPromptPickerOpen(false);
+                      }}
+                    >
+                      <div className="font-medium text-sm truncate">{p.title || 'Untitled prompt'}</div>
+                      <div className="mt-1 text-xs text-muted-foreground line-clamp-2 whitespace-pre-wrap">{p.content}</div>
+                    </button>
+                  ))}
+                {questionPrompts.length === 0 && (
+                  <div className="p-4 text-sm text-muted-foreground">
+                    No prompts found. Add prompts in Settings → Question Prompts.
+                  </div>
+                )}
+              </div>
+            </ScrollArea>
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setPromptPickerOpen(false)}>
+              Close
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       <div
         ref={ref}
         className={`min-h-[120px] rounded-md border p-3 focus:outline-none focus:ring-2 focus:ring-ring prose prose-base max-w-none`}
@@ -1580,15 +1796,19 @@ export default function RichTextEditor({ value, onChange, placeholder, className
             }
           }
           
-          // Fallback to text/html or text/plain
-          const html = e.clipboardData?.getData('text/html');
-          const text = e.clipboardData?.getData('text/plain');
-          if (html) {
-            const wrapper = document.createElement('div');
-            wrapper.innerHTML = html;
-            insertHtmlAtCursor(wrapper.innerHTML);
-          } else if (text) {
-            insertHtmlAtCursor(text);
+          const text = e.clipboardData?.getData('text/plain') ?? '';
+          const sel = window.getSelection();
+          if (sel && sel.rangeCount > 0 && ref.current && isDescendant(ref.current, sel.getRangeAt(0).startContainer)) {
+            selectionRef.current = sel.getRangeAt(0).cloneRange();
+          }
+          ensureCaretInEditor();
+          restoreSelection();
+          if (text) {
+            try {
+              document.execCommand('insertText', false, text);
+            } catch {
+              insertHtmlAtCursor(text);
+            }
           }
           if (ref.current) {
             stripBackgroundStyles(ref.current);
@@ -1628,15 +1848,195 @@ export default function RichTextEditor({ value, onChange, placeholder, className
           }
         }}
         onKeyDown={(e) => {
-          if (e.key === 'ArrowLeft' || e.key === 'ArrowRight' || e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+          // Never allow caret editing/deleting KaTeX wrappers. Only hover controls can edit/delete.
+          if (e.key === 'Backspace' || e.key === 'Delete') {
             const sel = window.getSelection();
-            const range = sel && sel.rangeCount > 0 ? sel.getRangeAt(0) : null;
+            if (sel && sel.rangeCount > 0 && ref.current) {
+              const range = sel.getRangeAt(0);
+              let node: Node | null = range.startContainer;
+              if (node.nodeType === Node.TEXT_NODE) node = node.parentNode;
+
+              // If caret is inside our post-KaTeX caret anchor, never allow it to delete the adjacent equation.
+              const anchorEl = (node as HTMLElement | null)?.closest
+                ? ((node as HTMLElement).closest('[data-tk-after-katex="1"]') as HTMLElement | null)
+                : null;
+              if (anchorEl && range.collapsed) {
+                const prev = anchorEl.previousSibling as HTMLElement | null;
+                const next = anchorEl.nextSibling as HTMLElement | null;
+                if (e.key === 'Backspace' && prev?.classList?.contains('tk-katex-wrapper') && range.startOffset === 0) {
+                  e.preventDefault();
+                  const nextRange = document.createRange();
+                  nextRange.setStart(anchorEl, 0);
+                  nextRange.collapse(true);
+                  sel.removeAllRanges();
+                  sel.addRange(nextRange);
+                  selectionRef.current = nextRange.cloneRange();
+                  return;
+                }
+                if (
+                  e.key === 'Delete' &&
+                  next?.classList?.contains('tk-katex-wrapper') &&
+                  range.startOffset === anchorEl.childNodes.length
+                ) {
+                  e.preventDefault();
+                  const nextRange = document.createRange();
+                  nextRange.setStart(anchorEl, 0);
+                  nextRange.collapse(true);
+                  sel.removeAllRanges();
+                  sel.addRange(nextRange);
+                  selectionRef.current = nextRange.cloneRange();
+                  return;
+                }
+              }
+
+              const insideWrapper = (node as HTMLElement | null)?.closest
+                ? ((node as HTMLElement).closest('.tk-katex-wrapper') as HTMLElement | null)
+                : null;
+              if (insideWrapper) {
+                e.preventDefault();
+                // Move caret outside the wrapper (before for Backspace, after for Delete)
+                const nextRange = document.createRange();
+                if (e.key === 'Backspace') {
+                  nextRange.setStartBefore(insideWrapper);
+                } else {
+                  const after = ensureNormalCaretAnchorAfter(insideWrapper);
+                  nextRange.setStart(after, after.data.length);
+                }
+                nextRange.collapse(true);
+                sel.removeAllRanges();
+                sel.addRange(nextRange);
+                selectionRef.current = nextRange.cloneRange();
+                return;
+              }
+
+              // If caret is directly before/after a wrapper, block deletion.
+              if (range.collapsed) {
+                const sc = range.startContainer;
+                const so = range.startOffset;
+
+                // Case: startContainer is an element, check siblings at offset
+                if (sc.nodeType === Node.ELEMENT_NODE) {
+                  const el = sc as Element;
+                  const before = so > 0 ? (el.childNodes[so - 1] as HTMLElement | undefined) : undefined;
+                  const after = el.childNodes[so] as HTMLElement | undefined;
+                  const target = (e.key === 'Backspace' ? before : after) as HTMLElement | undefined;
+                  if (target && target.nodeType === Node.ELEMENT_NODE && (target as HTMLElement).classList?.contains('tk-katex-wrapper')) {
+                    e.preventDefault();
+                    const nextRange = document.createRange();
+                    if (e.key === 'Backspace') {
+                      nextRange.setStartBefore(target);
+                    } else {
+                      const anchor = ensureNormalCaretAnchorAfter(target);
+                      nextRange.setStart(anchor, anchor.data.length);
+                    }
+                    nextRange.collapse(true);
+                    sel.removeAllRanges();
+                    sel.addRange(nextRange);
+                    selectionRef.current = nextRange.cloneRange();
+                    return;
+                  }
+                }
+
+                // Case: startContainer is a text node; if at boundary, inspect adjacent sibling
+                if (sc.nodeType === Node.TEXT_NODE) {
+                  const text = sc as Text;
+                  if (e.key === 'Backspace' && so === 0) {
+                    // If the text node is inside the anchor span, inspect the anchor's previous sibling.
+                    const anchor = (text.parentElement?.getAttribute('data-tk-after-katex') === '1')
+                      ? (text.parentElement as HTMLElement)
+                      : null;
+                    const prev = (anchor ? anchor.previousSibling : text.previousSibling) as HTMLElement | null;
+                    if (prev?.classList?.contains('tk-katex-wrapper')) {
+                      e.preventDefault();
+                      const nextRange = document.createRange();
+                      if (anchor) {
+                        nextRange.setStart(anchor, 0);
+                      } else {
+                        nextRange.setStartBefore(prev);
+                      }
+                      nextRange.collapse(true);
+                      sel.removeAllRanges();
+                      sel.addRange(nextRange);
+                      selectionRef.current = nextRange.cloneRange();
+                      return;
+                    }
+                  }
+                  if (e.key === 'Delete' && so === text.data.length) {
+                    const anchor = (text.parentElement?.getAttribute('data-tk-after-katex') === '1')
+                      ? (text.parentElement as HTMLElement)
+                      : null;
+                    const next = (anchor ? anchor.nextSibling : text.nextSibling) as HTMLElement | null;
+                    if (next?.classList?.contains('tk-katex-wrapper')) {
+                      e.preventDefault();
+                      const nextRange = document.createRange();
+                      if (anchor) {
+                        nextRange.setStart(anchor, 0);
+                      } else {
+                        const caretAnchor = ensureNormalCaretAnchorAfter(next);
+                        nextRange.setStart(caretAnchor, caretAnchor.data.length);
+                      }
+                      nextRange.collapse(true);
+                      sel.removeAllRanges();
+                      sel.addRange(nextRange);
+                      selectionRef.current = nextRange.cloneRange();
+                      return;
+                    }
+                  }
+                }
+              }
+            }
+          }
+
+          // Ensure Enter reliably creates a new paragraph.
+          if (e.key === 'Enter' && !e.shiftKey) {
+            const sel = window.getSelection();
+            if (sel && ref.current) {
+              // If caret is in/near KaTeX wrapper, jump to normal anchor first.
+              if (sel.rangeCount > 0) {
+                const r = sel.getRangeAt(0);
+                let n: Node | null = r.startContainer;
+                const inEl = (n && n.nodeType === Node.TEXT_NODE ? n.parentNode : n) as HTMLElement | null;
+                const wrapper = inEl?.closest ? (inEl.closest('.tk-katex-wrapper') as HTMLElement | null) : null;
+                if (wrapper) {
+                  e.preventDefault();
+                  const anchor = ensureNormalCaretAnchorAfter(wrapper);
+                  const tmp = document.createRange();
+                  tmp.setStart(anchor, anchor.data.length);
+                  tmp.collapse(true);
+                  sel.removeAllRanges();
+                  sel.addRange(tmp);
+                  selectionRef.current = tmp.cloneRange();
+                }
+              }
+
+              e.preventDefault();
+              try {
+                document.execCommand('insertParagraph');
+              } catch {
+                try {
+                  document.execCommand('insertHTML', false, '<p><br></p>');
+                } catch {
+                  insertHtmlAtCursor('<p><br></p>');
+                }
+              }
+              if (ref.current) {
+                onChange(stripEditorOnlyMarkup(ref.current.innerHTML));
+              }
+              return;
+            }
+          }
+
+          if (e.key === 'ArrowLeft' || e.key === 'ArrowRight' || e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+            // Preserve navigation behavior while ensuring we can exit sub/sup tags.
+            const sel = window.getSelection();
+            if (!sel || sel.rangeCount === 0) return;
+            const range = sel.getRangeAt(0);
             if (range && range.collapsed) {
               const container = range.startContainer;
               const elementContainer =
                 container.nodeType === Node.ELEMENT_NODE
                   ? (container as Element)
-                  : container.parentElement;
+                  : (container.parentElement as Element | null);
 
               let scriptTag = (elementContainer?.closest('sub') || elementContainer?.closest('sup')) as HTMLElement | null;
               while (scriptTag?.parentElement) {
@@ -1699,65 +2099,6 @@ export default function RichTextEditor({ value, onChange, placeholder, className
             } else if (e.key === 's' && !e.shiftKey) {
               e.preventDefault();
               doExec('strikeThrough');
-            }
-          }
-          // Fix paragraph break after katex equation
-          if (e.key === 'Enter') {
-            const sel = window.getSelection();
-            if (sel && sel.rangeCount > 0 && ref.current) {
-              const range = sel.getRangeAt(0);
-              const container = range.startContainer;
-              
-              // Check if we're inside or immediately after a katex element
-              let currentNode: Node | null = container.nodeType === Node.TEXT_NODE ? container.parentNode : container;
-              let katexElement: HTMLElement | null = null;
-              
-              // Find if we're inside a katex element
-              while (currentNode && currentNode !== ref.current) {
-                if (currentNode.nodeType === Node.ELEMENT_NODE) {
-                  const el = currentNode as HTMLElement;
-                  if (el.classList && (el.classList.contains('katex') || el.classList.contains('katex-display'))) {
-                    katexElement = el;
-                    break;
-                  }
-                }
-                currentNode = currentNode.parentNode;
-              }
-              
-              // If we're inside a katex element, prevent default and insert paragraph after it
-              if (katexElement && katexElement.parentNode) {
-                e.preventDefault();
-                // Find the outermost katex container
-                while (katexElement.parentNode && katexElement.parentNode !== ref.current) {
-                  const parent = katexElement.parentNode as HTMLElement;
-                  if (parent.classList && (parent.classList.contains('katex') || parent.classList.contains('katex-display'))) {
-                    katexElement = parent;
-                  } else {
-                    break;
-                  }
-                }
-                
-                // Insert a new paragraph after the katex element
-                const p = document.createElement('p');
-                p.innerHTML = '<br>';
-                if (katexElement.nextSibling) {
-                  katexElement.parentNode.insertBefore(p, katexElement.nextSibling);
-                } else {
-                  katexElement.parentNode.appendChild(p);
-                }
-                
-                // Move cursor to the new paragraph
-                const newRange = document.createRange();
-                newRange.setStart(p, 0);
-                newRange.collapse(true);
-                sel.removeAllRanges();
-                sel.addRange(newRange);
-                selectionRef.current = newRange.cloneRange();
-                
-                if (ref.current) {
-                  onChange(stripEditorOnlyMarkup(ref.current.innerHTML));
-                }
-              }
             }
           }
         }}

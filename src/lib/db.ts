@@ -211,6 +211,111 @@ export interface Tag {
   createdAt: number;
 }
 
+export type SemanticOntologyTagKind = 'topic' | 'subtopic' | 'skill' | 'operation' | 'prerequisite' | 'other';
+
+export interface SemanticOntologyTag {
+  id: string;
+  name: string;
+  kind: SemanticOntologyTagKind;
+  description: string;
+  parentId?: string;
+  aliases?: string[];
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface SemanticEmbeddingRecord {
+  id: string;
+  scope: 'ontology_tag' | 'ontology_alias' | 'question';
+  scopeId: string;
+  modelId: string;
+  dims: number;
+  vector: number[];
+  textHash: string;
+  createdAt: number;
+}
+
+export type SemanticAnnotationSource = 'ai' | 'user';
+
+export interface QuestionSemanticTagAssignment {
+  tagId: string;
+  tagName: string;
+  score: number;
+  rank: number;
+  explanation?: string;
+}
+
+export interface QuestionSemanticDifficultyFactors {
+  semanticComplexity: number;
+  conceptualDepth: number;
+  reasoningSteps: number;
+  abstractionLevel: number;
+  symbolDensity: number;
+  prerequisiteLoad: number;
+}
+
+export interface QuestionSemanticAnalysis {
+  id: string;
+  questionId: string;
+  inputHash: string;
+  modelId: string;
+  analysisVersion: number;
+  source: SemanticAnnotationSource;
+  createdAt: number;
+  tags: QuestionSemanticTagAssignment[];
+  difficultyScore: number;
+  difficultyBand: 'very_easy' | 'easy' | 'moderate' | 'hard' | 'very_hard' | 'olympiad';
+  difficultyFactors: QuestionSemanticDifficultyFactors;
+  rationale: {
+    topSignals: Array<{ label: string; weight: number; detail?: string }>;
+    activatedNodes?: Array<{
+      tagId: string;
+      tagName: string;
+      finalScore: number;
+      baseSimilarity: number;
+      heuristicBoost: number;
+      propagatedFromChildren: number;
+      propagatedToChildren: number;
+      depth: number;
+    }>;
+    hierarchy?: {
+      rootsActivated: Array<{ tagId: string; tagName: string; score: number }>;
+      siblingSuppressionApplied: boolean;
+    };
+    heuristics?: Array<{
+      key: string;
+      score: number;
+      contributedTo: Array<{ tagId: string; weight: number }>;
+    }>;
+    difficultyComponents?: {
+      foundationalDistance: number;
+      abstractionDepth: number;
+      reasoningChain: number;
+      prerequisiteBreadth: number;
+      consistencyAdjustment: number;
+      calibratedScore?: number;
+    };
+    consistency?: Array<{ rule: string; delta: number; detail?: string }>;
+  };
+}
+
+export interface QuestionSemanticOverride {
+  id: string;
+  questionId: string;
+  baseAnalysisId: string;
+  createdAt: number;
+  updatedAt: number;
+  tags?: {
+    applied: QuestionSemanticTagAssignment[];
+  };
+  difficulty?: {
+    difficultyScore: number;
+    difficultyBand: QuestionSemanticAnalysis['difficultyBand'];
+    difficultyFactors?: Partial<QuestionSemanticDifficultyFactors>;
+  };
+  notes?: string;
+}
+
 // User types
 export interface User {
   id: string;
@@ -257,6 +362,18 @@ export interface AppSettings {
       includeExistingUnassigned: boolean;
     };
   };
+
+
+  semanticTuning?: {
+    enabled: boolean;
+    updatedAt: number;
+    // Deterministic parameters derived from local corpus (no online learning)
+    tagThreshold: number;
+    siblingLambda: number;
+    upBeta: number;
+    downGamma: number;
+    targetAvgTags: number;
+  };
 }
 
 export interface IntelligenceSignal {
@@ -296,6 +413,13 @@ export interface ErrorReport {
   attemptId?: string;
   phase?: 'exam' | 'review' | 'practice' | 'unknown';
 
+	// Capture context (purely offline diagnostics)
+	currentQuestionIndex?: number;
+	scrollY?: number;
+	viewportWidth?: number;
+	viewportHeight?: number;
+	appState?: Record<string, any>;
+
   // Reporter metadata
   reporterUserId?: string;
   reporterUsername?: string;
@@ -308,6 +432,10 @@ export class ExamDatabase extends Dexie {
   attempts!: Table<Attempt, string>;
   integrityEvents!: Table<IntegrityEvent, string>;
   tags!: Table<Tag, string>;
+  semanticOntologyTags!: Table<SemanticOntologyTag, string>;
+  semanticEmbeddings!: Table<SemanticEmbeddingRecord, string>;
+  questionSemanticAnalyses!: Table<QuestionSemanticAnalysis, string>;
+  questionSemanticOverrides!: Table<QuestionSemanticOverride, string>;
   settings!: Table<AppSettings, string>;
   dailyStats!: Table<DailyStats, string>;
   users!: Table<User, string>;
@@ -717,6 +845,46 @@ export class ExamDatabase extends Dexie {
       reviewInteractions: 'id, attemptId, moduleId, userId, questionId, timestamp, [attemptId+questionId], [moduleId+userId]',
       errorReports: 'id, status, createdAt, updatedAt, moduleId, questionId, questionCode, reporterUserId, [status+createdAt]'
     });
+
+    this.version(15).stores({
+      questions: 'id, type, *tags, *modules, metadata.createdAt',
+      modules: 'id, type, *tags, createdAt, visible, locked',
+      attempts: 'id, moduleId, type, startedAt, syncStatus',
+      integrityEvents: 'id, attemptId, type, timestamp',
+      tags: 'id, name',
+      semanticOntologyTags: 'id, kind, parentId, name, updatedAt',
+      semanticEmbeddings: 'id, [scope+scopeId], scope, scopeId, modelId, createdAt',
+      questionSemanticAnalyses: 'id, questionId, createdAt, [questionId+analysisVersion], [questionId+modelId], source',
+      questionSemanticOverrides: 'id, questionId, updatedAt, baseAnalysisId, [questionId+updatedAt]',
+      settings: 'id',
+      dailyStats: 'id, date, moduleId, [date+moduleId], [moduleId+date], moduleType, createdAt',
+      users: 'id, username',
+      globalGlossary: 'id, normalizedWord, word',
+      intelligenceSignals: 'id, type, questionId, moduleId, [type+moduleId], [questionId+type]',
+      reviewInteractions: 'id, attemptId, moduleId, userId, questionId, timestamp, [attemptId+questionId], [moduleId+userId]',
+      errorReports: 'id, status, createdAt, updatedAt, moduleId, questionId, questionCode, reporterUserId, [status+createdAt]'
+    });
+
+    this.version(16).stores({
+      questions: 'id, type, *tags, *modules, metadata.createdAt',
+      modules: 'id, type, *tags, createdAt, visible, locked',
+      attempts: 'id, moduleId, type, startedAt, syncStatus',
+      integrityEvents: 'id, attemptId, type, timestamp',
+      tags: 'id, name',
+      semanticOntologyTags: 'id, kind, parentId, name, updatedAt',
+      semanticEmbeddings: 'id, [scope+scopeId], scope, scopeId, modelId, createdAt',
+      questionSemanticAnalyses: 'id, questionId, createdAt, [questionId+analysisVersion], [questionId+modelId], source',
+      questionSemanticOverrides: 'id, questionId, updatedAt, baseAnalysisId, [questionId+updatedAt]',
+      settings: 'id',
+      dailyStats: 'id, date, moduleId, [date+moduleId], [moduleId+date], moduleType, createdAt',
+      users: 'id, username',
+      globalGlossary: 'id, normalizedWord, word',
+      intelligenceSignals: 'id, type, questionId, moduleId, [type+moduleId], [questionId+type]',
+      reviewInteractions: 'id, attemptId, moduleId, userId, questionId, timestamp, [attemptId+questionId], [moduleId+userId]',
+      errorReports: 'id, status, createdAt, updatedAt, moduleId, questionId, questionCode, reporterUserId, [status+createdAt]'
+    }).upgrade(async () => {
+      // No-op: index addition only
+    });
   }
 }
 
@@ -812,8 +980,29 @@ export async function initializeSettings() {
           includeExistingUnassigned: false,
         },
       },
+      semanticTuning: {
+        enabled: true,
+        updatedAt: Date.now(),
+        tagThreshold: 0.3,
+        siblingLambda: 0.35,
+        upBeta: 0.55,
+        downGamma: 0.18,
+        targetAvgTags: 6,
+      },
     };
     
     await db.settings.add(defaultSettings);
+  } else if (!existingSettings.semanticTuning) {
+    await db.settings.update('1', {
+      semanticTuning: {
+        enabled: true,
+        updatedAt: Date.now(),
+        tagThreshold: 0.3,
+        siblingLambda: 0.35,
+        upBeta: 0.55,
+        downGamma: 0.18,
+        targetAvgTags: 6,
+      },
+    });
   }
 }

@@ -15,12 +15,15 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { toast } from 'sonner';
 import RichTextEditor from '@/components/RichTextEditor';
+import TypingAnswerMathInput from '@/components/TypingAnswerMathInput';
 import { invalidateTagModelCache, suggestTagsAdvanced } from '@/lib/tagLearning';
 import { syncQuestionGlossary } from '@/lib/glossary';
+import { enqueueSemanticAnalysis } from '@/lib/semanticQueue';
 import {
   analyzeQuestionDraft,
   ANALYSIS_VERSION,
   autoAssignQuestionToModules,
+  suggestDifficultySpectrum,
   mapLevelToSelectOptions,
   mapLevelToClassicDifficulty,
   persistDifficultySignal,
@@ -83,6 +86,9 @@ export default function CreateQuestion() {
   const [aiSnapshot, setAiSnapshot] = useState<QuestionIntelligenceSnapshot | null>(null);
   const [isAnalyzingDifficulty, setIsAnalyzingDifficulty] = useState(false);
   const userAdjustedDifficultyRef = useRef(false);
+  const [difficultySpectrum, setDifficultySpectrum] = useState<
+    { minLevel: number; maxLevel: number; recommendedLevel: number; sampleCount: number; source: 'corpus' | 'heuristic' } | null
+  >(null);
   const settings = useLiveQuery(() => db.settings.get('1'));
   const aiOrchestrator = settings?.aiOrchestrator;
   const levelOptions = useMemo(() => mapLevelToSelectOptions(), []);
@@ -135,7 +141,9 @@ export default function CreateQuestion() {
     const timeoutId = setTimeout(async () => {
       setIsLoadingTags(true);
       try {
-        const suggestions = await suggestTagsAdvanced(questionText, questionType, allTags, 5);
+        const suggestions = await suggestTagsAdvanced(questionText, questionType, allTags, 5, {
+          selectedTags,
+        });
         
         // Automatically add tags that aren't already selected
         const newTags = suggestions.filter(tag => !selectedTags.includes(tag));
@@ -200,6 +208,46 @@ export default function CreateQuestion() {
     questionType,
     selectedTags,
   ]);
+
+  useEffect(() => {
+    let active = true;
+    const handle = setTimeout(() => {
+      const draftLevel = aiSnapshot?.perTypeLevels?.[questionType] ?? aiSnapshot?.level ?? difficultyLevel;
+      void (async () => {
+        try {
+          const suggestion = await suggestDifficultySpectrum({
+            type: questionType,
+            draftLevel,
+            selectedTags,
+          });
+          if (!active) return;
+          setDifficultySpectrum({
+            minLevel: suggestion.minLevel,
+            maxLevel: suggestion.maxLevel,
+            recommendedLevel: suggestion.recommendedLevel,
+            sampleCount: suggestion.sampleCount,
+            source: suggestion.source,
+          });
+
+          if (!userAdjustedDifficultyRef.current) {
+            setTypeDifficulty((prev) => ({
+              ...prev,
+              [questionType]: suggestion.recommendedLevel,
+            }));
+            setDifficultyLevel(suggestion.recommendedLevel);
+          }
+        } catch {
+          if (!active) return;
+          setDifficultySpectrum(null);
+        }
+      })();
+    }, 450);
+
+    return () => {
+      active = false;
+      clearTimeout(handle);
+    };
+  }, [aiSnapshot, difficultyLevel, questionType, selectedTags]);
 
   // When editing, wait for existingQuestion to load and then hydrate form once
   useEffect(() => {
@@ -487,6 +535,7 @@ export default function CreateQuestion() {
       }
       await syncQuestionGlossary(questionId, questionData.glossary || []);
       invalidateTagModelCache();
+      enqueueSemanticAnalysis(questionId);
       navigate('/questions', { state: { scrollToQuestionId: questionId } });
     } catch (error) {
       toast.error('Failed to save question');
@@ -517,50 +566,50 @@ export default function CreateQuestion() {
 
       {/* Form */}
       <div className="pr-2">
-      <form onSubmit={handleSubmit} className="space-y-6">
-        {/* Question Type */}
-        <Card className="p-6">
-          <Label className="text-base font-semibold">Question Type</Label>
-          <RadioGroup
-            value={questionType}
-            onValueChange={(value: 'mcq' | 'text' | 'fill_blanks' | 'matching') => {
-              setQuestionType(value);
-              setCorrectAnswers([]);
-            }}
-            className="mt-4"
-          >
-            <div className="flex items-center space-x-2">
-              <RadioGroupItem value="mcq" id="mcq" />
-              <Label htmlFor="mcq" className="cursor-pointer">Multiple Choice</Label>
-            </div>
-            <div className="flex items-center space-x-2">
-              <RadioGroupItem value="text" id="text" />
-              <Label htmlFor="text" className="cursor-pointer">Free Text Answer</Label>
-            </div>
-            <div className="flex items-center space-x-2">
-              <RadioGroupItem value="fill_blanks" id="fill_blanks" />
-              <Label htmlFor="fill_blanks" className="cursor-pointer">Fill in the Blanks</Label>
-            </div>
-            <div className="flex items-center space-x-2">
-              <RadioGroupItem value="matching" id="matching" />
-              <Label htmlFor="matching" className="cursor-pointer">Matching</Label>
-            </div>
-          </RadioGroup>
-        </Card>
+        <form onSubmit={handleSubmit} className="space-y-6">
+          {/* Question Type */}
+          <Card className="p-6">
+            <Label className="text-base font-semibold">Question Type</Label>
+            <RadioGroup
+              value={questionType}
+              onValueChange={(value: 'mcq' | 'text' | 'fill_blanks' | 'matching') => {
+                setQuestionType(value);
+                setCorrectAnswers([]);
+              }}
+              className="mt-4"
+            >
+              <div className="flex items-center space-x-2">
+                <RadioGroupItem value="mcq" id="mcq" />
+                <Label htmlFor="mcq" className="cursor-pointer">Multiple Choice</Label>
+              </div>
+              <div className="flex items-center space-x-2">
+                <RadioGroupItem value="text" id="text" />
+                <Label htmlFor="text" className="cursor-pointer">Free Text Answer</Label>
+              </div>
+              <div className="flex items-center space-x-2">
+                <RadioGroupItem value="fill_blanks" id="fill_blanks" />
+                <Label htmlFor="fill_blanks" className="cursor-pointer">Fill in the Blanks</Label>
+              </div>
+              <div className="flex items-center space-x-2">
+                <RadioGroupItem value="matching" id="matching" />
+                <Label htmlFor="matching" className="cursor-pointer">Matching</Label>
+              </div>
+            </RadioGroup>
+          </Card>
 
-        {/* Question Text */}
-        <Card className="p-6">
-          <Label htmlFor="question" className="text-base font-semibold">Question Text *</Label>
-          <div className="mt-4 w-full">
-            <RichTextEditor
-              value={questionText}
-              onChange={setQuestionText}
-              placeholder="Enter your question here..."
-              enableBlanksButton={questionType === 'fill_blanks'}
-              className="tk-question-editor"
-            />
-          </div>
-        </Card>
+          {/* Question Text */}
+          <Card className="p-6">
+            <Label htmlFor="question" className="text-base font-semibold">Question Text *</Label>
+            <div className="mt-4 w-full">
+              <RichTextEditor
+                value={questionText}
+                onChange={setQuestionText}
+                placeholder="Enter your question here..."
+                enableBlanksButton={questionType === 'fill_blanks'}
+                className="tk-question-editor"
+              />
+            </div>
+          </Card>
 
         {/* Matching settings */}
         {questionType === 'matching' && (
@@ -700,17 +749,18 @@ export default function CreateQuestion() {
             <div className="space-y-3">
               {correctAnswers.map((answer, index) => (
                 <div key={index} className="flex items-center gap-3">
-                  <Input
-                    value={answer}
-                    onChange={(e) => {
-                      const newAnswers = [...correctAnswers];
-                      newAnswers[index] = e.target.value;
-                      setCorrectAnswers(newAnswers);
-                    }}
-                    placeholder={`Acceptable answer ${index + 1}`}
-                    required
-                    className="max-w-xl"
-                  />
+                  <div className="w-full max-w-xl">
+                    <TypingAnswerMathInput
+                      value={answer}
+                      onChange={(v) => {
+                        const newAnswers = [...correctAnswers];
+                        newAnswers[index] = v;
+                        setCorrectAnswers(newAnswers);
+                      }}
+                      placeholder={`Acceptable answer ${index + 1}`}
+                      className="rounded-md"
+                    />
+                  </div>
                   {correctAnswers.length > 1 && (
                     <Button
                       type="button"
@@ -881,8 +931,8 @@ export default function CreateQuestion() {
               <span className="text-xs text-muted-foreground">Level 1</span>
               <input
                 type="range"
-                min={1}
-                max={12}
+                min={difficultySpectrum?.minLevel ?? 1}
+                max={difficultySpectrum?.maxLevel ?? 12}
                 value={difficultyLevel}
                 onChange={(e) => handleDifficultyLevelChange(Number(e.target.value))}
                 className="flex-1 accent-primary"
@@ -899,8 +949,8 @@ export default function CreateQuestion() {
               <div className="flex items-center gap-2">
                 <Input
                   type="number"
-                  min={1}
-                  max={12}
+                  min={difficultySpectrum?.minLevel ?? 1}
+                  max={difficultySpectrum?.maxLevel ?? 12}
                   value={typeDifficulty[questionType]}
                   onChange={(e) =>
                     handleTypeDifficultyChange(questionType, Number(e.target.value || '0'))
@@ -908,6 +958,11 @@ export default function CreateQuestion() {
                   className="w-24"
                 />
                 <span className="text-xs text-muted-foreground">Level</span>
+                {difficultySpectrum && (
+                  <span className="text-[11px] text-muted-foreground">
+                    Suggested: {difficultySpectrum.recommendedLevel} ({difficultySpectrum.source})
+                  </span>
+                )}
               </div>
             </div>
             {aiOrchestrator?.autoDifficulty && (
@@ -1108,7 +1163,7 @@ export default function CreateQuestion() {
             {isEditing ? 'Update Question' : 'Create Question'}
           </Button>
         </div>
-      </form>
+        </form>
       </div>
     </div>
   );

@@ -178,6 +178,181 @@ export interface QuestionIntelligenceSnapshot {
   mathDensity: number;
 }
 
+export type DifficultySpectrumSuggestion = {
+  recommendedLevel: number;
+  minLevel: number;
+  maxLevel: number;
+  sampleCount: number;
+  source: 'corpus' | 'heuristic';
+};
+
+const DIFFICULTY_SPECTRUM_VERSION = 1;
+const DIFFICULTY_SPECTRUM_CACHE_KEY = 'tk-ai-difficulty-spectrum-v1';
+
+type DifficultySpectrumCache = {
+  version: number;
+  signature: string;
+  payload: Record<Question['type'], { count: number; avgLevel: number; stdLevel: number }>;
+};
+
+function classicDifficultyToLevel(value?: 'easy' | 'medium' | 'hard'): number {
+  if (value === 'easy') return 3;
+  if (value === 'hard') return 10;
+  return 6;
+}
+
+function safeDifficultyLevel(q: Question): number {
+  const stored = q.metadata?.difficultyLevel;
+  if (typeof stored === 'number' && Number.isFinite(stored) && stored > 0) {
+    return clampLevel(stored);
+  }
+  return clampLevel(classicDifficultyToLevel(q.metadata?.difficulty));
+}
+
+function buildDifficultySpectrumSignature(questions: Question[]): string {
+  const latest = questions.reduce((max, q) => Math.max(max, q.metadata?.updatedAt ?? 0), 0);
+  return `${DIFFICULTY_SPECTRUM_VERSION}:${questions.length}:${latest}`;
+}
+
+function loadDifficultySpectrumCache(signature: string): DifficultySpectrumCache | null {
+  if (typeof localStorage === 'undefined') return null;
+  try {
+    const raw = localStorage.getItem(DIFFICULTY_SPECTRUM_CACHE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as DifficultySpectrumCache;
+    if (parsed.version !== DIFFICULTY_SPECTRUM_VERSION) return null;
+    if (parsed.signature !== signature) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function storeDifficultySpectrumCache(cache: DifficultySpectrumCache) {
+  if (typeof localStorage === 'undefined') return;
+  try {
+    localStorage.setItem(DIFFICULTY_SPECTRUM_CACHE_KEY, JSON.stringify(cache));
+  } catch {
+    // ignore
+  }
+}
+
+function computeMeanAndStd(values: number[], weights?: number[]): { mean: number; std: number } {
+  if (!values.length) return { mean: 6, std: 2 };
+  if (!weights || weights.length !== values.length) {
+    const mean = values.reduce((s, v) => s + v, 0) / values.length;
+    const variance = values.reduce((s, v) => s + (v - mean) ** 2, 0) / values.length;
+    return { mean, std: Math.sqrt(variance) };
+  }
+  const wSum = weights.reduce((s, w) => s + w, 0) || 1;
+  const mean = values.reduce((s, v, i) => s + v * weights[i], 0) / wSum;
+  const variance = values.reduce((s, v, i) => s + weights[i] * (v - mean) ** 2, 0) / wSum;
+  return { mean, std: Math.sqrt(variance) };
+}
+
+function jaccard(a: Set<string>, b: Set<string>): number {
+  if (!a.size && !b.size) return 0;
+  let inter = 0;
+  for (const x of a) if (b.has(x)) inter++;
+  const union = a.size + b.size - inter;
+  return union > 0 ? inter / union : 0;
+}
+
+async function getDifficultySpectrumCorpusStats(): Promise<Record<Question['type'], { count: number; avgLevel: number; stdLevel: number }>> {
+  const questions = await db.questions.toArray();
+  const signature = buildDifficultySpectrumSignature(questions);
+  const cached = loadDifficultySpectrumCache(signature);
+  if (cached) return cached.payload;
+
+  const payload: DifficultySpectrumCache['payload'] = {
+    mcq: { count: 0, avgLevel: 6, stdLevel: 2 },
+    text: { count: 0, avgLevel: 6, stdLevel: 2 },
+    fill_blanks: { count: 0, avgLevel: 6, stdLevel: 2 },
+    matching: { count: 0, avgLevel: 6, stdLevel: 2 },
+  };
+
+  for (const type of Object.keys(payload) as Question['type'][]) {
+    const levels = questions.filter((q) => q.type === type).map(safeDifficultyLevel);
+    const { mean, std } = computeMeanAndStd(levels);
+    payload[type] = {
+      count: levels.length,
+      avgLevel: mean,
+      stdLevel: std,
+    };
+  }
+
+  storeDifficultySpectrumCache({
+    version: DIFFICULTY_SPECTRUM_VERSION,
+    signature,
+    payload,
+  });
+
+  return payload;
+}
+
+/**
+ * Suggest a dynamic slider band (min/max) and a recommended level.
+ *
+ * Algorithm:
+ * - Start from the draft heuristic level.
+ * - Blend with a weighted mean of existing questions of the same type.
+ *   Weight comes primarily from tag overlap (Jaccard), with a small floor.
+ * - Band width is driven by corpus stddev (and widened when little data).
+ */
+export async function suggestDifficultySpectrum(input: {
+  type: Question['type'];
+  draftLevel: number;
+  selectedTags?: string[];
+}): Promise<DifficultySpectrumSuggestion> {
+  const corpus = await db.questions.toArray();
+  const typeCorpus = corpus.filter((q) => q.type === input.type);
+  const normalizedSelected = new Set(
+    (input.selectedTags || []).map((t) => (t || '').trim().toLowerCase()).filter(Boolean)
+  );
+
+  if (typeCorpus.length === 0) {
+    const recommended = clampLevel(input.draftLevel);
+    const minLevel = clampLevel(recommended - 3);
+    const maxLevel = clampLevel(recommended + 3);
+    return {
+      recommendedLevel: recommended,
+      minLevel,
+      maxLevel,
+      sampleCount: 0,
+      source: 'heuristic',
+    };
+  }
+
+  const levels: number[] = [];
+  const weights: number[] = [];
+  for (const q of typeCorpus) {
+    const qTags = new Set((q.tags || []).map((t) => (t || '').trim().toLowerCase()).filter(Boolean));
+    const overlap = normalizedSelected.size ? jaccard(normalizedSelected, qTags) : 0;
+    const weight = 0.2 + overlap * 0.8;
+    levels.push(safeDifficultyLevel(q));
+    weights.push(weight);
+  }
+
+  const { mean, std } = computeMeanAndStd(levels, weights);
+  const stats = await getDifficultySpectrumCorpusStats();
+  const baseStd = stats[input.type]?.stdLevel ?? std;
+  const usedStd = Math.max(1.5, Math.min(4, Number.isFinite(baseStd) ? baseStd : 2));
+
+  const blended = 0.6 * clampLevel(input.draftLevel) + 0.4 * mean;
+  const recommended = clampLevel(blended);
+
+  const scarcityWiden = typeCorpus.length < 10 ? 1.5 : typeCorpus.length < 30 ? 1 : 0;
+  const halfWidth = Math.round(Math.max(2, usedStd + scarcityWiden));
+
+  return {
+    recommendedLevel: recommended,
+    minLevel: clampLevel(recommended - halfWidth),
+    maxLevel: clampLevel(recommended + halfWidth),
+    sampleCount: typeCorpus.length,
+    source: 'corpus',
+  };
+}
+
 /**
  * Estimate difficulty (1–12) for a question draft or saved question.
  */

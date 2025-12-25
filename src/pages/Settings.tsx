@@ -39,6 +39,8 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip';
+import { rerunSemanticAnalysisForAll } from '@/lib/semanticQueue';
+import { tuneSemanticFromExistingData } from '@/lib/semanticEngine';
 
 export default function Settings() {
   const settings = useLiveQuery(() => db.settings.get('1'));
@@ -64,6 +66,26 @@ export default function Settings() {
     existingQuestionsSnapshot: any[];
   } | null>(null);
   const [importDialogOpen, setImportDialogOpen] = useState(false);
+
+  const [rerunSemantic, setRerunSemantic] = useState(false);
+  const [purgeSemanticAi, setPurgeSemanticAi] = useState(false);
+  const [tuneSemantic, setTuneSemantic] = useState(false);
+  const [rerunAfterTuning, setRerunAfterTuning] = useState(true);
+  const [lastTuneSummary, setLastTuneSummary] = useState<{
+    sampleCount: number;
+    tuned: {
+      tagThreshold: number;
+      siblingLambda: number;
+      upBeta: number;
+      downGamma: number;
+      targetAvgTags: number;
+    };
+    derived: {
+      avgTagsAtThreshold: number;
+      avgUpRatio: number;
+      avgDownRatio: number;
+    };
+  } | null>(null);
   
   // User management state
   const [showUserDialog, setShowUserDialog] = useState(false);
@@ -74,11 +96,45 @@ export default function Settings() {
   const [editPassword, setEditPassword] = useState('');
   const [deleteUserId, setDeleteUserId] = useState<string | null>(null);
 
+  const [questionPrompts, setQuestionPrompts] = useState<{ id: string; title: string; content: string }[]>([]);
+  const [promptDialogOpen, setPromptDialogOpen] = useState(false);
+  const [editingPrompt, setEditingPrompt] = useState<{ id: string; title: string; content: string } | null>(null);
+  const [promptTitle, setPromptTitle] = useState('');
+  const [promptContent, setPromptContent] = useState('');
+
   useEffect(() => {
     if (settings) {
       setLocalSettings(settings);
     }
   }, [settings]);
+
+  useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem('questionPrompts');
+      if (!raw) {
+        setQuestionPrompts([]);
+        return;
+      }
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        setQuestionPrompts(
+          parsed
+            .filter((p) => p && typeof p.id === 'string')
+            .map((p) => ({ id: String(p.id), title: String(p.title ?? ''), content: String(p.content ?? '') }))
+        );
+      }
+    } catch {
+      setQuestionPrompts([]);
+    }
+  }, []);
+
+  const persistPrompts = (next: { id: string; title: string; content: string }[]) => {
+    setQuestionPrompts(next);
+    try {
+      window.localStorage.setItem('questionPrompts', JSON.stringify(next));
+    } catch {
+    }
+  };
 
   useEffect(() => {
     if (settings === undefined) return;
@@ -600,6 +656,225 @@ export default function Settings() {
           </div>
         </Card>
 
+      <Card className="p-6 space-y-4">
+        <div>
+          <h2 className="text-xl font-semibold text-foreground">Offline AI</h2>
+          <p className="text-sm text-muted-foreground mt-1">
+            Re-run local semantic tags and difficulty analysis for your question bank.
+          </p>
+        </div>
+
+        <div className="space-y-2">
+          <label className="flex items-center gap-2 text-sm">
+            <Checkbox checked={purgeSemanticAi} onCheckedChange={(v) => setPurgeSemanticAi(v === true)} />
+            <span>Purge previous AI analysis/embeddings before re-running</span>
+          </label>
+          <p className="text-xs text-muted-foreground">
+            User overrides are preserved. Purging forces a full recompute (slower) but guarantees the latest ontology/scoring is applied.
+          </p>
+        </div>
+
+        <Button
+          variant="outline"
+          disabled={rerunSemantic}
+          onClick={async () => {
+            setRerunSemantic(true);
+            try {
+              await rerunSemanticAnalysisForAll({ purgeExistingAi: purgeSemanticAi });
+              toast.success('Queued semantic analysis for all questions. It will run in the background.');
+            } catch (e) {
+              console.error(e);
+              toast.error('Failed to queue semantic analysis re-run.');
+            } finally {
+              setRerunSemantic(false);
+            }
+          }}
+        >
+          {rerunSemantic ? 'Queueing…' : 'Re-run semantic analysis for all questions'}
+        </Button>
+
+        <Separator />
+
+        <div className="space-y-2">
+          <div className="text-sm font-semibold">Tune from existing data</div>
+          <p className="text-xs text-muted-foreground">
+            Runs a deterministic, offline tuning pass using your existing semantic analyses to choose stable thresholds/weights.
+          </p>
+          <label className="flex items-center gap-2 text-sm">
+            <Checkbox checked={rerunAfterTuning} onCheckedChange={(v) => setRerunAfterTuning(v === true)} />
+            <span>Automatically re-run analysis after tuning</span>
+          </label>
+        </div>
+
+        <Button
+          variant="outline"
+          disabled={tuneSemantic}
+          onClick={async () => {
+            setTuneSemantic(true);
+            try {
+              const result = await tuneSemanticFromExistingData();
+              setLastTuneSummary({
+                sampleCount: result.sampleCount,
+                tuned: {
+                  tagThreshold: result.tuned.tagThreshold,
+                  siblingLambda: result.tuned.siblingLambda,
+                  upBeta: result.tuned.upBeta,
+                  downGamma: result.tuned.downGamma,
+                  targetAvgTags: result.tuned.targetAvgTags,
+                },
+                derived: {
+                  avgTagsAtThreshold: result.derived.avgTagsAtThreshold,
+                  avgUpRatio: result.derived.avgUpRatio,
+                  avgDownRatio: result.derived.avgDownRatio,
+                },
+              });
+              toast.success(`Tuning complete (samples: ${result.sampleCount}).`);
+              if (rerunAfterTuning) {
+                await rerunSemanticAnalysisForAll({ purgeExistingAi: purgeSemanticAi });
+                toast.success('Queued re-analysis using tuned parameters.');
+              }
+            } catch (e) {
+              console.error(e);
+              toast.error('Failed to tune from existing data.');
+            } finally {
+              setTuneSemantic(false);
+            }
+          }}
+        >
+          {tuneSemantic ? 'Tuning…' : 'Tune algorithm from existing data'}
+        </Button>
+
+        {lastTuneSummary ? (
+          <div className="rounded-md border p-3 text-xs space-y-2">
+            <div className="text-muted-foreground">
+              Samples used: <span className="font-semibold text-foreground">{lastTuneSummary.sampleCount}</span>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <div className="text-muted-foreground">tagThreshold</div>
+              <div className="font-mono text-foreground">{lastTuneSummary.tuned.tagThreshold.toFixed(6)}</div>
+              <div className="text-muted-foreground">siblingLambda</div>
+              <div className="font-mono text-foreground">{lastTuneSummary.tuned.siblingLambda.toFixed(6)}</div>
+              <div className="text-muted-foreground">upBeta</div>
+              <div className="font-mono text-foreground">{lastTuneSummary.tuned.upBeta.toFixed(6)}</div>
+              <div className="text-muted-foreground">downGamma</div>
+              <div className="font-mono text-foreground">{lastTuneSummary.tuned.downGamma.toFixed(6)}</div>
+              <div className="text-muted-foreground">avgTags@threshold</div>
+              <div className="font-mono text-foreground">{lastTuneSummary.derived.avgTagsAtThreshold.toFixed(6)}</div>
+            </div>
+          </div>
+        ) : null}
+      </Card>
+
+        <Card className="p-6 space-y-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="text-xl font-semibold text-foreground">Question Prompts</h2>
+              <p className="text-sm text-muted-foreground mt-1">Create reusable prompts you can insert while writing questions.</p>
+            </div>
+            <Button
+              onClick={() => {
+                setEditingPrompt(null);
+                setPromptTitle('');
+                setPromptContent('');
+                setPromptDialogOpen(true);
+              }}
+            >
+              Add Prompt
+            </Button>
+          </div>
+
+          <div className="space-y-2">
+            {questionPrompts.length === 0 ? (
+              <div className="text-sm text-muted-foreground">No prompts yet.</div>
+            ) : (
+              <div className="space-y-2">
+                {questionPrompts.map((p) => (
+                  <div key={p.id} className="flex items-start justify-between gap-3 rounded-md border bg-background p-3">
+                    <div className="min-w-0">
+                      <div className="font-medium text-foreground truncate">{p.title || 'Untitled prompt'}</div>
+                      <div className="mt-1 text-xs text-muted-foreground line-clamp-2 whitespace-pre-wrap">{p.content}</div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          setEditingPrompt(p);
+                          setPromptTitle(p.title);
+                          setPromptContent(p.content);
+                          setPromptDialogOpen(true);
+                        }}
+                      >
+                        Edit
+                      </Button>
+                      <Button
+                        variant="destructive"
+                        size="sm"
+                        onClick={() => {
+                          const next = questionPrompts.filter((x) => x.id !== p.id);
+                          persistPrompts(next);
+                        }}
+                      >
+                        Delete
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <Dialog open={promptDialogOpen} onOpenChange={setPromptDialogOpen}>
+            <DialogContent className="max-w-lg">
+              <DialogHeader>
+                <DialogTitle>{editingPrompt ? 'Edit Prompt' : 'Add Prompt'}</DialogTitle>
+                <DialogDescription>These prompts are stored locally on this device.</DialogDescription>
+              </DialogHeader>
+              <div className="space-y-3">
+                <div className="space-y-1">
+                  <Label>Title</Label>
+                  <Input value={promptTitle} onChange={(e) => setPromptTitle(e.target.value)} placeholder="e.g. Solve using integration" />
+                </div>
+                <div className="space-y-1">
+                  <Label>Prompt</Label>
+                  <textarea
+                    className="w-full min-h-[160px] rounded-md border bg-background p-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                    value={promptContent}
+                    onChange={(e) => setPromptContent(e.target.value)}
+                    placeholder="Write the reusable prompt text here..."
+                  />
+                </div>
+              </div>
+              <DialogFooter>
+                <Button type="button" variant="outline" onClick={() => setPromptDialogOpen(false)}>
+                  Cancel
+                </Button>
+                <Button
+                  type="button"
+                  onClick={() => {
+                    const title = promptTitle.trim();
+                    const content = promptContent;
+                    if (!content.trim()) {
+                      toast.error('Prompt cannot be empty');
+                      return;
+                    }
+                    if (editingPrompt) {
+                      const next = questionPrompts.map((p) => (p.id === editingPrompt.id ? { ...p, title, content } : p));
+                      persistPrompts(next);
+                    } else {
+                      const next = [{ id: uuidv4(), title, content }, ...questionPrompts];
+                      persistPrompts(next);
+                    }
+                    setPromptDialogOpen(false);
+                  }}
+                >
+                  Save
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+        </Card>
+
         {/* Error Reports */}
         <Card className="p-6 space-y-4">
           <div className="flex items-center justify-between gap-3">
@@ -684,6 +959,18 @@ export default function Settings() {
               {activeErrorReport && (
 				<ScrollArea className="max-h-[70vh] pr-3">
 					<div className="space-y-4">
+						{activeErrorReport.screenshotDataUrl && (
+							<div className="rounded-md border p-3">
+								<div className="text-xs text-muted-foreground">Screenshot</div>
+								<div className="mt-2 max-h-[60vh] overflow-auto rounded-md border">
+									<img
+										src={activeErrorReport.screenshotDataUrl}
+										alt="Error report screenshot"
+										className="w-full h-auto"
+									/>
+								</div>
+							</div>
+						)}
 						<div className="rounded-md border p-3">
 							<div className="text-xs text-muted-foreground">Message</div>
 							<div className="mt-1 text-sm text-foreground whitespace-pre-wrap">
