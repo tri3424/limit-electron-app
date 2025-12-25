@@ -34,7 +34,19 @@ import { toast } from 'sonner';
 
 const FOCUS_WARNING_TIMEOUT = 8000;
 
-async function captureAppVisualStateScreenshotDataUrl(): Promise<string> {
+function findScrollableAncestor(el: HTMLElement | null): HTMLElement | null {
+	let cur: HTMLElement | null = el;
+	while (cur) {
+		const style = window.getComputedStyle(cur);
+		const overflowY = style.overflowY;
+		const isScrollable = (overflowY === 'auto' || overflowY === 'scroll') && cur.scrollHeight > cur.clientHeight + 2;
+		if (isScrollable) return cur;
+		cur = cur.parentElement;
+	}
+	return null;
+}
+
+async function captureAppVisualStateScreenshotDataUrl(scrollContainer?: HTMLElement | null): Promise<string> {
 	// Electron: capture the app window viewport as actually rendered (fonts/SVG preserved).
 	if (typeof window !== 'undefined' && window.examProctor?.captureViewportScreenshot) {
 		const res = await window.examProctor.captureViewportScreenshot();
@@ -53,6 +65,8 @@ async function captureAppVisualStateScreenshotDataUrl(): Promise<string> {
 	const scrollX = window.scrollX || 0;
 	const scrollY = window.scrollY || 0;
 	const clone = root.cloneNode(true) as HTMLElement;
+	const originalScrollContainer = scrollContainer ?? null;
+	let cloneScrollContainer: HTMLElement | null = null;
 
 	const originalWalker = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT);
 	const cloneWalker = document.createTreeWalker(clone, NodeFilter.SHOW_ELEMENT);
@@ -67,9 +81,32 @@ async function captureAppVisualStateScreenshotDataUrl(): Promise<string> {
 			cssText += `${prop}:${style.getPropertyValue(prop)};`;
 		}
 		(cloneNode as HTMLElement).setAttribute('style', cssText);
+		if (originalNode instanceof HTMLElement && cloneNode instanceof HTMLElement) {
+			cloneNode.scrollTop = originalNode.scrollTop;
+			cloneNode.scrollLeft = originalNode.scrollLeft;
+			if (originalScrollContainer && originalNode === originalScrollContainer) {
+				cloneScrollContainer = cloneNode;
+			}
+		}
 
 		originalNode = originalWalker.nextNode() as Element | null;
 		cloneNode = cloneWalker.nextNode() as Element | null;
+	}
+
+	// foreignObject rendering does not reliably respect scrollTop/scrollLeft; if the app scrolls
+	// inside a container, translate the cloned container's contents to represent the current scroll.
+	if (originalScrollContainer && cloneScrollContainer) {
+		const y = originalScrollContainer.scrollTop;
+		const x = originalScrollContainer.scrollLeft;
+		const wrapper = document.createElement('div');
+		wrapper.setAttribute(
+			'style',
+			`width:100%;height:100%;transform:translate(${-x}px,${-y}px);will-change:transform;`
+		);
+		while (cloneScrollContainer.firstChild) {
+			wrapper.appendChild(cloneScrollContainer.firstChild);
+		}
+		cloneScrollContainer.appendChild(wrapper);
 	}
 
 	await (document as any).fonts?.ready;
@@ -103,109 +140,111 @@ async function captureAppVisualStateScreenshotDataUrl(): Promise<string> {
 	return canvas.toDataURL('image/png');
 }
 
-async function captureFullContentScreenshotDataUrl(): Promise<string> {
-	const root = document.documentElement;
-	const totalHeight = Math.max(root.scrollHeight, document.body?.scrollHeight ?? 0);
+async function captureFullContentScreenshotDataUrl(scrollContainer?: HTMLElement | null): Promise<string> {
+	const container = scrollContainer ?? null;
 	const viewportWidth = Math.max(1, window.innerWidth);
 	const viewportHeight = Math.max(1, window.innerHeight);
-	const steps = Math.max(1, Math.ceil(totalHeight / viewportHeight));
+	const containerRect = container ? container.getBoundingClientRect() : null;
+	const topStripHeight = containerRect ? Math.max(0, Math.min(viewportHeight, Math.floor(containerRect.top))) : 0;
+	const containerViewportHeight = containerRect ? Math.max(1, Math.floor(containerRect.height)) : viewportHeight;
+	const totalHeight = container
+		? Math.max(container.scrollHeight, container.clientHeight)
+		: Math.max(document.documentElement.scrollHeight, document.body?.scrollHeight ?? 0);
+	const steps = Math.max(1, Math.ceil(totalHeight / containerViewportHeight));
 
-	// Electron: stitch multiple real viewport captures. This preserves fonts/SVG, but requires
-	// temporary scrolling (restored before opening the report modal).
-	if (typeof window !== 'undefined' && window.examProctor?.captureViewportScreenshot) {
-		const originalScrollX = window.scrollX;
-		const originalScrollY = window.scrollY;
-		const tiles: { y: number; dataUrl: string; width: number; height: number }[] = [];
-		let scale = 1;
-		try {
-			for (let i = 0; i < steps; i++) {
-				const y = Math.min(i * viewportHeight, Math.max(0, totalHeight - viewportHeight));
-				window.scrollTo(originalScrollX, y);
-				await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
-				const res = await window.examProctor.captureViewportScreenshot();
-				const dataUrl = res?.dataUrl;
-				if (!dataUrl || typeof dataUrl !== 'string' || !dataUrl.startsWith('data:image/')) {
-					throw new Error('Viewport screenshot failed');
-				}
-				const img = new Image();
-				img.decoding = 'async';
-				img.src = dataUrl;
-				await img.decode();
-				if (i === 0) {
-					scale = viewportWidth > 0 ? img.naturalWidth / viewportWidth : 1;
-					if (!Number.isFinite(scale) || scale <= 0) scale = 1;
-				}
-				tiles.push({ y, dataUrl, width: img.naturalWidth, height: img.naturalHeight });
+	const originalWindowX = window.scrollX;
+	const originalWindowY = window.scrollY;
+	const originalContainerScrollTop = container ? container.scrollTop : 0;
+
+	const tiles: {
+		y: number;
+		dataUrl: string;
+		width: number;
+		height: number;
+	}[] = [];
+	let topStripTile: { dataUrl: string; width: number; height: number } | null = null;
+	let scale = 1;
+	try {
+		for (let i = 0; i < steps; i++) {
+			const y = Math.min(i * containerViewportHeight, Math.max(0, totalHeight - containerViewportHeight));
+			if (container) {
+				container.scrollTop = y;
+			} else {
+				window.scrollTo(originalWindowX, y);
 			}
-		} finally {
-			window.scrollTo(originalScrollX, originalScrollY);
-		}
-
-		const canvas = document.createElement('canvas');
-		canvas.width = tiles[0]?.width ?? Math.round(viewportWidth * (window.devicePixelRatio || 1));
-		canvas.height = Math.max(1, Math.round(totalHeight * scale));
-		const ctx = canvas.getContext('2d');
-		if (!ctx) throw new Error('Canvas 2D context not available');
-		ctx.fillStyle = '#ffffff';
-		ctx.fillRect(0, 0, canvas.width, canvas.height);
-		for (const tile of tiles) {
+			await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+			const dataUrl = await captureAppVisualStateScreenshotDataUrl(container);
 			const img = new Image();
 			img.decoding = 'async';
-			img.src = tile.dataUrl;
+			img.src = dataUrl;
 			await img.decode();
-			ctx.drawImage(img, 0, Math.round(tile.y * scale), tile.width, tile.height);
+			if (i === 0) {
+				scale = viewportWidth > 0 ? img.naturalWidth / viewportWidth : 1;
+				if (!Number.isFinite(scale) || scale <= 0) scale = 1;
+				if (topStripHeight > 0) {
+					topStripTile = { dataUrl, width: img.naturalWidth, height: img.naturalHeight };
+				}
+			}
+			tiles.push({ y, dataUrl, width: img.naturalWidth, height: img.naturalHeight });
 		}
-		return canvas.toDataURL('image/png');
+	} finally {
+		if (container) {
+			container.scrollTop = originalContainerScrollTop;
+		} else {
+			window.scrollTo(originalWindowX, originalWindowY);
+		}
 	}
 
-	// Browser/localhost: tile the DOM-clone renderer without scrolling by adjusting the translate.
-	const docWidth = Math.max(root.scrollWidth, document.body?.scrollWidth ?? 0, root.clientWidth);
-	const docHeight = Math.max(root.scrollHeight, document.body?.scrollHeight ?? 0, root.clientHeight);
-	const dpr = Math.max(1, window.devicePixelRatio || 1);
+	if (!tiles.length) throw new Error('No screenshot tiles captured');
+
 	const canvas = document.createElement('canvas');
-	canvas.width = Math.round(viewportWidth * dpr);
-	canvas.height = Math.round(totalHeight * dpr);
+	if (containerRect) {
+		canvas.width = Math.max(1, Math.round(containerRect.width * scale));
+		canvas.height = Math.max(1, Math.round((totalHeight + topStripHeight) * scale));
+	} else {
+		canvas.width = tiles[0].width;
+		canvas.height = Math.max(1, Math.round(totalHeight * scale));
+	}
 	const ctx = canvas.getContext('2d');
 	if (!ctx) throw new Error('Canvas 2D context not available');
-	ctx.scale(dpr, dpr);
-	const bg = window.getComputedStyle(document.body).backgroundColor || window.getComputedStyle(root).backgroundColor || '#ffffff';
-	ctx.fillStyle = bg;
-	ctx.fillRect(0, 0, viewportWidth, totalHeight);
-
-	const clone = root.cloneNode(true) as HTMLElement;
-	const originalWalker = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT);
-	const cloneWalker = document.createTreeWalker(clone, NodeFilter.SHOW_ELEMENT);
-	let originalNode = originalWalker.nextNode() as Element | null;
-	let cloneNode = cloneWalker.nextNode() as Element | null;
-	while (originalNode && cloneNode) {
-		const style = window.getComputedStyle(originalNode);
-		let cssText = '';
-		for (let i = 0; i < style.length; i++) {
-			const prop = style[i];
-			cssText += `${prop}:${style.getPropertyValue(prop)};`;
-		}
-		(cloneNode as HTMLElement).setAttribute('style', cssText);
-		originalNode = originalWalker.nextNode() as Element | null;
-		cloneNode = cloneWalker.nextNode() as Element | null;
-	}
-	await (document as any).fonts?.ready;
-	const serialized = new XMLSerializer().serializeToString(clone);
-
-	for (let i = 0; i < steps; i++) {
-		const y = Math.min(i * viewportHeight, Math.max(0, totalHeight - viewportHeight));
-		const svg = `<?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" width="${viewportWidth}" height="${viewportHeight}">
-	<foreignObject x="0" y="0" width="100%" height="100%">
-		<div xmlns="http://www.w3.org/1999/xhtml" style="width:${docWidth}px;height:${docHeight}px;transform:translate(0px,${-y}px);">${serialized}</div>
-	</foreignObject>
-</svg>`;
+	ctx.fillStyle = '#ffffff';
+	ctx.fillRect(0, 0, canvas.width, canvas.height);
+	if (containerRect && topStripTile && topStripHeight > 0) {
 		const img = new Image();
 		img.decoding = 'async';
-		img.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+		img.src = topStripTile.dataUrl;
 		await img.decode();
-		ctx.drawImage(img, 0, y, viewportWidth, viewportHeight);
+		const sx = 0;
+		const sy = 0;
+		const sw = Math.max(1, Math.round(viewportWidth * scale));
+		const sh = Math.max(1, Math.round(topStripHeight * scale));
+		ctx.drawImage(img, sx, sy, sw, sh, 0, 0, canvas.width, sh);
 	}
-
+	for (const tile of tiles) {
+		const img = new Image();
+		img.decoding = 'async';
+		img.src = tile.dataUrl;
+		await img.decode();
+		if (containerRect) {
+			const sx = Math.max(0, Math.round(containerRect.left * scale));
+			const sy = Math.max(0, Math.round(containerRect.top * scale));
+			const sw = Math.max(1, Math.round(containerRect.width * scale));
+			const sh = Math.max(1, Math.round(containerRect.height * scale));
+			ctx.drawImage(
+				img,
+				sx,
+				sy,
+				sw,
+				sh,
+				0,
+				Math.round((tile.y + topStripHeight) * scale),
+				canvas.width,
+				sh
+			);
+		} else {
+			ctx.drawImage(img, 0, Math.round(tile.y * scale), tile.width, tile.height);
+		}
+	}
 	return canvas.toDataURL('image/png');
 }
 
@@ -985,7 +1024,8 @@ function ExamSession({
 			let screenshotDataUrl: string | undefined = reportScreenshotDataUrl;
 			if (!screenshotDataUrl) {
 				try {
-					screenshotDataUrl = await captureFullContentScreenshotDataUrl();
+					const scrollEl = findScrollableAncestor(examContentRef.current) ?? examContentRef.current;
+					screenshotDataUrl = await captureFullContentScreenshotDataUrl(scrollEl);
 				} catch (e) {
 					console.error('Failed to capture screenshot for report:', e);
 					setReportScreenshotError('Screenshot capture failed');
@@ -1043,7 +1083,8 @@ function ExamSession({
 		setReportScreenshotError(null);
 		setIsCapturingReportScreenshot(true);
 		try {
-			const url = await captureFullContentScreenshotDataUrl();
+			const scrollEl = findScrollableAncestor(examContentRef.current) ?? examContentRef.current;
+			const url = await captureFullContentScreenshotDataUrl(scrollEl);
 			setReportScreenshotDataUrl(url);
 		} catch (e) {
 			console.error('Failed to capture screenshot for report preview:', e);
@@ -1930,7 +1971,7 @@ function ExamSession({
 					}
 				}}
 			>
-				<DialogContent className="max-w-lg">
+				<DialogContent className="max-w-3xl">
 					<DialogHeader>
 						<DialogTitle>Report an issue</DialogTitle>
 						<DialogDescription>
@@ -3070,9 +3111,11 @@ function PracticeRunner({ moduleData, baseQuestions, onExit, glossaryEntries, gl
 			setIsSubmittingReport(true);
 			const now = Date.now();
 			let screenshotDataUrl: string | undefined = reportScreenshotDataUrl;
+			const scrollEl = findScrollableAncestor(practiceContentRef.current) ?? practiceContentRef.current;
+			const effectiveScrollY = scrollEl ? scrollEl.scrollTop : window.scrollY;
 			if (!screenshotDataUrl) {
 				try {
-					screenshotDataUrl = await captureAppVisualStateScreenshotDataUrl();
+					screenshotDataUrl = await captureFullContentScreenshotDataUrl(scrollEl);
 				} catch (e) {
 					console.error('Failed to capture screenshot for report:', e);
 					setReportScreenshotError('Screenshot capture failed');
@@ -3094,7 +3137,7 @@ function PracticeRunner({ moduleData, baseQuestions, onExit, glossaryEntries, gl
 					questionTags: current?.tags,
 					attemptId: undefined,
 					currentQuestionIndex: index,
-					scrollY: window.scrollY,
+					scrollY: effectiveScrollY,
 					viewportWidth: window.innerWidth,
 					viewportHeight: window.innerHeight,
 					phase: 'practice',
@@ -3130,7 +3173,8 @@ function PracticeRunner({ moduleData, baseQuestions, onExit, glossaryEntries, gl
 		setIsCapturingReportScreenshot(true);
 		void (async () => {
 			try {
-				const url = await captureFullContentScreenshotDataUrl();
+				const scrollEl = findScrollableAncestor(practiceContentRef.current) ?? practiceContentRef.current;
+				const url = await captureFullContentScreenshotDataUrl(scrollEl);
 				setReportScreenshotDataUrl(url);
 			} catch (e) {
 				console.error('Failed to capture screenshot for report preview:', e);
@@ -3233,7 +3277,7 @@ function PracticeRunner({ moduleData, baseQuestions, onExit, glossaryEntries, gl
 					}
 				}}
 			>
-				<DialogContent className="max-w-lg">
+				<DialogContent className="max-w-3xl">
 					<DialogHeader>
 						<DialogTitle>Report an issue</DialogTitle>
 						<DialogDescription>
