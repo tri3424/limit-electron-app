@@ -52,9 +52,25 @@ jobs:
       - name: Build EXE
         run: npm run build && npx electron-builder --win --x64 --publish never
 
+      - name: Inspect dist output
+        shell: pwsh
+        run: |
+          Write-Output "=== dist directory ==="
+          if (Test-Path .\dist) { Get-ChildItem .\dist -Force } else { Write-Output "dist not found" }
+          Write-Output "=== dist recursive ==="
+          if (Test-Path .\dist) { Get-ChildItem .\dist -Recurse -Force | Select-Object FullName,Length } else { Write-Output "dist not found" }
+
+      - name: Verify EXE exists
+        shell: pwsh
+        run: |
+          $exes = Get-ChildItem -Path .\dist -Recurse -Filter *.exe -ErrorAction SilentlyContinue
+          if (-not $exes -or $exes.Count -eq 0) {
+            throw "No .exe produced under dist/"
+          }
+
       - name: Upload EXE
         uses: actions/upload-artifact@v4
         with:
           name: Limit-Windows-EXE
-          path: dist/*.exe
+          path: dist/**/*.exe
 

@@ -54,8 +54,22 @@ jobs:
       - name: Build AppImage
         run: npm run build && npx electron-builder --linux AppImage --x64 --publish never
 
+      - name: Inspect dist output
+        run: |
+          echo "=== dist directory ==="
+          ls -la dist || true
+          echo "=== dist recursive ==="
+          find dist -maxdepth 3 -type f -print || true
+
+      - name: Verify AppImage exists
+        run: |
+          if ! find dist -maxdepth 3 -type f -name "*.AppImage" | grep -q .; then
+            echo "No .AppImage produced under dist/" >&2
+            exit 1
+          fi
+
       - name: Upload AppImage
         uses: actions/upload-artifact@v4
         with:
           name: Limit-Linux-AppImage
-          path: dist/*.AppImage
+          path: dist/**/*.AppImage
