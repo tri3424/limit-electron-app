@@ -26,7 +26,7 @@ jobs:
         run: |
           git clone --depth 1 https://github.com/ggml-org/llama.cpp.git .\_llama_cpp
           cmake -S .\_llama_cpp -B .\_llama_cpp\build -A x64 -DLLAMA_CURL=OFF
-          cmake --build .\_llama_cpp\build --config Release -j 2
+          cmake --build .\_llama_cpp\build --config Release --target llama-cli -j 2
 
           $candidates = @(
             ".\\_llama_cpp\\build\\bin\\Release\\llama-cli.exe",
