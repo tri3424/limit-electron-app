@@ -1,6 +1,6 @@
 'use strict';
 
-const { app, BrowserWindow, Menu, ipcMain } = require('electron');
+const { app, BrowserWindow, Menu, ipcMain, dialog, session } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const { spawn } = require('child_process');
@@ -12,6 +12,42 @@ app.commandLine.appendSwitch('smooth-scrolling');
 // Single instance lock
 if (!app.requestSingleInstanceLock()) {
   app.quit();
+}
+
+function canWriteToDir(dirPath) {
+	try {
+		fs.mkdirSync(dirPath, { recursive: true });
+		const p = path.join(dirPath, `.__limit_write_test_${Date.now()}_${Math.random().toString(16).slice(2)}.tmp`);
+		fs.writeFileSync(p, 'ok');
+		fs.unlinkSync(p);
+		return true;
+	} catch {
+		return false;
+	}
+}
+
+function getOfflineAiStatus() {
+	const exePath = resolveBundledFile('native', 'offline-ai', 'offline_ai_embed.exe');
+	const modelPath = resolveBundledFile('native', 'offline-ai', 'models', 'embedding.gguf');
+	if (!exePath) {
+		return { available: false, reason: 'missing_executable' };
+	}
+	if (!modelPath) {
+		return { available: false, reason: 'missing_model' };
+	}
+	try {
+		const stat = fs.statSync(modelPath);
+		if (!stat.isFile() || stat.size < 1024 * 1024) {
+			return { available: false, reason: 'invalid_model_file' };
+		}
+	} catch {
+		return { available: false, reason: 'invalid_model_file' };
+	}
+	const tempDir = app.getPath('temp');
+	if (!canWriteToDir(tempDir)) {
+		return { available: false, reason: 'temp_not_writable' };
+	}
+	return { available: true, reason: 'ok', exePath, modelPath };
 }
 
 let mainWindow;
@@ -126,6 +162,19 @@ function createWindow() {
     console.error('[render-process-gone]', details);
   });
 
+	mainWindow.webContents.on('before-input-event', (_event, input) => {
+		try {
+			const key = String(input.key || '').toLowerCase();
+			if (key === 'i' && input.control && input.shift && !input.alt && !input.meta) {
+				if (mainWindow && !mainWindow.isDestroyed()) {
+					mainWindow.webContents.toggleDevTools();
+				}
+			}
+		} catch {
+			// ignore
+		}
+	});
+
   if (isDev) {
     // Vite dev server
     mainWindow.loadURL(process.env.VITE_DEV_SERVER_URL || 'http://localhost:8080');
@@ -160,6 +209,43 @@ function createWindow() {
 app.on('ready', () => {
   // Remove default application menu / toolbar
   Menu.setApplicationMenu(null);
+
+	if (!isDev) {
+		try {
+			const s = session.defaultSession;
+			s.webRequest.onBeforeRequest((details, callback) => {
+				try {
+					const u = new URL(details.url);
+					const proto = u.protocol;
+					if (proto === 'file:' || proto === 'app:' || proto === 'devtools:') {
+						callback({ cancel: false });
+						return;
+					}
+					if (proto === 'http:' || proto === 'https:' || proto === 'ws:' || proto === 'wss:') {
+						const host = u.hostname;
+						const isLocal = host === 'localhost' || host === '127.0.0.1' || host === '::1';
+						callback({ cancel: !isLocal });
+						return;
+					}
+					callback({ cancel: true });
+				} catch {
+					callback({ cancel: true });
+				}
+			});
+		} catch {
+			// ignore
+		}
+	}
+
+	if (!isDev) {
+		const status = getOfflineAiStatus();
+		if (!status.available) {
+			dialog.showErrorBox('Offline AI assets missing', `Offline AI is not initialized (${status.reason}). Reinstall or rebuild the app with native/offline-ai bundled.`);
+			app.quit();
+			return;
+		}
+	}
+
   createWindow();
 
   ipcMain.handle('exam:captureAppScreenshot', async (_event, payload) => {
@@ -284,9 +370,50 @@ app.on('ready', () => {
 		return { dataUrl: `data:image/png;base64,${pngBuffer.toString('base64')}` };
 	});
 
+	ipcMain.handle('offlineAi:status', async () => {
+		return getOfflineAiStatus();
+	});
+
   ipcMain.handle('offlineAi:embed', async (_event, payload) => {
     return runOfflineAiEmbedding(payload);
   });
+
+	ipcMain.handle('offlineAi:reasoningStatus', async () => {
+		return getOfflineAiReasoningStatus();
+	});
+
+	ipcMain.handle('offlineAi:explain', async (_event, payload) => {
+		const prompt = payload && typeof payload.prompt === 'string' ? payload.prompt : '';
+		const maxTokens = payload && Number.isFinite(payload.maxTokens) ? payload.maxTokens : 700;
+		const temperature = payload && Number.isFinite(payload.temperature) ? payload.temperature : 0.7;
+		const seed = payload && Number.isFinite(payload.seed) ? payload.seed : 0;
+		return runOfflineAiReasoning({ prompt, maxTokens, temperature, seed, contextTokens: 4096, threads: 4 });
+	});
+
+	ipcMain.handle('offlineAi:chat', async (_event, payload) => {
+		const messages = payload && Array.isArray(payload.messages) ? payload.messages : [];
+		const system = payload && typeof payload.system === 'string' ? payload.system : '';
+		const maxTokens = payload && Number.isFinite(payload.maxTokens) ? payload.maxTokens : 512;
+		const temperature = payload && Number.isFinite(payload.temperature) ? payload.temperature : 0.7;
+		const seed = payload && Number.isFinite(payload.seed) ? payload.seed : 0;
+
+		const lines = [];
+		if (system) {
+			lines.push(`SYSTEM:\n${system}`);
+		}
+		for (const m of messages) {
+			if (!m || typeof m !== 'object') continue;
+			const role = String(m.role || 'user').toUpperCase();
+			const content = typeof m.content === 'string' ? m.content : '';
+			if (!content.trim()) continue;
+			lines.push(`${role}:\n${content}`);
+		}
+		lines.push('ASSISTANT:\n');
+		const prompt = lines.join('\n\n');
+
+		const res = await runOfflineAiReasoning({ prompt, maxTokens, temperature, seed, contextTokens: 4096, threads: 4 });
+		return { text: res.text };
+	});
 });
 
 app.on('window-all-closed', () => {

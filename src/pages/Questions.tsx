@@ -15,12 +15,14 @@ import { deleteQuestion } from '@/lib/questions';
 import { mergeGlobalGlossaryDuplicates } from '@/lib/glossary';
 import { MatchingQuestionView } from '@/components/MatchingQuestionView';
 import { prepareContentForDisplay } from '@/lib/contentFormatting';
+import { renderTypingAnswerMathToHtml } from '@/components/TypingAnswerMathInput';
 import { copyTextToClipboard } from '@/utils/codeBlockCopy';
 import { toast } from 'sonner';
 import { summarizeDifficulty } from '@/lib/intelligenceEngine';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
 import { v4 as uuidv4 } from 'uuid';
 import { mapScoreToBand } from '@/lib/semanticEngine';
+import { generateDeterministicExplanationHtml } from '@/lib/explanationEngine';
 
 export default function Questions() {
   const location = useLocation();
@@ -332,6 +334,15 @@ function QuestionCard({
 }) {
   const [open, setOpen] = useState(false);
   const [glossaryModal, setGlossaryModal] = useState<{ word: string; meanings: string[] } | null>(null);
+	const [aiExplanationOpen, setAiExplanationOpen] = useState(false);
+	const [aiExplanationHtml, setAiExplanationHtml] = useState('');
+	const [aiExplanationLoading, setAiExplanationLoading] = useState(false);
+	const [aiExplanationApplying, setAiExplanationApplying] = useState(false);
+	const [aiExplanationRegen, setAiExplanationRegen] = useState(0);
+	const [tutorChatOpen, setTutorChatOpen] = useState(false);
+	const [tutorChatInput, setTutorChatInput] = useState('');
+	const [tutorChatLoading, setTutorChatLoading] = useState(false);
+	const [tutorChatMessages, setTutorChatMessages] = useState<Array<{ role: 'user' | 'assistant'; content: string }>>([]);
   const semanticAnalysis = useLiveQuery(
     () => db.questionSemanticAnalyses.where('questionId').equals(question.id).last(),
     [question.id],
@@ -407,6 +418,159 @@ function QuestionCard({
       meanings: entry.meanings,
     });
   }, [combinedGlossary]);
+
+	const generateAiExplanation = useCallback(
+		async (regenIndex: number) => {
+			setAiExplanationLoading(true);
+			try {
+				const api = window.offlineAi;
+				if (api && typeof api.reasoningStatus === 'function' && typeof api.explain === 'function') {
+					const st = await api.reasoningStatus();
+					if (st.available) {
+						const qPlain = extractPlainText(question.text || '').trim();
+						const tags = (semanticAnalysis?.tags || []).slice(0, 8).map((t) => `${t.tagName} (${Math.round((t.score ?? 0) * 100)}%)`);
+						const fallbackTags = (question.tags || []).slice(0, 12);
+
+						const blocks: string[] = [];
+						blocks.push(`Question type: ${question.type}`);
+						blocks.push(`Question:\n${qPlain}`);
+						if (question.type === 'mcq' && Array.isArray(question.options)) {
+							blocks.push(
+								`Options:\n${question.options
+									.map((o) => `- (${o.id}) ${extractPlainText(o.text || '').trim()}`)
+									.join('\n')}`,
+							);
+							if (Array.isArray(question.correctAnswers) && question.correctAnswers.length) {
+								const correctIds = new Set(question.correctAnswers);
+								const correctTexts = question.options
+									.filter((o) => correctIds.has(o.id))
+									.map((o) => extractPlainText(o.text || '').trim());
+								blocks.push(`Correct answer(s): ${correctTexts.length ? correctTexts.join(' | ') : question.correctAnswers.join(', ')}`);
+							}
+						}
+						if (question.type === 'fill_blanks' && question.fillBlanks?.blanks?.length) {
+							blocks.push(`Blanks (correct): ${question.fillBlanks.blanks.map((b) => b.correct).join(' | ')}`);
+						}
+						if (question.type === 'matching' && question.matching?.pairs?.length) {
+							blocks.push(
+								`Matching pairs:\n${question.matching.pairs
+									.map((p) => `- ${extractPlainText(p.leftText || '').trim()} => ${extractPlainText(p.rightText || '').trim()}`)
+									.join('\n')}`,
+							);
+						}
+						if (tags.length) blocks.push(`Suggested topics/tags: ${tags.join(', ')}`);
+						if (fallbackTags.length) blocks.push(`Existing question tags: ${fallbackTags.join(', ')}`);
+						if (semanticAnalysis?.difficultyBand) blocks.push(`Difficulty: ${String(semanticAnalysis.difficultyBand).replace(/_/g, ' ')}`);
+
+						const prompt = [
+							'You are an offline tutor. Generate a high-quality explanation tailored to the question.',
+							'Rules:',
+							'- Use KaTeX-friendly LaTeX: inline $...$ and display $$...$$.',
+							'- Explain in a topic-aware way (biology/chemistry/physics/math etc).',
+							'- Prefer concise but complete reasoning, step-by-step where applicable.',
+							'- If multiple correct answers are possible, mention that.',
+							'- Output plain text or markdown (no code blocks).',
+							'',
+							`Variation seed: ${regenIndex}`,
+							'',
+							blocks.join('\n\n'),
+						].join('\n');
+
+						const res = await api.explain({ prompt, maxTokens: 800, temperature: 0.7, seed: 0 });
+						setAiExplanationHtml(prepareContentForDisplay(res.text || ''));
+						return;
+					}
+				}
+
+				const html = await generateDeterministicExplanationHtml({
+					question,
+					analysis: semanticAnalysis || null,
+					regenerateIndex: regenIndex,
+				});
+				setAiExplanationHtml(html);
+			} finally {
+				setAiExplanationLoading(false);
+			}
+		},
+		[question, semanticAnalysis],
+	);
+
+	const applyAiExplanationToQuestion = useCallback(async () => {
+		if (!aiExplanationHtml) return;
+		setAiExplanationApplying(true);
+		try {
+			await db.questions.update(question.id, {
+				explanation: aiExplanationHtml,
+				metadata: {
+					...(question.metadata || ({} as any)),
+					updatedAt: Date.now(),
+				},
+			});
+			toast.success('Explanation saved to question');
+		} catch (e) {
+			console.error(e);
+			toast.error('Failed to save explanation');
+		} finally {
+			setAiExplanationApplying(false);
+		}
+	}, [aiExplanationHtml, question.id, question.metadata]);
+
+	const sendTutorChat = useCallback(async () => {
+		const msg = tutorChatInput.trim();
+		if (!msg) return;
+		setTutorChatInput('');
+		setTutorChatLoading(true);
+		try {
+			const api = window.offlineAi;
+			if (!api || typeof api.chat !== 'function' || typeof api.reasoningStatus !== 'function') {
+				toast.error('Tutor chat is only available in the Electron app');
+				return;
+			}
+			const st = await api.reasoningStatus();
+			if (!st.available) {
+				toast.error(`Tutor chat unavailable: ${st.reason}`);
+				return;
+			}
+
+			const questionPlain = extractPlainText(question.text || '').trim();
+			const typeLine = `Question type: ${question.type}`;
+			const optionLines = question.type === 'mcq' && Array.isArray(question.options)
+				? `Options:\n${question.options.map((o) => `- (${o.id}) ${extractPlainText(o.text || '').trim()}`).join('\n')}`
+				: '';
+			const system = [
+				'You are an offline tutor. Use KaTeX-friendly LaTeX: inline $...$ and display $$...$$.',
+				'Be correct, explain clearly, and adapt to the subject/topic.',
+				'If unsure, say so and ask a clarifying question.',
+				'',
+				'Context:',
+				typeLine,
+				`Question:\n${questionPlain}`,
+				optionLines,
+			].filter(Boolean).join('\n\n');
+
+			const nextMessages = [...tutorChatMessages, { role: 'user', content: msg }];
+			setTutorChatMessages(nextMessages);
+			const res = await api.chat({
+				system,
+				messages: nextMessages,
+				maxTokens: 512,
+				temperature: 0.7,
+				seed: 0,
+			});
+			setTutorChatMessages([...nextMessages, { role: 'assistant', content: res.text || '' }]);
+		} catch (e) {
+			console.error(e);
+			toast.error('Tutor chat failed');
+		} finally {
+			setTutorChatLoading(false);
+		}
+	}, [question.text, tutorChatInput, tutorChatMessages]);
+
+	useEffect(() => {
+		if (!aiExplanationOpen) return;
+		if (aiExplanationHtml) return;
+		void generateAiExplanation(aiExplanationRegen);
+	}, [aiExplanationOpen, aiExplanationHtml, aiExplanationRegen, generateAiExplanation]);
 
   const shortText = useMemo(() => {
     const tmp = document.createElement('div');
@@ -632,9 +796,127 @@ function QuestionCard({
             </DialogTrigger>
             <DialogContent className="max-w-5xl">
               <DialogHeader>
-                <DialogTitle>Question Details</DialogTitle>
-              </DialogHeader>
-              <ScrollArea className="h-[70vh]">
+                <div className="flex items-center justify-between gap-3">
+                  <DialogTitle>Question Details</DialogTitle>
+                  <div className="flex items-center gap-2">
+                    <Dialog open={tutorChatOpen} onOpenChange={(v) => {
+                      setTutorChatOpen(v);
+                      if (!v) {
+                        setTutorChatInput('');
+                        setTutorChatLoading(false);
+                        setTutorChatMessages([]);
+                      }
+                    }}>
+                    <DialogTrigger asChild>
+                      <Button type="button" size="sm" variant="outline">
+                        Tutor Chat
+                      </Button>
+                    </DialogTrigger>
+                    <DialogContent className="max-w-3xl">
+                      <DialogHeader>
+                        <DialogTitle>Tutor Chat</DialogTitle>
+                        <DialogDescription>
+                          Runs locally (Electron only). Uses $...$ / $$...$$ for math.
+                        </DialogDescription>
+                      </DialogHeader>
+                      <div className="rounded-md border p-3 bg-muted/20 h-[46vh] overflow-auto space-y-3">
+                        {tutorChatMessages.length ? (
+                          tutorChatMessages.map((m, idx) => (
+                            <div key={idx}>
+                              <div className="text-xs text-muted-foreground mb-1">{m.role === 'user' ? 'You' : 'Tutor'}</div>
+                              {m.role === 'assistant' ? (
+                                <div className="prose prose-sm max-w-none content-html" dangerouslySetInnerHTML={{ __html: prepareContentForDisplay(m.content) }} />
+                              ) : (
+                                <div className="text-sm whitespace-pre-wrap">{m.content}</div>
+                              )}
+                            </div>
+                          ))
+                        ) : (
+                          <div className="text-sm text-muted-foreground">Ask a question about this question…</div>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Input
+                          value={tutorChatInput}
+                          onChange={(e) => setTutorChatInput(e.target.value)}
+                          placeholder="Type your question…"
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') void sendTutorChat();
+                          }}
+                        />
+                        <Button type="button" disabled={tutorChatLoading} onClick={() => void sendTutorChat()}>
+                          {tutorChatLoading ? 'Sending…' : 'Send'}
+                        </Button>
+                      </div>
+                    </DialogContent>
+                  </Dialog>
+
+                  <Dialog open={aiExplanationOpen} onOpenChange={(v) => {
+                    setAiExplanationOpen(v);
+                    if (!v) {
+                      setAiExplanationLoading(false);
+                      setAiExplanationHtml('');
+                      setAiExplanationRegen(0);
+                    }
+                  }}>
+                    <DialogTrigger asChild>
+                      <Button type="button" size="sm" variant="outline">
+                        AI Explanation
+                      </Button>
+                    </DialogTrigger>
+                    <DialogContent className="max-w-3xl">
+                      <DialogHeader>
+                        <DialogTitle>AI Explanation</DialogTitle>
+                        <DialogDescription>
+                          Generated locally. You can regenerate as many times as you want.
+                        </DialogDescription>
+                      </DialogHeader>
+
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="text-xs text-muted-foreground">
+                          {semanticAnalysis?.modelId ? (
+                            <>Model: <span className="font-mono text-foreground">{semanticAnalysis.modelId}</span></>
+                          ) : (
+                            <>Model: <span className="text-foreground">Offline (deterministic)</span></>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Button
+                            type="button"
+                            variant="secondary"
+                            disabled={!aiExplanationHtml || aiExplanationLoading || aiExplanationApplying}
+                            onClick={applyAiExplanationToQuestion}
+                          >
+                            {aiExplanationApplying ? 'Saving…' : 'Apply to Question'}
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            disabled={aiExplanationLoading}
+                            onClick={async () => {
+                              const next = aiExplanationRegen + 1;
+                              setAiExplanationRegen(next);
+                              await generateAiExplanation(next);
+                            }}
+                          >
+                            {aiExplanationLoading ? 'Generating…' : 'Regenerate'}
+                          </Button>
+                        </div>
+                      </div>
+
+                      <div className="rounded-md border p-3 bg-muted/20">
+                        {aiExplanationHtml ? (
+                          <div className="content-html" dangerouslySetInnerHTML={{ __html: aiExplanationHtml }} />
+                        ) : (
+                          <div className="text-sm text-muted-foreground">No explanation generated yet.</div>
+                        )}
+                      </div>
+                    </DialogContent>
+                  </Dialog>
+                </div>
+              </div>
+            </DialogHeader>
+            <ScrollArea className="h-[70vh]">
               <div className="space-y-4 pr-2" onDoubleClick={handleGlossaryLookup}>
                 <div className="flex items-center justify-between text-xs text-muted-foreground">
                   {question.code && (
@@ -650,8 +932,8 @@ function QuestionCard({
                       Code: <span className="font-semibold text-foreground">{question.code}</span>
                     </button>
                   )}
-                  <div>Type: <span className="font-semibold text-foreground uppercase">{question.type}</span></div>
-                </div>
+                    <div>Type: <span className="font-semibold text-foreground uppercase">{question.type}</span></div>
+                  </div>
                 <div>
                   <div className="text-sm text-muted-foreground mb-1">Question</div>
                   <div className="prose prose-base max-w-none content-html" dangerouslySetInnerHTML={{ __html: prepareContentForDisplay(question.text) }} />
@@ -693,9 +975,18 @@ function QuestionCard({
                 {question.type !== 'mcq' && question.type !== 'fill_blanks' && question.type !== 'matching' && question.correctAnswers && question.correctAnswers.length > 0 && (
                   <div className="rounded-md border p-3">
                     <div className="text-sm font-semibold mb-1">Correct Answer</div>
-                    <div className="text-sm">
-                      {question.correctAnswers.join(', ')}
-                    </div>
+                    {question.type === 'text' ? (
+                      <div className="text-sm">
+                        {question.correctAnswers.map((ans, idx) => (
+                          <span key={`${ans}-${idx}`}>
+                            {idx > 0 ? ', ' : ''}
+                            <span className="content-html" dangerouslySetInnerHTML={{ __html: renderTypingAnswerMathToHtml(ans) }} />
+                          </span>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="text-sm">{question.correctAnswers.join(', ')}</div>
+                    )}
                   </div>
                 )}
                 {question.explanation && (

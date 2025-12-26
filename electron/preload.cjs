@@ -15,7 +15,19 @@ contextBridge.exposeInMainWorld('examProctor', {
 });
 
 contextBridge.exposeInMainWorld('offlineAi', {
+  status: async () => {
+    return ipcRenderer.invoke('offlineAi:status');
+  },
   embedText: async (payload) => {
     return ipcRenderer.invoke('offlineAi:embed', payload);
   },
+	reasoningStatus: async () => {
+		return ipcRenderer.invoke('offlineAi:reasoningStatus');
+	},
+	explain: async (payload) => {
+		return ipcRenderer.invoke('offlineAi:explain', payload);
+	},
+	chat: async (payload) => {
+		return ipcRenderer.invoke('offlineAi:chat', payload);
+	},
 });

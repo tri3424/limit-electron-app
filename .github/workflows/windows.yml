@@ -21,6 +21,34 @@ jobs:
       - name: Install dependencies
         run: npm install
 
+      - name: Build llama.cpp runner (llama-cli.exe)
+        shell: pwsh
+        run: |
+          git clone --depth 1 https://github.com/ggml-org/llama.cpp.git .\_llama_cpp
+          cmake -S .\_llama_cpp -B .\_llama_cpp\build -A x64
+          cmake --build .\_llama_cpp\build --config Release -j 2
+
+          $candidates = @(
+            ".\\_llama_cpp\\build\\bin\\Release\\llama-cli.exe",
+            ".\\_llama_cpp\\build\\bin\\Release\\llama.exe",
+            ".\\_llama_cpp\\build\\Release\\llama-cli.exe",
+            ".\\_llama_cpp\\build\\Release\\llama.exe"
+          )
+          $exe = $null
+          foreach ($c in $candidates) { if (Test-Path $c) { $exe = $c; break } }
+          if (-not $exe) { throw "Could not find llama-cli.exe in build output" }
+
+          New-Item -ItemType Directory -Force -Path .\native\offline-ai | Out-Null
+          Copy-Item -Force $exe .\native\offline-ai\llama-cli.exe
+
+      - name: Optional offline AI bootstrap (models)
+        run: node scripts/setup-offline-ai.cjs
+        env:
+          OFFLINE_AI_BOOTSTRAP: '1'
+          OFFLINE_AI_REASONING_MODEL: ${{ vars.OFFLINE_AI_REASONING_MODEL || '1' }}
+          OFFLINE_AI_REASONING_MODEL_URL: ${{ vars.OFFLINE_AI_REASONING_MODEL_URL || 'https://huggingface.co/lmstudio-community/Qwen2.5-3B-Instruct-GGUF/resolve/a4887aa2f3430226d71668c068e4479e2a08ca4d/Qwen2.5-3B-Instruct-Q4_K_M.gguf?download=true' }}
+          OFFLINE_AI_REASONING_MODEL_SHA256: ${{ vars.OFFLINE_AI_REASONING_MODEL_SHA256 || '' }}
+
       - name: Build EXE
         run: npm run build && npx electron-builder --win --x64 --publish never
 

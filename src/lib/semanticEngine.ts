@@ -279,15 +279,33 @@ export function mapScoreToBand(score: number): QuestionSemanticAnalysis['difficu
 }
 
 export async function seedOntologyIfNeeded(): Promise<void> {
-  const count = await db.semanticOntologyTags.count();
-  if (count > 0) return;
-  const now = Date.now();
-  const seed = getOntologySeedWithTimestamps(now);
-  await db.transaction('rw', db.semanticOntologyTags, async () => {
-    for (const t of seed) {
-      await db.semanticOntologyTags.put(t);
-    }
-  });
+	const now = Date.now();
+	const seed = getOntologySeedWithTimestamps(now);
+	await db.transaction('rw', db.semanticOntologyTags, async () => {
+		for (const t of seed) {
+			const existing = await db.semanticOntologyTags.get(t.id);
+			if (!existing) {
+				await db.semanticOntologyTags.put(t);
+				continue;
+			}
+			const nextAliases = Array.isArray((t as any).aliases) ? ((t as any).aliases as string[]) : undefined;
+			const curAliases = Array.isArray((existing as any).aliases) ? ((existing as any).aliases as string[]) : undefined;
+			const aliasesChanged = JSON.stringify(curAliases || []) !== JSON.stringify(nextAliases || []);
+			const parentChanged = (existing as any).parentId !== (t as any).parentId;
+			const kindChanged = (existing as any).kind !== (t as any).kind;
+			const nameChanged = existing.name !== t.name;
+			const descChanged = existing.description !== t.description;
+			if (!aliasesChanged && !parentChanged && !kindChanged && !nameChanged && !descChanged) continue;
+			await db.semanticOntologyTags.update(t.id, {
+				name: t.name,
+				description: t.description,
+				updatedAt: now,
+				...(kindChanged ? { kind: (t as any).kind } : {}),
+				...(parentChanged ? { parentId: (t as any).parentId } : {}),
+				...(aliasesChanged ? { aliases: nextAliases } : {}),
+			} as any);
+		}
+	});
 }
 
 async function getOrCreateOntologyEmbeddings(modelId: string): Promise<Array<{ tagId: string; tagName: string; vector: number[]; description: string }>> {
@@ -796,11 +814,12 @@ export async function analyzeQuestionSemantics(params: {
 
 export async function calibrateSemanticDifficultyDistribution(params?: { modelId?: string }): Promise<void> {
   const modelId = params?.modelId || DEFAULT_EMBED_MODEL_ID;
-  const analyses = await db.questionSemanticAnalyses
-    .where('modelId')
-    .equals(modelId)
-    .and((a) => a.source === 'ai' && a.analysisVersion === SEMANTIC_ANALYSIS_VERSION)
-    .toArray();
+  // NOTE: questionSemanticAnalyses is not indexed by modelId alone.
+  // Query on an indexed field first, then filter in-memory.
+  const analyses = (await db.questionSemanticAnalyses
+    .where('source')
+    .equals('ai')
+    .toArray()).filter((a) => a.modelId === modelId && a.analysisVersion === SEMANTIC_ANALYSIS_VERSION);
   if (analyses.length < 3) return;
 
   const ordered = analyses

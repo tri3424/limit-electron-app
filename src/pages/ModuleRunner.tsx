@@ -2227,7 +2227,10 @@ function ExamSession({
 											{currentQuestion.correctAnswers.map((ans, idx) => (
 												<span key={idx}>
 													{idx > 0 && ', '}
-													<span className="font-semibold">{ans}</span>
+													<span
+														className="font-semibold content-html"
+														dangerouslySetInnerHTML={{ __html: renderTypingAnswerMathToHtml(ans) }}
+													/>
 												</span>
 											))}
 										</div>

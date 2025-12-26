@@ -19,6 +19,7 @@ import { FillBlanksAttemptView } from '@/components/FillBlanksAttemptView';
 import { Checkbox } from '@/components/ui/checkbox';
 import type { CheckedState } from '@radix-ui/react-checkbox';
 import { prepareContentForDisplay } from '@/lib/contentFormatting';
+import { renderTypingAnswerMathToHtml } from '@/components/TypingAnswerMathInput';
 import { copyTextToClipboard } from '@/utils/codeBlockCopy';
 import { areAllQuestionsCompleted } from '@/lib/completedQuestions';
 
@@ -592,22 +593,24 @@ export default function ModulesPage() {
 								<div className="grid grid-cols-1 md:grid-cols-2 gap-4">
 									<div className="space-y-1">
 										<div className="text-sm font-semibold">Your Answer</div>
-										{openStatDetail.userAnswer && openStatDetail.userAnswer.toString().includes('<') ? (
-											<div className="text-sm text-foreground prose prose-sm max-w-none content-html" dangerouslySetInnerHTML={{ __html: prepareContentForDisplay(openStatDetail.userAnswer) }} />
+										{openStatDetail.userAnswer && String(openStatDetail.userAnswer).includes('<') ? (
+											<div className="text-sm text-foreground prose prose-sm max-w-none content-html" dangerouslySetInnerHTML={{ __html: prepareContentForDisplay(String(openStatDetail.userAnswer)) }} />
 										) : (
-											<div className={`text-sm text-foreground whitespace-pre-wrap ${openStatDetail.userAnswer === '—' ? 'text-muted-foreground' : ''}`}>
-												{openStatDetail.userAnswer || '—'}
-											</div>
+											<div
+												className={`text-sm text-foreground whitespace-pre-wrap content-html ${openStatDetail.userAnswer === '—' ? 'text-muted-foreground' : ''}`}
+												dangerouslySetInnerHTML={{ __html: renderTypingAnswerMathToHtml(String(openStatDetail.userAnswer || '—')) }}
+											/>
 										)}
 									</div>
 									<div className="space-y-1">
 										<div className="text-sm font-semibold">Correct Answer{openStatDetail.correctAnswer.includes(',') ? 's' : ''}</div>
-										{openStatDetail.correctAnswer && openStatDetail.correctAnswer.toString().includes('<') ? (
-											<div className="text-sm text-foreground prose prose-sm max-w-none content-html" dangerouslySetInnerHTML={{ __html: prepareContentForDisplay(openStatDetail.correctAnswer) }} />
+										{openStatDetail.correctAnswer && String(openStatDetail.correctAnswer).includes('<') ? (
+											<div className="text-sm text-foreground prose prose-sm max-w-none content-html" dangerouslySetInnerHTML={{ __html: prepareContentForDisplay(String(openStatDetail.correctAnswer)) }} />
 										) : (
-											<div className="text-sm text-foreground whitespace-pre-wrap border-green-600 bg-green-50 border rounded-md p-2">
-												{openStatDetail.correctAnswer || '—'}
-											</div>
+											<div
+												className="text-sm text-foreground whitespace-pre-wrap border-green-600 bg-green-50 border rounded-md p-2 content-html"
+												dangerouslySetInnerHTML={{ __html: renderTypingAnswerMathToHtml(String(openStatDetail.correctAnswer || '—')) }}
+											/>
 										)}
 									</div>
 								</div>
@@ -775,7 +778,18 @@ export default function ModulesPage() {
 								{openQuestion.type !== 'mcq' && openQuestion.type !== 'matching' && openQuestion.correctAnswers && openQuestion.correctAnswers.length > 0 && (
 									<div>
 										<div className="text-xs text-muted-foreground mb-1">Correct Answer{openQuestion.correctAnswers.length > 1 ? 's' : ''}</div>
-										<div className="text-sm">{openQuestion.correctAnswers.join(', ')}</div>
+										{openQuestion.type === 'text' ? (
+											<div className="text-sm">
+												{openQuestion.correctAnswers.map((ans, idx) => (
+													<span key={`${ans}-${idx}`}>
+														{idx > 0 ? ', ' : ''}
+														<span className="content-html" dangerouslySetInnerHTML={{ __html: renderTypingAnswerMathToHtml(ans) }} />
+													</span>
+												))}
+											</div>
+										) : (
+											<div className="text-sm">{openQuestion.correctAnswers.join(', ')}</div>
+										)}
 									</div>
 								)}
 								{openQuestion.explanation && (

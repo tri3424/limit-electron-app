@@ -374,6 +374,18 @@ export interface AppSettings {
     downGamma: number;
     targetAvgTags: number;
   };
+
+
+	semanticAutoApply?: {
+		enabled: boolean;
+		updatedAt: number;
+		applyTags: boolean;
+		applyDifficulty: boolean;
+		maxTags: number;
+		minScore: number;
+		preserveExistingQuestionTags: boolean;
+		preserveExistingDifficulty: boolean;
+	};
 }
 
 export interface IntelligenceSignal {
@@ -989,6 +1001,16 @@ export async function initializeSettings() {
         downGamma: 0.18,
         targetAvgTags: 6,
       },
+		semanticAutoApply: {
+			enabled: true,
+			updatedAt: Date.now(),
+			applyTags: true,
+			applyDifficulty: true,
+			maxTags: 6,
+			minScore: 0.35,
+			preserveExistingQuestionTags: true,
+			preserveExistingDifficulty: true,
+		},
     };
     
     await db.settings.add(defaultSettings);
@@ -1004,5 +1026,18 @@ export async function initializeSettings() {
         targetAvgTags: 6,
       },
     });
+	} else if (!existingSettings.semanticAutoApply) {
+		await db.settings.update('1', {
+			semanticAutoApply: {
+				enabled: true,
+				updatedAt: Date.now(),
+				applyTags: true,
+				applyDifficulty: true,
+				maxTags: 6,
+				minScore: 0.35,
+				preserveExistingQuestionTags: true,
+				preserveExistingDifficulty: true,
+			},
+		});
   }
 }

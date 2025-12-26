@@ -17,6 +17,16 @@ declare global {
 			captureViewportScreenshot?: () => Promise<{ dataUrl: string }>;
 		};
 		offlineAi?: {
+			status?: () => Promise<{
+				available: boolean;
+				reason: string;
+				exePath?: string;
+				modelPath?: string;
+			}>;
+			reasoningStatus?: () => Promise<
+				| { available: true; reason: 'ok'; runnerPath?: string; modelPath?: string }
+				| { available: false; reason: string }
+			>;
 			embedText: (payload: {
 				text: string;
 				modelId?: string;
@@ -27,6 +37,19 @@ declare global {
 				dims: number;
 				vector: number[];
 			}>;
+			explain?: (payload: {
+				prompt: string;
+				maxTokens?: number;
+				temperature?: number;
+				seed?: number;
+			}) => Promise<{ text: string }>;
+			chat?: (payload: {
+				system?: string;
+				messages: Array<{ role: 'user' | 'assistant'; content: string }>;
+				maxTokens?: number;
+				temperature?: number;
+				seed?: number;
+			}) => Promise<{ text: string }>;
 		};
 	}
 }
