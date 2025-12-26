@@ -29,7 +29,7 @@ jobs:
       - name: Build llama.cpp runner (llama-cli)
         run: |
           git clone --depth 1 https://github.com/ggml-org/llama.cpp.git ./_llama_cpp
-          cmake -S ./_llama_cpp -B ./_llama_cpp/build -DCMAKE_BUILD_TYPE=Release
+          cmake -S ./_llama_cpp -B ./_llama_cpp/build -DCMAKE_BUILD_TYPE=Release -DLLAMA_CURL=OFF
           cmake --build ./_llama_cpp/build -j 2
 
           mkdir -p ./native/offline-ai
