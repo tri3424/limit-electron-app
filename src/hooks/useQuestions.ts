@@ -15,7 +15,7 @@ export function useQuestions(filters?: QuestionFilters) {
 		}
 		let list = await coll.toArray();
 		if (filters?.tags && filters.tags.length) {
-			list = list.filter(q => q.tags.some(t => filters.tags!.includes(t)));
+			list = list.filter(q => filters.tags!.every(t => q.tags.includes(t)));
 		}
 		if (filters?.search && filters.search.trim()) {
 			const s = filters.search.trim().toLowerCase();

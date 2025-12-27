@@ -106,6 +106,12 @@ export default function ModuleCreator() {
 	const [filterType, setFilterType] = useState<'mcq' | 'text' | 'fill_blanks' | 'matching' | undefined>(undefined);
 	const [filterSearch, setFilterSearch] = useState('');
 	const [filterTags, setFilterTags] = useState<string[]>([]);
+	const clearQuestionFilters = () => {
+		setFilterType(undefined);
+		setFilterSearch('');
+		setFilterTags([]);
+		setShowOnlySelected(false);
+	};
 	const questions = useQuestions({
 		type: filterType,
 		search: filterSearch,
@@ -495,7 +501,7 @@ export default function ModuleCreator() {
 					</div>
 				</Card>
 
-				<Card className="p-6 col-span-12 space-y-4 flex flex-col min-h-0 max-h-[70vh] overflow-hidden">
+				<Card className="p-6 col-span-12 space-y-4 flex flex-col min-h-0 max-h-[80vh] overflow-hidden">
 					<div className="flex items-center justify-between">
 						<h3 className="font-medium">Select Questions</h3>
 						<div className="flex items-center gap-2 text-sm text-muted-foreground">
@@ -554,6 +560,12 @@ export default function ModuleCreator() {
 						</label>
 					</div>
 					<div className="border rounded-md flex-1 min-h-0 overflow-auto overscroll-contain divide-y pb-2 show-scrollbar">
+						{(!displayedQuestions || displayedQuestions.length === 0) && (
+							<div className="p-4 text-sm text-muted-foreground space-y-2">
+								<div>No questions match your current filters.</div>
+								<Button size="sm" variant="outline" onClick={clearQuestionFilters}>Clear filters</Button>
+							</div>
+						)}
 						{displayedQuestions?.map(q => {
 							const selected = questionIds.includes(q.id);
 							return (
