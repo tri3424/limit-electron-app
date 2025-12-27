@@ -24,7 +24,7 @@ jobs:
       - name: Install system dependencies (build tools)
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential cmake
+          sudo apt-get install -y build-essential cmake libfuse2
 
       - name: Install dependencies
         run: npm ci
@@ -70,8 +70,10 @@ jobs:
 
       - name: Verify AppImage exists
         run: |
-          if ! find dist -maxdepth 3 -type f -name "*.AppImage" | grep -q .; then
-            echo "No .AppImage produced under dist/" >&2
+          if ! find dist -maxdepth 3 -type f -iname "*.appimage" | grep -q .; then
+            echo "No AppImage produced under dist/" >&2
+            echo "dist contents:" >&2
+            find dist -maxdepth 3 -type f -print >&2 || true
             exit 1
           fi
 
@@ -79,4 +81,4 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: Limit-Linux-${{ env.BUILD_VERSION }}-${{ github.sha }}
-          path: dist/**/*.AppImage
+          path: dist/**/*

@@ -8,6 +8,11 @@
 !define MUI_FINISHPAGE_TITLE "Limit is ready to launch"
 !define MUI_FINISHPAGE_TEXT "You're all set to continue your focused study sessions with Limit.\r\n\r\nClick Finish to close this wizard."
 
-!define MUI_FINISHPAGE_RUN "$INSTDIR\\Limit.exe"
-!define MUI_FINISHPAGE_RUN_TEXT "Launch Limit"
+!ifndef MUI_FINISHPAGE_RUN
+  !define MUI_FINISHPAGE_RUN "$INSTDIR\\Limit.exe"
+!endif
+
+!ifndef MUI_FINISHPAGE_RUN_TEXT
+  !define MUI_FINISHPAGE_RUN_TEXT "Launch Limit"
+!endif
 
