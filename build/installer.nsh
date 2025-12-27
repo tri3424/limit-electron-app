@@ -8,3 +8,18 @@
 !define MUI_FINISHPAGE_TITLE "Limit is ready to launch"
 !define MUI_FINISHPAGE_TEXT "You're all set to continue your focused study sessions with Limit.\r\n\r\nClick Finish to close this wizard."
 
+!macro customInstall
+  Delete "$DESKTOP\\${PRODUCT_FILENAME}.lnk"
+  Delete "$SMPROGRAMS\\$START_MENU_FOLDER\\${PRODUCT_FILENAME}.lnk"
+
+  CreateDirectory "$SMPROGRAMS\\$START_MENU_FOLDER"
+
+  CreateShortCut "$SMPROGRAMS\\$START_MENU_FOLDER\\${PRODUCT_FILENAME}.lnk" "$INSTDIR\\${PRODUCT_FILENAME}.exe" "" "$INSTDIR\\${PRODUCT_FILENAME}.exe" 0
+  CreateShortCut "$DESKTOP\\${PRODUCT_FILENAME}.lnk" "$INSTDIR\\${PRODUCT_FILENAME}.exe" "" "$INSTDIR\\${PRODUCT_FILENAME}.exe" 0
+!macroend
+
+!macro customUnInstall
+  Delete "$DESKTOP\\${PRODUCT_FILENAME}.lnk"
+  Delete "$SMPROGRAMS\\$START_MENU_FOLDER\\${PRODUCT_FILENAME}.lnk"
+!macroend
+

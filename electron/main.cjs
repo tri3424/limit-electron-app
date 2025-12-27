@@ -168,7 +168,7 @@ function createWindow() {
     height: 800,
     minWidth: 900,
     minHeight: 600,
-    title: 'Limit',
+    title: app.isPackaged ? `Limit v${app.getVersion()}` : 'Limit',
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
