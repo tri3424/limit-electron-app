@@ -19,10 +19,10 @@ import ModuleCreator from "./pages/ModuleCreator";
 import ModuleEditor from "./pages/ModuleEditor";
 import ModuleRunner from "./pages/ModuleRunner";
 import DailyLimitReached from "./pages/DailyLimitReached";
-import { CHAT_ROUTE, HOME_ROUTE, LOGIN_ROUTE } from "./constants/routes";
+import { HOME_ROUTE, LOGIN_ROUTE } from "./constants/routes";
 import { setupCodeBlockCopy } from "./utils/codeBlockCopy";
 import { startSemanticBackgroundQueue } from "./lib/semanticQueue";
-import Chat from "./pages/Chat";
+ 
 
 const queryClient = new QueryClient();
 
@@ -131,16 +131,6 @@ const App = () => {
         <ProtectedRoute requireAdmin>
           <Layout>
             <Settings />
-          </Layout>
-        </ProtectedRoute>
-      ),
-    },
-    {
-      path: CHAT_ROUTE,
-      element: (
-        <ProtectedRoute requireAdmin>
-          <Layout>
-            <Chat />
           </Layout>
         </ProtectedRoute>
       ),

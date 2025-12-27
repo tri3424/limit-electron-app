@@ -1,6 +1,5 @@
 import { db } from './db';
 import { analyzeQuestionSemantics, calibrateSemanticDifficultyDistribution } from './semanticEngine';
-import { getOfflineAiStatusCached, isOfflineAiUnavailableError } from './offlineAiStatus';
 
 function bandToLegacyDifficulty(band: string): 'easy' | 'medium' | 'hard' {
 	// Backward-compatible mapping for any UI that still expects easy/medium/hard.
@@ -131,7 +130,6 @@ async function processNext(batchSize: number) {
           await applySemanticResultsToQuestion({ questionId: q.id, analysisId: analysis.id });
         }
       } catch (e) {
-        if (isOfflineAiUnavailableError(e)) continue;
         console.error(e);
       }
     }
@@ -161,15 +159,12 @@ export function startSemanticBackgroundQueue(params?: { intervalMs?: number; bat
   if (state.timer) return;
 
 	// In browser/Vite mode there is no offline runtime; skip starting the queue.
+	state.timer = window.setInterval(() => {
+		if (!state.pending.length) return;
+		void processNext(batchSize);
+	}, intervalMs);
+
 	void (async () => {
-		const st = await getOfflineAiStatusCached();
-		if (!st.available) return;
-
-		state.timer = window.setInterval(() => {
-			if (!state.pending.length) return;
-			void processNext(batchSize);
-		}, intervalMs);
-
 		const all = await db.questions.toArray();
 		enqueue(all.map((q) => q.id));
 	})();

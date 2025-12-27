@@ -13,7 +13,6 @@
     "build:dev": "vite build --mode development",
     "lint": "eslint .",
     "preview": "vite preview",
-    "offline-ai:setup": "node scripts/setup-offline-ai.cjs",
     "electron:dev": "concurrently \"vite\" \"wait-on http://localhost:8080 && electron .\"",
     "electron:build": "vite build && electron-builder",
     "electron:build:win": "vite build && electron-builder --win --x64"
@@ -133,10 +132,6 @@
       "native/**"
     ],
     "extraResources": [
-      {
-        "from": "native/offline-ai",
-        "to": "native/offline-ai"
-      },
       {
         "from": "build/icon.ico",
         "to": "icon.ico"

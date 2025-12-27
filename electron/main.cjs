@@ -3,7 +3,6 @@
 const { app, BrowserWindow, Menu, ipcMain, dialog, session, shell } = require('electron');
 const path = require('path');
 const fs = require('fs');
-const { spawn } = require('child_process');
 
 // Improve wheel/trackpad feel across the app (Chromium)
 app.commandLine.appendSwitch('enable-smooth-scrolling');
@@ -26,30 +25,6 @@ function canWriteToDir(dirPath) {
 	}
 }
 
-function getOfflineAiStatus() {
-	const exePath = resolveBundledFile('native', 'offline-ai', 'offline_ai_embed.exe');
-	const modelPath = resolveBundledFile('native', 'offline-ai', 'models', 'embedding.gguf');
-	if (!exePath) {
-		return { available: false, reason: 'missing_executable' };
-	}
-	if (!modelPath) {
-		return { available: false, reason: 'missing_model' };
-	}
-	try {
-		const stat = fs.statSync(modelPath);
-		if (!stat.isFile() || stat.size < 1024 * 1024) {
-			return { available: false, reason: 'invalid_model_file' };
-		}
-	} catch {
-		return { available: false, reason: 'invalid_model_file' };
-	}
-	const tempDir = app.getPath('temp');
-	if (!canWriteToDir(tempDir)) {
-		return { available: false, reason: 'temp_not_writable' };
-	}
-	return { available: true, reason: 'ok', exePath, modelPath };
-}
-
 let mainWindow;
 const isDev = !app.isPackaged;
 
@@ -66,75 +41,6 @@ function resolveBundledFile(...segments) {
   }
   const hit = candidates.find((p) => fs.existsSync(p));
   return hit || null;
-}
-
-function runOfflineAiEmbedding(payload) {
-  const text = payload && typeof payload.text === 'string' ? payload.text : '';
-  const modelId = payload && typeof payload.modelId === 'string' ? payload.modelId : 'local-embed-v1';
-  const seed = payload && Number.isFinite(payload.seed) ? String(payload.seed) : '0';
-  const threads = payload && Number.isFinite(payload.threads) ? String(payload.threads) : '1';
-  if (!text.trim()) {
-    return Promise.resolve({ modelId, dims: 0, vector: [] });
-  }
-
-  const exePath = resolveBundledFile('native', 'offline-ai', 'offline_ai_embed.exe');
-  const modelPath = resolveBundledFile('native', 'offline-ai', 'models', 'embedding.gguf');
-  if (!exePath || !modelPath) {
-    throw new Error('Offline AI runtime is missing. Ensure native/offline-ai is bundled in the installer.');
-  }
-
-  return new Promise((resolve, reject) => {
-    const child = spawn(
-      exePath,
-      [
-        '--model',
-        modelPath,
-        '--model-id',
-        modelId,
-        '--seed',
-        seed,
-        '--threads',
-        threads,
-        '--format',
-        'json',
-      ],
-      {
-        stdio: ['pipe', 'pipe', 'pipe'],
-        windowsHide: true,
-      },
-    );
-
-    let stdout = '';
-    let stderr = '';
-    child.stdout.on('data', (d) => {
-      stdout += String(d);
-    });
-    child.stderr.on('data', (d) => {
-      stderr += String(d);
-    });
-
-    child.on('error', (err) => {
-      reject(err);
-    });
-
-    child.on('close', (code) => {
-      if (code !== 0) {
-        reject(new Error(`Offline AI process failed (code ${code}). ${stderr || ''}`.trim()));
-        return;
-      }
-      try {
-        const parsed = JSON.parse(stdout);
-        const dims = Number(parsed.dims) || 0;
-        const vector = Array.isArray(parsed.vector) ? parsed.vector.map((x) => Number(x)) : [];
-        resolve({ modelId: parsed.modelId || modelId, dims, vector });
-      } catch (e) {
-        reject(new Error(`Offline AI returned invalid JSON. ${String(e)}`));
-      }
-    });
-
-    child.stdin.write(text);
-    child.stdin.end();
-  });
 }
 
 function createWindow() {
@@ -234,15 +140,6 @@ app.on('ready', () => {
 			});
 		} catch {
 			// ignore
-		}
-	}
-
-	if (!isDev) {
-		const status = getOfflineAiStatus();
-		if (!status.available) {
-			dialog.showErrorBox('Offline AI assets missing', `Offline AI is not initialized (${status.reason}). Reinstall or rebuild the app with native/offline-ai bundled.`);
-			app.quit();
-			return;
 		}
 	}
 
@@ -370,50 +267,6 @@ app.on('ready', () => {
 		return { dataUrl: `data:image/png;base64,${pngBuffer.toString('base64')}` };
 	});
 
-	ipcMain.handle('offlineAi:status', async () => {
-		return getOfflineAiStatus();
-	});
-
-  ipcMain.handle('offlineAi:embed', async (_event, payload) => {
-    return runOfflineAiEmbedding(payload);
-  });
-
-	ipcMain.handle('offlineAi:reasoningStatus', async () => {
-		return getOfflineAiReasoningStatus();
-	});
-
-	ipcMain.handle('offlineAi:explain', async (_event, payload) => {
-		const prompt = payload && typeof payload.prompt === 'string' ? payload.prompt : '';
-		const maxTokens = payload && Number.isFinite(payload.maxTokens) ? payload.maxTokens : 700;
-		const temperature = payload && Number.isFinite(payload.temperature) ? payload.temperature : 0.7;
-		const seed = payload && Number.isFinite(payload.seed) ? payload.seed : 0;
-		return runOfflineAiReasoning({ prompt, maxTokens, temperature, seed, contextTokens: 4096, threads: 4 });
-	});
-
-	ipcMain.handle('offlineAi:chat', async (_event, payload) => {
-		const messages = payload && Array.isArray(payload.messages) ? payload.messages : [];
-		const system = payload && typeof payload.system === 'string' ? payload.system : '';
-		const maxTokens = payload && Number.isFinite(payload.maxTokens) ? payload.maxTokens : 512;
-		const temperature = payload && Number.isFinite(payload.temperature) ? payload.temperature : 0.7;
-		const seed = payload && Number.isFinite(payload.seed) ? payload.seed : 0;
-
-		const lines = [];
-		if (system) {
-			lines.push(`SYSTEM:\n${system}`);
-		}
-		for (const m of messages) {
-			if (!m || typeof m !== 'object') continue;
-			const role = String(m.role || 'user').toUpperCase();
-			const content = typeof m.content === 'string' ? m.content : '';
-			if (!content.trim()) continue;
-			lines.push(`${role}:\n${content}`);
-		}
-		lines.push('ASSISTANT:\n');
-		const prompt = lines.join('\n\n');
-
-		const res = await runOfflineAiReasoning({ prompt, maxTokens, temperature, seed, contextTokens: 4096, threads: 4 });
-		return { text: res.text };
-	});
 });
 
 app.on('window-all-closed', () => {

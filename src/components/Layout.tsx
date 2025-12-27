@@ -1,7 +1,7 @@
 import { ReactNode } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { Link, useLocation } from 'react-router-dom';
-import { Home, FileQuestion, Settings, Layers, LogOut, MessageSquare } from 'lucide-react';
+import { Home, FileQuestion, Settings, Layers, LogOut } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
@@ -13,7 +13,6 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip';
 import { HOME_ROUTE } from '@/constants/routes';
-import { CHAT_ROUTE } from '@/constants/routes';
 
 interface LayoutProps {
   children: ReactNode;
@@ -35,7 +34,6 @@ export function Layout({ children }: LayoutProps) {
     { name: 'Home', href: HOME_ROUTE, icon: Home },
     { name: 'Questions', href: '/questions', icon: FileQuestion },
     { name: 'Modules', href: '/modules', icon: Layers },
-    { name: 'Chat', href: CHAT_ROUTE, icon: MessageSquare },
     { name: 'Settings', href: '/settings', icon: Settings },
   ];
 
