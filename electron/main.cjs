@@ -1,9 +1,22 @@
 'use strict';
 
-const { app, BrowserWindow, Menu, ipcMain, dialog, session } = require('electron');
+const { app, BrowserWindow, Menu, ipcMain, dialog, session, shell } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const { spawn } = require('child_process');
+
+function getWindowIconPath() {
+	// In packaged apps on Windows/Linux, resources live under process.resourcesPath.
+	// We copy icon.ico there via electron-builder extraResources.
+	const packagedIcon = path.join(process.resourcesPath, 'icon.ico');
+	if (fs.existsSync(packagedIcon)) return packagedIcon;
+
+	// Fallback for dev / repo layout
+	const devIcon = path.join(__dirname, '..', 'build', 'icon.ico');
+	if (fs.existsSync(devIcon)) return devIcon;
+
+	return undefined;
+}
 
 // Improve wheel/trackpad feel across the app (Chromium)
 app.commandLine.appendSwitch('enable-smooth-scrolling');
@@ -13,6 +26,18 @@ app.commandLine.appendSwitch('smooth-scrolling');
 if (!app.requestSingleInstanceLock()) {
   app.quit();
 }
+
+app.on('ready', () => {
+  // Ensures the app's taskbar/start-menu icon is applied consistently on Windows.
+  // Must be set before creating windows.
+  try {
+    if (process.platform === 'win32') {
+      app.setAppUserModelId('com.subhadeep.limit');
+    }
+  } catch {
+    // ignore
+  }
+});
 
 function canWriteToDir(dirPath) {
 	try {
@@ -150,7 +175,7 @@ function createWindow() {
       webSecurity: false,
       preload: path.join(__dirname, 'preload.cjs'),
     },
-    icon: path.join(__dirname, '..', 'build', 'icon.ico'),
+    icon: getWindowIconPath(),
     autoHideMenuBar: true,
   });
 

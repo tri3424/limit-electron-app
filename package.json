@@ -136,6 +136,10 @@
       {
         "from": "native/offline-ai",
         "to": "native/offline-ai"
+      },
+      {
+        "from": "build/icon.ico",
+        "to": "icon.ico"
       }
     ],
     "win": {
@@ -154,6 +158,8 @@
       "perMachine": false,
       "allowToChangeInstallationDirectory": true,
       "runAfterFinish": true,
+      "installerIcon": "build/icon.ico",
+      "uninstallerIcon": "build/icon.ico",
       "include": "build/installer.nsh",
       "license": "build/terms-and-conditions.txt"
     }

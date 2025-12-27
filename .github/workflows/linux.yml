@@ -12,11 +12,14 @@ jobs:
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 20
+          cache: npm
 
       - name: Install system dependencies (build tools)
         run: |
@@ -24,7 +27,11 @@ jobs:
           sudo apt-get install -y build-essential cmake
 
       - name: Install dependencies
-        run: npm install
+        run: npm ci
+
+      - name: Set build version
+        run: |
+          echo "BUILD_VERSION=1.0.${GITHUB_RUN_NUMBER}" >> "$GITHUB_ENV"
 
       - name: Build llama.cpp runner (llama-cli)
         run: |
@@ -52,7 +59,7 @@ jobs:
           OFFLINE_AI_REASONING_MODEL_SHA256: ${{ vars.OFFLINE_AI_REASONING_MODEL_SHA256 || '' }}
 
       - name: Build AppImage
-        run: npm run build && npx electron-builder --linux AppImage --x64 --publish never
+        run: npm run build && npx electron-builder --linux AppImage --x64 --publish never --config.extraMetadata.version=${{ env.BUILD_VERSION }}
 
       - name: Inspect dist output
         run: |
@@ -71,5 +78,5 @@ jobs:
       - name: Upload AppImage
         uses: actions/upload-artifact@v4
         with:
-          name: Limit-Linux-AppImage
+          name: Limit-Linux-${{ env.BUILD_VERSION }}-${{ github.sha }}
           path: dist/**/*.AppImage
