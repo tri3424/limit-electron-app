@@ -158,6 +158,7 @@
       "perMachine": false,
       "allowToChangeInstallationDirectory": true,
       "runAfterFinish": true,
+      "shortcutName": "Limit Desktop",
       "installerIcon": "build/icon.ico",
       "uninstallerIcon": "build/icon.ico",
       "license": "build/terms-and-conditions.txt"
