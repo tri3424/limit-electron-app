@@ -75,6 +75,18 @@ jobs:
           Write-Output "=== dist recursive ==="
           if (Test-Path .\dist) { Get-ChildItem .\dist -Recurse -Force | Select-Object FullName,Length } else { Write-Output "dist not found" }
 
+      - name: Verify installer for this version exists
+        shell: pwsh
+        run: |
+          $expected = "Limit-Setup-${{ env.BUILD_VERSION }}.exe"
+          $path = Join-Path -Path "dist" -ChildPath $expected
+          if (-not (Test-Path $path)) {
+            Write-Output "Expected installer not found: $path"
+            Write-Output "Available installers under dist:" 
+            Get-ChildItem -Path .\dist -Recurse -Filter *.exe -ErrorAction SilentlyContinue | Select-Object FullName,Length
+            throw "Missing expected installer for version ${{ env.BUILD_VERSION }}"
+          }
+
       - name: Verify EXE exists
         shell: pwsh
         run: |
@@ -87,5 +99,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: Limit-Windows-${{ env.BUILD_VERSION }}-${{ github.sha }}
-          path: dist/**/*.exe
+          path: dist/Limit-Setup-${{ env.BUILD_VERSION }}.exe
 
