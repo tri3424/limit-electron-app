@@ -1,7 +1,7 @@
 {
   "name": "limit",
   "private": true,
-  "version": "1.0.9",
+  "version": "1.0.10",
   "description": "Limit Desktop Application",
   "type": "module",
   "main": "electron/main.cjs",
@@ -160,7 +160,6 @@
       "runAfterFinish": true,
       "installerIcon": "build/icon.ico",
       "uninstallerIcon": "build/icon.ico",
-      "include": "build/installer.nsh",
       "license": "build/terms-and-conditions.txt"
     }
   }
