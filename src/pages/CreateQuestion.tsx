@@ -18,7 +18,7 @@ import RichTextEditor from '@/components/RichTextEditor';
 import TypingAnswerMathInput from '@/components/TypingAnswerMathInput';
 import { invalidateTagModelCache, suggestTagsAdvanced } from '@/lib/tagLearning';
 import { syncQuestionGlossary } from '@/lib/glossary';
-import { enqueueSemanticAnalysis } from '@/lib/semanticQueue';
+import { enqueueSemanticAnalysis, startSemanticBackgroundQueue, stopSemanticBackgroundQueue } from '@/lib/semanticQueue';
 import {
   analyzeQuestionDraft,
   ANALYSIS_VERSION,
@@ -50,6 +50,15 @@ export default function CreateQuestion() {
   const navigate = useNavigate();
   const { id } = useParams();
   const isEditing = !!id;
+
+	useEffect(() => {
+		// The semantic background queue can be CPU-heavy (offline analysis across many questions)
+		// and may cause scroll jank while editing. Pause it on this page.
+		stopSemanticBackgroundQueue();
+		return () => {
+			startSemanticBackgroundQueue();
+		};
+	}, []);
 
   // Load existing question if editing
   const existingQuestion = useLiveQuery(
@@ -301,7 +310,7 @@ export default function CreateQuestion() {
   }
 
   const handleAddOption = () => {
-    setOptions([...options, { id: uuidv4(), text: '' }]);
+    setOptions((prev) => [...prev, { id: uuidv4(), text: '' }]);
   };
 
   const handleRemoveOption = (id: string) => {
@@ -309,20 +318,16 @@ export default function CreateQuestion() {
       toast.error('A question must have at least 2 options');
       return;
     }
-    setOptions(options.filter(opt => opt.id !== id));
-    setCorrectAnswers(correctAnswers.filter(ans => ans !== id));
+    setOptions((prev) => prev.filter((opt) => opt.id !== id));
+    setCorrectAnswers((prev) => prev.filter((ans) => ans !== id));
   };
 
   const handleOptionChange = (id: string, text: string) => {
-    setOptions(options.map(opt => opt.id === id ? { ...opt, text } : opt));
+    setOptions((prev) => prev.map((opt) => (opt.id === id ? { ...opt, text } : opt)));
   };
 
   const handleCorrectAnswerToggle = (optionId: string) => {
-    if (correctAnswers.includes(optionId)) {
-      setCorrectAnswers(correctAnswers.filter(id => id !== optionId));
-    } else {
-      setCorrectAnswers([...correctAnswers, optionId]);
-    }
+    setCorrectAnswers((prev) => (prev.includes(optionId) ? prev.filter((id) => id !== optionId) : [...prev, optionId]));
   };
 
   const handleAddTag = () => {

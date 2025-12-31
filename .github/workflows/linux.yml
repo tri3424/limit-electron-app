@@ -33,31 +33,6 @@ jobs:
         run: |
           echo "BUILD_VERSION=1.0.${GITHUB_RUN_NUMBER}" >> "$GITHUB_ENV"
 
-      - name: Build llama.cpp runner (llama-cli)
-        run: |
-          git clone --depth 1 https://github.com/ggml-org/llama.cpp.git ./_llama_cpp
-          cmake -S ./_llama_cpp -B ./_llama_cpp/build -DCMAKE_BUILD_TYPE=Release -DLLAMA_CURL=OFF
-          cmake --build ./_llama_cpp/build --target llama-cli -j 2
-
-          mkdir -p ./native/offline-ai
-          if [ -f "./_llama_cpp/build/bin/llama-cli" ]; then
-            cp -f ./_llama_cpp/build/bin/llama-cli ./native/offline-ai/llama-cli
-          elif [ -f "./_llama_cpp/build/bin/llama" ]; then
-            cp -f ./_llama_cpp/build/bin/llama ./native/offline-ai/llama-cli
-          else
-            echo "Could not find llama-cli in build output" >&2
-            exit 1
-          fi
-          chmod +x ./native/offline-ai/llama-cli
-
-      - name: Offline AI bootstrap (models)
-        run: node scripts/setup-offline-ai.cjs
-        env:
-          OFFLINE_AI_BOOTSTRAP: '1'
-          OFFLINE_AI_REASONING_MODEL: ${{ vars.OFFLINE_AI_REASONING_MODEL || '1' }}
-          OFFLINE_AI_REASONING_MODEL_URL: ${{ vars.OFFLINE_AI_REASONING_MODEL_URL || 'https://huggingface.co/lmstudio-community/Qwen2.5-3B-Instruct-GGUF/resolve/a4887aa2f3430226d71668c068e4479e2a08ca4d/Qwen2.5-3B-Instruct-Q4_K_M.gguf?download=true' }}
-          OFFLINE_AI_REASONING_MODEL_SHA256: ${{ vars.OFFLINE_AI_REASONING_MODEL_SHA256 || '' }}
-
       - name: Build AppImage
         run: npm run build && npx electron-builder --linux AppImage --x64 --publish never --config.extraMetadata.version=${{ env.BUILD_VERSION }}
 

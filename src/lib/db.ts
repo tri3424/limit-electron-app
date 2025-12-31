@@ -437,6 +437,45 @@ export interface ErrorReport {
   reporterUsername?: string;
 }
 
+export interface Song {
+  id: string;
+  title: string;
+  singer: string;
+  writer: string;
+  lyrics: string;
+  audioFilePath: string;
+  audioFileUrl: string;
+  createdAt: number;
+  updatedAt: number;
+  visible?: boolean;
+}
+
+export interface SongModule {
+	id: string;
+	title: string;
+	description?: string;
+	songIds: string[];
+	assignedUserIds: string[];
+	createdAt: number;
+	updatedAt: number;
+	visible?: boolean;
+}
+
+export interface SongListeningEvent {
+	id: string;
+	date: string; // YYYY-MM-DD
+	timestamp: number;
+	userId?: string;
+	username?: string;
+	songModuleId: string;
+	songId: string;
+	songTitle?: string;
+	eventType: 'play' | 'pause' | 'ended' | 'switch';
+	positionSec?: number;
+	songDurationSec?: number;
+	listenedMs?: number;
+}
+
 // Database class
 export class ExamDatabase extends Dexie {
   questions!: Table<Question, string>;
@@ -455,6 +494,9 @@ export class ExamDatabase extends Dexie {
   intelligenceSignals!: Table<IntelligenceSignal, string>;
   reviewInteractions!: Table<ReviewInteraction, string>;
   errorReports!: Table<ErrorReport, string>;
+	songs!: Table<Song, string>;
+	songModules!: Table<SongModule, string>;
+	songListeningEvents!: Table<SongListeningEvent, string>;
 
   constructor() {
     super('ExamDatabase');
@@ -897,6 +939,72 @@ export class ExamDatabase extends Dexie {
     }).upgrade(async () => {
       // No-op: index addition only
     });
+
+		// v17: add songs table
+		this.version(17).stores({
+			questions: 'id, type, *tags, *modules, metadata.createdAt',
+			modules: 'id, type, *tags, createdAt, visible, locked',
+			attempts: 'id, moduleId, type, startedAt, syncStatus',
+			integrityEvents: 'id, attemptId, type, timestamp',
+			tags: 'id, name',
+			semanticOntologyTags: 'id, kind, parentId, name, updatedAt',
+			semanticEmbeddings: 'id, [scope+scopeId], scope, scopeId, modelId, createdAt',
+			questionSemanticAnalyses: 'id, questionId, createdAt, [questionId+analysisVersion], [questionId+modelId], source',
+			questionSemanticOverrides: 'id, questionId, updatedAt, baseAnalysisId, [questionId+updatedAt]',
+			settings: 'id',
+			dailyStats: 'id, date, moduleId, [date+moduleId], [moduleId+date], moduleType, createdAt',
+			users: 'id, username',
+			globalGlossary: 'id, normalizedWord, word',
+			intelligenceSignals: 'id, type, questionId, moduleId, [type+moduleId], [questionId+type]',
+			reviewInteractions: 'id, attemptId, moduleId, userId, questionId, timestamp, [attemptId+questionId], [moduleId+userId]',
+			errorReports: 'id, status, createdAt, updatedAt, moduleId, questionId, questionCode, reporterUserId, [status+createdAt]',
+			songs: 'id, visible, createdAt, updatedAt'
+		});
+
+		// v18: add song modules table
+		this.version(18).stores({
+			questions: 'id, type, *tags, *modules, metadata.createdAt',
+			modules: 'id, type, *tags, createdAt, visible, locked',
+			attempts: 'id, moduleId, type, startedAt, syncStatus',
+			integrityEvents: 'id, attemptId, type, timestamp',
+			tags: 'id, name',
+			semanticOntologyTags: 'id, kind, parentId, name, updatedAt',
+			semanticEmbeddings: 'id, [scope+scopeId], scope, scopeId, modelId, createdAt',
+			questionSemanticAnalyses: 'id, questionId, createdAt, [questionId+analysisVersion], [questionId+modelId], source',
+			questionSemanticOverrides: 'id, questionId, updatedAt, baseAnalysisId, [questionId+updatedAt]',
+			settings: 'id',
+			dailyStats: 'id, date, moduleId, [date+moduleId], [moduleId+date], moduleType, createdAt',
+			users: 'id, username',
+			globalGlossary: 'id, normalizedWord, word',
+			intelligenceSignals: 'id, type, questionId, moduleId, [type+moduleId], [questionId+type]',
+			reviewInteractions: 'id, attemptId, moduleId, userId, questionId, timestamp, [attemptId+questionId], [moduleId+userId]',
+			errorReports: 'id, status, createdAt, updatedAt, moduleId, questionId, questionCode, reporterUserId, [status+createdAt]',
+			songs: 'id, visible, createdAt, updatedAt',
+			songModules: 'id, visible, createdAt, updatedAt'
+		});
+
+		// v19: add song listening analytics table
+		this.version(19).stores({
+			questions: 'id, type, *tags, *modules, metadata.createdAt',
+			modules: 'id, type, *tags, createdAt, visible, locked',
+			attempts: 'id, moduleId, type, startedAt, syncStatus',
+			integrityEvents: 'id, attemptId, type, timestamp',
+			tags: 'id, name',
+			semanticOntologyTags: 'id, kind, parentId, name, updatedAt',
+			semanticEmbeddings: 'id, [scope+scopeId], scope, scopeId, modelId, createdAt',
+			questionSemanticAnalyses: 'id, questionId, createdAt, [questionId+analysisVersion], [questionId+modelId], source',
+			questionSemanticOverrides: 'id, questionId, updatedAt, baseAnalysisId, [questionId+updatedAt]',
+			settings: 'id',
+			dailyStats: 'id, date, moduleId, [date+moduleId], [moduleId+date], moduleType, createdAt',
+			users: 'id, username',
+			globalGlossary: 'id, normalizedWord, word',
+			intelligenceSignals: 'id, type, questionId, moduleId, [type+moduleId], [questionId+type]',
+			reviewInteractions: 'id, attemptId, moduleId, userId, questionId, timestamp, [attemptId+questionId], [moduleId+userId]',
+			errorReports: 'id, status, createdAt, updatedAt, moduleId, questionId, questionCode, reporterUserId, [status+createdAt]',
+			songs: 'id, visible, createdAt, updatedAt',
+			songModules: 'id, visible, createdAt, updatedAt',
+			songListeningEvents: 'id, date, timestamp, songModuleId, userId, songId, [date+songModuleId], [songModuleId+date], [songModuleId+userId], [songModuleId+songId]'
+		});
   }
 }
 
