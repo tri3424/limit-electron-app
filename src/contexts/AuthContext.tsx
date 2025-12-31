@@ -32,7 +32,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (storedUser) {
       try {
         const parsed = JSON.parse(storedUser);
-        setUser(parsed);
+				setUser(parsed);
+
+				// Backward compatibility: older sessions might not include the student id.
+				// Without id, assignment-based modules (like song modules) won't match.
+				if (parsed && parsed.role === 'student' && !parsed.id && typeof parsed.username === 'string') {
+					void (async () => {
+						try {
+							const student = await db.users.where('username').equals(parsed.username).first();
+							if (student) {
+								const hydrated: AuthUser = { id: student.id, username: parsed.username, role: 'student' };
+								setUser(hydrated);
+								localStorage.setItem('currentUser', JSON.stringify(hydrated));
+							}
+						} catch {
+							// ignore
+						}
+					})();
+				}
       } catch {
         localStorage.removeItem('currentUser');
       }

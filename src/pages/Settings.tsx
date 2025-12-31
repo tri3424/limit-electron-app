@@ -149,6 +149,29 @@ export default function Settings() {
       const globalGlossary = await db.globalGlossary.toArray();
       const intelligenceSignals = await db.intelligenceSignals.toArray();
       const errorReports = await db.errorReports.toArray();
+      const songsRaw = await db.songs.toArray();
+      const songModules = await db.songModules.toArray();
+
+			const songs = await Promise.all(
+				songsRaw.map(async (s) => {
+					const audioFilePath = (s as any).audioFilePath as string;
+					const audioFileUrl = (s as any).audioFileUrl as string;
+					// If the song is stored as a local file, include bytes for offline backup.
+					if (window.songs?.readAudioFile && audioFilePath && audioFileUrl && audioFileUrl.startsWith('file:')) {
+						try {
+							const res = await window.songs.readAudioFile({ filePath: audioFilePath });
+							return { ...s, audioDataBase64: res.dataBase64 } as any;
+						} catch {
+							return s as any;
+						}
+					}
+					// If already a data URL, it can be restored as-is.
+					if (typeof audioFileUrl === 'string' && audioFileUrl.startsWith('data:')) {
+						return { ...s, audioDataUrl: audioFileUrl } as any;
+					}
+					return s as any;
+				}),
+			);
 
       const data = {
         questions,
@@ -162,6 +185,8 @@ export default function Settings() {
         globalGlossary,
         intelligenceSignals,
         errorReports,
+        songs,
+        songModules,
         exportedAt: new Date().toISOString(),
         schemaVersion: 14,
       };
@@ -375,6 +400,57 @@ export default function Settings() {
           if (Array.isArray(rawData.errorReports) && rawData.errorReports.length > 0) {
             await db.errorReports.bulkPut(rawData.errorReports);
           }
+					if (Array.isArray(rawData.songs) && rawData.songs.length > 0) {
+						const mappedSongs = await Promise.all(
+							rawData.songs.map(async (s: any) => {
+								const now = Date.now();
+								const fileName = typeof s?.title === 'string' && s.title.trim() ? `${s.title}.audio` : 'song.audio';
+
+								// If audio bytes exist in backup, reconstruct to a real file (Electron) or data URL (browser).
+								if (typeof s?.audioDataBase64 === 'string' && s.audioDataBase64.length > 0) {
+									if (window.songs?.saveAudioFile) {
+										try {
+											const saved = await window.songs.saveAudioFile({ fileName, dataBase64: s.audioDataBase64 });
+											return {
+												...s,
+												audioFilePath: saved.filePath,
+												audioFileUrl: saved.fileUrl,
+												updatedAt: typeof s.updatedAt === 'number' ? s.updatedAt : now,
+											};
+										} catch {
+											return {
+												...s,
+												audioFilePath: '',
+												audioFileUrl: `data:audio/*;base64,${s.audioDataBase64}`,
+												updatedAt: typeof s.updatedAt === 'number' ? s.updatedAt : now,
+											};
+										}
+									}
+									return {
+										...s,
+										audioFilePath: '',
+										audioFileUrl: `data:audio/*;base64,${s.audioDataBase64}`,
+										updatedAt: typeof s.updatedAt === 'number' ? s.updatedAt : now,
+									};
+								}
+
+								if (typeof s?.audioDataUrl === 'string' && s.audioDataUrl.startsWith('data:')) {
+									return {
+										...s,
+										audioFilePath: '',
+										audioFileUrl: s.audioDataUrl,
+										updatedAt: typeof s.updatedAt === 'number' ? s.updatedAt : now,
+									};
+								}
+
+								return s;
+							}),
+						);
+						await db.songs.bulkPut(mappedSongs);
+					}
+					if (Array.isArray(rawData.songModules) && rawData.songModules.length > 0) {
+						await db.songModules.bulkPut(rawData.songModules);
+					}
         }
       );
 

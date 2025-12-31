@@ -1,7 +1,7 @@
 import { ReactNode } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { Link, useLocation } from 'react-router-dom';
-import { Home, FileQuestion, Settings, Layers, LogOut } from 'lucide-react';
+import { Home, FileQuestion, Settings, Layers, LogOut, Music, ListMusic } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
@@ -34,6 +34,8 @@ export function Layout({ children }: LayoutProps) {
     { name: 'Home', href: HOME_ROUTE, icon: Home },
     { name: 'Questions', href: '/questions', icon: FileQuestion },
     { name: 'Modules', href: '/modules', icon: Layers },
+		{ name: 'Songs', href: '/songs-admin', icon: Music },
+		{ name: 'Song Modules', href: '/song-modules-admin', icon: ListMusic },
     { name: 'Settings', href: '/settings', icon: Settings },
   ];
 

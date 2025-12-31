@@ -422,6 +422,15 @@ const Home = () => {
   if (list.length === 0) {
     return (
       <div className="w-full py-10">
+        <div className="flex justify-end mb-4">
+          <Button
+            variant="outline"
+            onClick={() => navigate('/songs')}
+            className="border-green-300 text-green-800 hover:bg-green-50"
+          >
+            Songs
+          </Button>
+        </div>
         <div className="text-center text-muted-foreground">No modules to show</div>
       </div>
     );
@@ -429,6 +438,15 @@ const Home = () => {
 
   return (
     <div className="w-full py-10 space-y-4">
+      <div className="flex justify-end">
+        <Button
+          variant="outline"
+          onClick={() => navigate('/songs')}
+          className="border-green-300 text-green-800 hover:bg-green-50"
+        >
+          Songs
+        </Button>
+      </div>
       {list.map((m) => (
         <ModuleCard 
           key={m.id} 

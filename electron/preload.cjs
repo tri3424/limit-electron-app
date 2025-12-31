@@ -13,3 +13,15 @@ contextBridge.exposeInMainWorld('examProctor', {
     return ipcRenderer.invoke('exam:captureViewportScreenshot');
   },
 });
+
+contextBridge.exposeInMainWorld('songs', {
+  saveAudioFile: async (payload) => {
+    return ipcRenderer.invoke('songs:saveAudioFile', payload);
+  },
+  readAudioFile: async (payload) => {
+    return ipcRenderer.invoke('songs:readAudioFile', payload);
+  },
+  deleteAudioFile: async (payload) => {
+    return ipcRenderer.invoke('songs:deleteAudioFile', payload);
+  },
+});

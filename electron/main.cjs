@@ -3,6 +3,7 @@
 const { app, BrowserWindow, Menu, ipcMain, dialog, session, shell } = require('electron');
 const path = require('path');
 const fs = require('fs');
+const { pathToFileURL } = require('url');
 
 // Improve wheel/trackpad feel across the app (Chromium)
 app.commandLine.appendSwitch('enable-smooth-scrolling');
@@ -145,10 +146,65 @@ app.on('ready', () => {
 
   createWindow();
 
-  ipcMain.handle('exam:captureAppScreenshot', async (_event, payload) => {
-    if (!mainWindow || mainWindow.isDestroyed()) {
-      throw new Error('Main window is not available');
-    }
+	ipcMain.handle('songs:saveAudioFile', async (_event, payload) => {
+		const fileName = payload && typeof payload.fileName === 'string' ? payload.fileName : '';
+		const dataBase64 = payload && typeof payload.dataBase64 === 'string' ? payload.dataBase64 : '';
+		if (!fileName || !dataBase64) {
+			throw new Error('Missing fileName or dataBase64');
+		}
+
+		const safeName = path.basename(fileName).replace(/[^a-zA-Z0-9._-]/g, '_');
+		const songsDir = path.join(app.getPath('userData'), 'songs');
+		fs.mkdirSync(songsDir, { recursive: true });
+		const outPath = path.join(songsDir, `${Date.now()}-${safeName}`);
+
+		const buffer = Buffer.from(dataBase64, 'base64');
+		fs.writeFileSync(outPath, buffer);
+		return {
+			filePath: outPath,
+			fileUrl: pathToFileURL(outPath).href,
+		};
+	});
+
+	ipcMain.handle('songs:readAudioFile', async (_event, payload) => {
+		const filePath = payload && typeof payload.filePath === 'string' ? payload.filePath : '';
+		if (!filePath) {
+			throw new Error('Missing filePath');
+		}
+		const songsDir = path.join(app.getPath('userData'), 'songs');
+		const resolved = path.resolve(filePath);
+		const resolvedSongsDir = path.resolve(songsDir);
+		if (!resolved.startsWith(resolvedSongsDir + path.sep) && resolved !== resolvedSongsDir) {
+			throw new Error('Refusing to read file outside songs directory');
+		}
+		if (!fs.existsSync(resolved) || !fs.statSync(resolved).isFile()) {
+			throw new Error('File not found');
+		}
+		const buffer = fs.readFileSync(resolved);
+		return { dataBase64: buffer.toString('base64') };
+	});
+
+	ipcMain.handle('songs:deleteAudioFile', async (_event, payload) => {
+		const filePath = payload && typeof payload.filePath === 'string' ? payload.filePath : '';
+		if (!filePath) {
+			throw new Error('Missing filePath');
+		}
+		const songsDir = path.join(app.getPath('userData'), 'songs');
+		const resolved = path.resolve(filePath);
+		const resolvedSongsDir = path.resolve(songsDir);
+		if (!resolved.startsWith(resolvedSongsDir + path.sep) && resolved !== resolvedSongsDir) {
+			throw new Error('Refusing to delete file outside songs directory');
+		}
+		if (fs.existsSync(resolved) && fs.statSync(resolved).isFile()) {
+			fs.unlinkSync(resolved);
+		}
+		return { ok: true };
+	});
+
+  	ipcMain.handle('exam:captureAppScreenshot', async (_event, payload) => {
+		if (!mainWindow || mainWindow.isDestroyed()) {
+			throw new Error('Main window is not available');
+		}
 
     const attemptId = payload && typeof payload.attemptId === 'string' ? payload.attemptId : 'unknown';
     const questionId = payload && typeof payload.questionId === 'string' ? payload.questionId : undefined;
@@ -177,88 +233,20 @@ app.on('ready', () => {
     fs.writeFileSync(filePath, pngBuffer);
 
     return { filePath, ts, attemptId, questionId };
-  });
-
-	ipcMain.handle('exam:captureFullPageScreenshot', async () => {
-		if (!mainWindow || mainWindow.isDestroyed()) {
-			throw new Error('Main window is not available');
-		}
-		const wc = mainWindow.webContents;
-		const dbg = wc.debugger;
-		let attachedHere = false;
-		try {
-			if (!dbg.isAttached()) {
-				dbg.attach('1.3');
-				attachedHere = true;
-			}
-			await dbg.sendCommand('Page.enable');
-			await dbg.sendCommand('Emulation.clearDeviceMetricsOverride');
-			const metrics = await dbg.sendCommand('Page.getLayoutMetrics');
-			const contentSize = metrics && metrics.contentSize ? metrics.contentSize : null;
-			if (!contentSize || !contentSize.width || !contentSize.height) {
-				throw new Error('Unable to determine content size for screenshot');
-			}
-
-			const width = Math.max(1, Math.ceil(contentSize.width));
-			const height = Math.max(1, Math.ceil(contentSize.height));
-
-			await dbg.sendCommand('Emulation.setDeviceMetricsOverride', {
-				mobile: false,
-				width,
-				height,
-				deviceScaleFactor: 1,
-				screenWidth: width,
-				screenHeight: height,
-				positionX: 0,
-				positionY: 0,
-				scale: 1,
-			});
-
-			// Give Chromium time to relayout/repaint at the new virtual viewport.
-			try {
-				await dbg.sendCommand('Runtime.evaluate', {
-					expression: 'new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)))',
-					awaitPromise: true,
-				});
-			} catch {
-				// ignore
-			}
-			await new Promise((r) => setTimeout(r, 80));
-
-			const result = await dbg.sendCommand('Page.captureScreenshot', {
-				format: 'png',
-				fromSurface: true,
-				clip: {
-					x: 0,
-					y: 0,
-					width,
-					height,
-					scale: 1,
-				},
-			});
-			await dbg.sendCommand('Emulation.clearDeviceMetricsOverride');
-			const data = result && result.data ? String(result.data) : '';
-			if (!data) {
-				throw new Error('Empty screenshot result');
-			}
-			return { dataUrl: `data:image/png;base64,${data}` };
-		} finally {
-			try {
-				try {
-					await dbg.sendCommand('Emulation.clearDeviceMetricsOverride');
-				} catch {
-					// ignore
-				}
-				if (attachedHere && dbg.isAttached()) {
-					dbg.detach();
-				}
-			} catch {
-				// ignore
-			}
-		}
 	});
 
 	ipcMain.handle('exam:captureViewportScreenshot', async () => {
+		if (!mainWindow || mainWindow.isDestroyed()) {
+			throw new Error('Main window is not available');
+		}
+		const image = await mainWindow.webContents.capturePage();
+		const pngBuffer = image.toPNG();
+		return { dataUrl: `data:image/png;base64,${pngBuffer.toString('base64')}` };
+	});
+
+	ipcMain.handle('exam:captureFullPageScreenshot', async () => {
+		// Best-effort: capture the current window surface.
+		// (Scroll-stitching is handled in the renderer for the quiz runner.)
 		if (!mainWindow || mainWindow.isDestroyed()) {
 			throw new Error('Main window is not available');
 		}

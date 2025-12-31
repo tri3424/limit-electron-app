@@ -22,6 +22,10 @@ import DailyLimitReached from "./pages/DailyLimitReached";
 import { HOME_ROUTE, LOGIN_ROUTE } from "./constants/routes";
 import { setupCodeBlockCopy } from "./utils/codeBlockCopy";
 import { startSemanticBackgroundQueue } from "./lib/semanticQueue";
+import SongsAdmin from "./pages/SongsAdmin";
+import SongModules from "./pages/SongModules";
+import SongModulesAdmin from "./pages/SongModulesAdmin";
+import SongModuleRunner from "./pages/SongModuleRunner";
  
 
 const queryClient = new QueryClient();
@@ -135,6 +139,46 @@ const App = () => {
         </ProtectedRoute>
       ),
     },
+    {
+      path: "/songs",
+      element: (
+        <ProtectedRoute>
+          <Layout>
+            <SongModules />
+          </Layout>
+        </ProtectedRoute>
+      ),
+    },
+    {
+      path: "/songs-admin",
+      element: (
+        <ProtectedRoute requireAdmin>
+          <Layout>
+            <SongsAdmin />
+          </Layout>
+        </ProtectedRoute>
+      ),
+    },
+		{
+			path: "/song-modules-admin",
+			element: (
+				<ProtectedRoute requireAdmin>
+					<Layout>
+						<SongModulesAdmin />
+					</Layout>
+				</ProtectedRoute>
+			),
+		},
+		{
+			path: "/song-module/:id",
+			element: (
+				<ProtectedRoute>
+					<Layout>
+						<SongModuleRunner />
+					</Layout>
+				</ProtectedRoute>
+			),
+		},
     {
       path: "/daily-limit/:moduleId",
       element: (
