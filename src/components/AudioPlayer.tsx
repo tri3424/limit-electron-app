@@ -16,6 +16,7 @@ type Props = {
 	src: string;
 	className?: string;
 	title?: string;
+	showVolumeControls?: boolean;
 	onEnded?: () => void;
 	onPlay?: () => void;
 	onPause?: () => void;
@@ -23,7 +24,7 @@ type Props = {
 	onLoadedMetadata?: (payload: { duration: number }) => void;
 };
 
-export default function AudioPlayer({ src, className, title, onEnded, onPlay, onPause, onTimeUpdate, onLoadedMetadata }: Props) {
+export default function AudioPlayer({ src, className, title, showVolumeControls = true, onEnded, onPlay, onPause, onTimeUpdate, onLoadedMetadata }: Props) {
 	const audioRef = useRef<HTMLAudioElement | null>(null);
 	const [ready, setReady] = useState(false);
 	const [playing, setPlaying] = useState(false);
@@ -164,29 +165,31 @@ export default function AudioPlayer({ src, className, title, onEnded, onPlay, on
 				</div>
 			</div>
 
-			<div className="mt-2 flex items-center gap-2">
-				<Button
-					type="button"
-					variant="ghost"
-					size="icon"
-					onClick={() => setMuted((m) => !m)}
-					title={muted ? "Unmute" : "Mute"}
-				>
-					{muted || volume === 0 ? <VolumeX className="h-4 w-4" /> : <Volume2 className="h-4 w-4" />}
-				</Button>
-				<div className="w-40">
-					<Slider
-						value={[muted ? 0 : volume * 100]}
-						max={100}
-						step={1}
-						onValueChange={(v) => {
-							const p = Array.isArray(v) ? (v[0] ?? 0) : 0;
-							setMuted(false);
-							setVolume(p / 100);
-						}}
-					/>
+			{showVolumeControls ? (
+				<div className="mt-2 flex items-center gap-2">
+					<Button
+						type="button"
+						variant="ghost"
+						size="icon"
+						onClick={() => setMuted((m) => !m)}
+						title={muted ? "Unmute" : "Mute"}
+					>
+						{muted || volume === 0 ? <VolumeX className="h-4 w-4" /> : <Volume2 className="h-4 w-4" />}
+					</Button>
+					<div className="w-40">
+						<Slider
+							value={[muted ? 0 : volume * 100]}
+							max={100}
+							step={1}
+							onValueChange={(v) => {
+								const p = Array.isArray(v) ? (v[0] ?? 0) : 0;
+								setMuted(false);
+								setVolume(p / 100);
+							}}
+						/>
+					</div>
 				</div>
-			</div>
+			) : null}
 		</div>
 	);
 }

@@ -66,6 +66,7 @@
     "input-otp": "^1.4.2",
     "jspdf": "^3.0.3",
     "katex": "^0.16.25",
+    "music-metadata-browser": "2.5.11",
     "lucide-react": "^0.462.0",
     "next-themes": "^0.3.0",
     "quill": "^2.0.3",

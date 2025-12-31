@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import { v4 as uuidv4 } from "uuid";
 import { db, Song } from "@/lib/db";
@@ -9,7 +9,9 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Eye, Pencil, Trash2 } from "lucide-react";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Command, CommandEmpty, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
+import { Check, ChevronsUpDown, Eye, Pencil, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import AudioPlayer from "@/components/AudioPlayer";
 
@@ -30,6 +32,97 @@ async function fileToBase64(file: File): Promise<string> {
 	});
 }
 
+async function readArtistFromAudioFile(file: File): Promise<string | null> {
+	try {
+		const mod = await import('music-metadata-browser');
+		const metadata = await mod.parseBlob(file);
+		const artist = metadata?.common?.artist;
+		return typeof artist === 'string' && artist.trim().length ? artist.trim() : null;
+	} catch {
+		return null;
+	}
+}
+
+function fileNameToTitle(name: string) {
+	const base = name.replace(/\.[^/.]+$/, "");
+	return base.replace(/[_-]+/g, " ").trim();
+}
+
+function ComboBox({
+	value,
+	onChange,
+	options,
+	placeholder,
+}: {
+	value: string;
+	onChange: (next: string) => void;
+	options: string[];
+	placeholder: string;
+}) {
+	const [open, setOpen] = useState(false);
+	const [query, setQuery] = useState("");
+	const filtered = useMemo(() => {
+		const q = query.trim().toLowerCase();
+		if (!q) return options;
+		return options.filter((o) => o.toLowerCase().includes(q));
+	}, [options, query]);
+
+	const displayValue = value.trim().length ? value : placeholder;
+
+	return (
+		<Popover open={open} onOpenChange={setOpen}>
+			<PopoverTrigger asChild>
+				<Button
+					variant="outline"
+					role="combobox"
+					aria-expanded={open}
+					className="w-full justify-between"
+				>
+					<span className={value.trim().length ? "truncate" : "truncate text-muted-foreground"}>{displayValue}</span>
+					<ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+				</Button>
+			</PopoverTrigger>
+			<PopoverContent className="w-[--radix-popover-trigger-width] p-0" align="start">
+				<Command>
+					<CommandInput value={query} onValueChange={setQuery} placeholder={placeholder} />
+					<CommandList>
+						<CommandEmpty>No matches.</CommandEmpty>
+						{query.trim().length > 0 && !options.some((o) => o.toLowerCase() === query.trim().toLowerCase()) ? (
+							<CommandItem
+								value={query.trim()}
+								onSelect={() => {
+									onChange(query.trim());
+									setOpen(false);
+								}}
+							>
+								<div className="flex items-center gap-2">
+									<Check className="h-4 w-4 opacity-0" />
+									<span className="truncate">Use "{query.trim()}"</span>
+								</div>
+							</CommandItem>
+						) : null}
+						{filtered.map((o) => (
+							<CommandItem
+								key={o}
+								value={o}
+								onSelect={() => {
+									onChange(o);
+									setOpen(false);
+								}}
+							>
+								<div className="flex items-center gap-2">
+									<Check className={value.trim().toLowerCase() === o.toLowerCase() ? "h-4 w-4" : "h-4 w-4 opacity-0"} />
+									<span className="truncate">{o}</span>
+								</div>
+							</CommandItem>
+						))}
+					</CommandList>
+				</Command>
+			</PopoverContent>
+		</Popover>
+	);
+}
+
 async function fileToDataUrl(file: File): Promise<string> {
 	return new Promise((resolve, reject) => {
 		const reader = new FileReader();
@@ -48,6 +141,7 @@ async function fileToDataUrl(file: File): Promise<string> {
 
 export default function SongsAdmin() {
 	const songs = useLiveQuery(() => db.songs.orderBy("createdAt").reverse().toArray(), [], [] as Song[]);
+	const uploadAudioInputRef = useRef<HTMLInputElement | null>(null);
 
 	const [title, setTitle] = useState("");
 	const [singer, setSinger] = useState("");
@@ -70,12 +164,28 @@ export default function SongsAdmin() {
 	const canSave = useMemo(() => {
 		return (
 			title.trim().length > 0 &&
-			singer.trim().length > 0 &&
-			writer.trim().length > 0 &&
 			lyrics.trim().length > 0 &&
 			audioFile != null
 		);
-	}, [title, singer, writer, lyrics, audioFile]);
+	}, [title, lyrics, audioFile]);
+
+	const singerOptions = useMemo(() => {
+		const set = new Set(
+			(songs ?? [])
+				.map((s) => (s.singer ?? "").trim())
+				.filter((v) => v.length > 0),
+		);
+		return Array.from(set).sort((a, b) => a.localeCompare(b));
+	}, [songs]);
+
+	const writerOptions = useMemo(() => {
+		const set = new Set(
+			(songs ?? [])
+				.map((s) => (s.writer ?? "").trim())
+				.filter((v) => v.length > 0),
+		);
+		return Array.from(set).sort((a, b) => a.localeCompare(b));
+	}, [songs]);
 
 	return (
 		<div className="max-w-7xl mx-auto space-y-6">
@@ -99,18 +209,28 @@ export default function SongsAdmin() {
 					</div>
 					<div className="space-y-2">
 						<Label>Singer</Label>
-						<Input value={singer} onChange={(e) => setSinger(e.target.value)} placeholder="Singer" />
+						<ComboBox value={singer} onChange={setSinger} options={singerOptions} placeholder="Singer" />
 					</div>
 					<div className="space-y-2">
 						<Label>Writer</Label>
-						<Input value={writer} onChange={(e) => setWriter(e.target.value)} placeholder="Writer" />
+						<ComboBox value={writer} onChange={setWriter} options={writerOptions} placeholder="Writer" />
 					</div>
 					<div className="space-y-2">
 						<Label>Audio file</Label>
 						<Input
+							ref={uploadAudioInputRef}
 							type="file"
 							accept="audio/*"
-							onChange={(e) => setAudioFile(e.target.files?.[0] ?? null)}
+							onChange={(e) => {
+								const file = e.target.files?.[0] ?? null;
+								setAudioFile(file);
+								if (file && !title.trim()) setTitle(fileNameToTitle(file.name));
+								if (file && !singer.trim()) {
+									void readArtistFromAudioFile(file).then((artist) => {
+										if (artist && !singer.trim()) setSinger(artist);
+									});
+								}
+							}}
 						/>
 					</div>
 				</div>
@@ -160,6 +280,7 @@ export default function SongsAdmin() {
 								setWriter("");
 								setLyrics("");
 								setAudioFile(null);
+								if (uploadAudioInputRef.current) uploadAudioInputRef.current.value = "";
 								toast.success(window.songs?.saveAudioFile ? 'Song uploaded' : 'Song uploaded (stored locally)');
 							} catch (err) {
 								console.error(err);
@@ -288,11 +409,11 @@ export default function SongsAdmin() {
 						</div>
 						<div className="space-y-2">
 							<Label>Singer</Label>
-							<Input value={editSinger} onChange={(e) => setEditSinger(e.target.value)} />
+							<ComboBox value={editSinger} onChange={setEditSinger} options={singerOptions} placeholder="Singer" />
 						</div>
 						<div className="space-y-2">
 							<Label>Writer</Label>
-							<Input value={editWriter} onChange={(e) => setEditWriter(e.target.value)} />
+							<ComboBox value={editWriter} onChange={setEditWriter} options={writerOptions} placeholder="Writer" />
 						</div>
 						<div className="space-y-2">
 							<Label>Replace audio (optional)</Label>
@@ -308,7 +429,7 @@ export default function SongsAdmin() {
 							Cancel
 						</Button>
 						<Button
-							disabled={!editTarget || editing || !editTitle.trim() || !editSinger.trim() || !editWriter.trim() || !editLyrics.trim()}
+							disabled={!editTarget || editing || !editTitle.trim() || !editLyrics.trim()}
 							onClick={async () => {
 								if (!editTarget) return;
 								setEditing(true);

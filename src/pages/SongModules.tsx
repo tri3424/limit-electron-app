@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { db, SongModule } from '@/lib/db';
 import { useAuth } from '@/contexts/AuthContext';
 import { useNavigate } from 'react-router-dom';
+import { HOME_ROUTE } from '@/constants/routes';
 
 export default function SongModules() {
 	const navigate = useNavigate();
@@ -26,9 +27,18 @@ export default function SongModules() {
 
 	return (
 		<div className="max-w-7xl mx-auto space-y-6">
-			<div>
+			<div className="flex items-start justify-between gap-4">
+				{!isAdmin ? (
+					<Button variant="outline" onClick={() => navigate(HOME_ROUTE)}>
+						Back
+					</Button>
+				) : (
+					<div />
+				)}
+				<div className="flex-1">
 				<h1 className="text-3xl font-bold text-foreground">Song Modules</h1>
 				<p className="text-muted-foreground mt-2">Open a module to view its songs.</p>
+				</div>
 			</div>
 
 			<div className="space-y-4">

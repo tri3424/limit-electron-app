@@ -211,7 +211,7 @@ export default function SongModuleRunner() {
 						placeholder="Search by title / singer / writer..."
 						className="mb-3"
 					/>
-					<div className="space-y-2">
+					<div className="space-y-2 max-h-[60vh] overflow-y-auto overflow-x-hidden pr-1">
 						{filteredSongs.map((s) => (
 							<Button
 								key={s.id}
@@ -252,6 +252,7 @@ export default function SongModuleRunner() {
 							<AudioPlayer
 								src={selectedSong.audioFileUrl}
 								title={selectedSong.title}
+								showVolumeControls={false}
 								onLoadedMetadata={({ duration }) => setKnownSongDurationSec(duration)}
 								onTimeUpdate={({ currentTime }) => setKnownPositionSec(currentTime)}
 								onPlay={() => {
