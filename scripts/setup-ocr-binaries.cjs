@@ -185,22 +185,43 @@ async function ensurePoppler(tempDir) {
 async function ensureTesseract(tempDir) {
   console.log('[ocr-bootstrap] Fetching Tesseract ...');
 
-  // UB Mannheim links to the official tesseract-ocr/tesseract release installer.
-  const rel = await httpsGetJson('https://api.github.com/repos/tesseract-ocr/tesseract/releases/latest');
-  const assets = Array.isArray(rel.assets) ? rel.assets : [];
-  const asset = assets.find(
-    (a) =>
-      typeof a.name === 'string' &&
-      /tesseract-ocr-w64-setup-.*\.exe$/i.test(a.name) &&
-      typeof a.browser_download_url === 'string'
-  );
+  const overrideUrl = process.env.TESSERACT_INSTALLER_URL;
+  let downloadUrl = '';
+  let fileName = '';
 
-  if (!asset || !asset.browser_download_url) {
-    throw new Error('[ocr-bootstrap] Could not find tesseract-ocr-w64-setup-*.exe in latest tesseract release.');
+  if (overrideUrl && typeof overrideUrl === 'string') {
+    downloadUrl = overrideUrl;
+    fileName = path.basename(new URL(downloadUrl).pathname) || 'tesseract-installer.exe';
+  } else {
+    // The "latest" release is sometimes source-only and may not ship Windows installers.
+    // Scan a few recent releases for the w64 installer asset.
+    const releases = await httpsGetJson('https://api.github.com/repos/tesseract-ocr/tesseract/releases?per_page=30&page=1');
+    const list = Array.isArray(releases) ? releases : [];
+    for (const rel of list) {
+      const assets = Array.isArray(rel.assets) ? rel.assets : [];
+      const asset = assets.find(
+        (a) =>
+          typeof a.name === 'string' &&
+          /tesseract-ocr-w64-setup-.*\\.exe$/i.test(a.name) &&
+          typeof a.browser_download_url === 'string'
+      );
+      if (asset && asset.browser_download_url) {
+        downloadUrl = asset.browser_download_url;
+        fileName = asset.name;
+        break;
+      }
+    }
   }
 
-  const exePath = path.join(tempDir, asset.name);
-  await downloadToFile(asset.browser_download_url, exePath);
+  if (!downloadUrl) {
+    // Fallback to a known working installer referenced by UB Mannheim documentation.
+    downloadUrl = 'https://github.com/tesseract-ocr/tesseract/releases/download/5.5.0/tesseract-ocr-w64-setup-5.5.0.20241111.exe';
+    fileName = 'tesseract-ocr-w64-setup-5.5.0.20241111.exe';
+    console.warn('[ocr-bootstrap] Could not locate a Windows installer asset via GitHub API; using fallback URL:', downloadUrl);
+  }
+
+  const exePath = path.join(tempDir, fileName);
+  await downloadToFile(downloadUrl, exePath);
 
   const installDir = path.join(tempDir, 'tesseract-install');
   rimraf(installDir);
