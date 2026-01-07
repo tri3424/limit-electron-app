@@ -2,7 +2,7 @@ name: Build Linux AppImage
 
 on:
   push:
-    branches: [ main ]
+    branches: [ main, remove-offline-ai ]
   workflow_dispatch:
 
 jobs:
