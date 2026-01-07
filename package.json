@@ -13,11 +13,10 @@
     "build:dev": "vite build --mode development",
     "lint": "eslint .",
     "preview": "vite preview",
-    "postinstall": "node scripts/setup-ocr-binaries.cjs",
-    "setup:ocr": "node scripts/setup-ocr-binaries.cjs",
+    "validate:ocr": "node scripts/setup-ocr-binaries.cjs",
     "electron:dev": "concurrently \"vite\" \"wait-on http://localhost:8080 && electron .\"",
-    "electron:build": "node scripts/check-ocr-binaries.cjs && vite build && electron-builder",
-    "electron:build:win": "node scripts/check-ocr-binaries.cjs && vite build && electron-builder --win --x64"
+    "electron:build": "vite build && electron-builder",
+    "electron:build:win": "vite build && electron-builder --win --x64"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",

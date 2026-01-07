@@ -6,6 +6,15 @@ const path = require('path');
 const ROOT = path.join(__dirname, '..');
 const OFFLINE_DIR = path.join(ROOT, 'native', 'offline-ai');
 
+function getPlatformArchDir() {
+  const p = process.platform;
+  const a = process.arch;
+  if (p === 'win32') return a === 'x64' ? 'windows-x64' : `windows-${a}`;
+  if (p === 'linux') return a === 'x64' ? 'linux-x64' : `linux-${a}`;
+  if (p === 'darwin') return a === 'arm64' ? 'macos-arm64' : a === 'x64' ? 'macos-x64' : `macos-${a}`;
+  return `${p}-${a}`;
+}
+
 const expected = [
   { platform: 'win32', name: 'pdftoppm.exe' },
   { platform: 'win32', name: 'tesseract.exe' },
@@ -33,11 +42,15 @@ function main() {
     return;
   }
 
+  const bundleDir = path.join(OFFLINE_DIR, getPlatformArchDir());
+
   const missing = [];
   for (const r of required) {
-    const p = path.join(OFFLINE_DIR, r.name);
+    const p = path.join(bundleDir, r.name);
     if (!exists(p)) missing.push(`- ${path.relative(ROOT, p)}`);
   }
+  const tessdataEng = path.join(bundleDir, 'tessdata', 'eng.traineddata');
+  if (!exists(tessdataEng)) missing.push(`- ${path.relative(ROOT, tessdataEng)}`);
 
   if (missing.length) {
     const msg = [
@@ -47,7 +60,7 @@ function main() {
       ...missing,
       '',
       'Fix:',
-      '1) Place the correct binaries into native/offline-ai/',
+      `1) Place the correct binaries into native/offline-ai/${getPlatformArchDir()}/`,
       '2) Rebuild the installer.',
       '',
       'Note: electron-builder is configured to include native/** and unpack it from asar, but the files must exist at build time.',

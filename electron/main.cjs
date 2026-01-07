@@ -31,6 +31,15 @@ function canWriteToDir(dirPath) {
 let mainWindow;
 const isDev = !app.isPackaged;
 
+function getOcrBundleDirName() {
+	const p = process.platform;
+	const a = process.arch;
+	if (p === 'win32') return a === 'x64' ? 'windows-x64' : `windows-${a}`;
+	if (p === 'linux') return a === 'x64' ? 'linux-x64' : `linux-${a}`;
+	if (p === 'darwin') return a === 'arm64' ? 'macos-arm64' : a === 'x64' ? 'macos-x64' : `macos-${a}`;
+	return `${p}-${a}`;
+}
+
 function resolveBundledFile(...segments) {
   const candidates = [];
   const appPath = app.getAppPath();
@@ -409,11 +418,14 @@ app.on('ready', () => {
 
 		const pdftoppmName = process.platform === 'win32' ? 'pdftoppm.exe' : 'pdftoppm';
 		const tesseractName = process.platform === 'win32' ? 'tesseract.exe' : 'tesseract';
-		const pdftoppm = resolveBundledFile('native', 'offline-ai', pdftoppmName) || resolveBundledFile('native', 'offline-ai', 'pdftoppm');
-		const tesseract = resolveBundledFile('native', 'offline-ai', tesseractName) || resolveBundledFile('native', 'offline-ai', 'tesseract');
-		if (!pdftoppm || !tesseract) {
+		const ocrDirName = getOcrBundleDirName();
+		const pdftoppm = resolveBundledFile('native', 'offline-ai', ocrDirName, pdftoppmName);
+		const tesseract = resolveBundledFile('native', 'offline-ai', ocrDirName, tesseractName);
+		const tessdataEng = resolveBundledFile('native', 'offline-ai', ocrDirName, 'tessdata', 'eng.traineddata');
+		const tessdataDir = resolveBundledFile('native', 'offline-ai', ocrDirName, 'tessdata');
+		if (!pdftoppm || !tesseract || !tessdataEng || !tessdataDir) {
 			throw new Error(
-				`Missing bundled OCR binaries.\n\nExpected the following files to be bundled with the installer:\n- native/offline-ai/${pdftoppmName}\n- native/offline-ai/${tesseractName}\n\nFix: add these binaries into the repository (or your build pipeline) under native/offline-ai and rebuild the Windows installer.\nNote: electron-builder is configured to unpack native/** via asarUnpack, but the files must exist at build time.`
+				`Missing bundled OCR files.\n\nExpected these files to exist locally (offline-first) under:\n- native/offline-ai/${ocrDirName}/\n\nRequired:\n- ${pdftoppmName}\n- ${tesseractName}\n- tessdata/eng.traineddata\n\nFix: place the OCR binaries + tessdata into native/offline-ai/${ocrDirName}/ and rebuild the installer.\nNote: electron-builder is configured to include native/** and unpack it via asarUnpack, but the files must exist at build time.`
 			);
 		}
 		const stat = fs.statSync(pdfFilePath);
@@ -442,7 +454,10 @@ app.on('ready', () => {
 		for (let i = 0; i < pagePngs.length; i++) {
 			const pngPath = path.join(baseDir, pagePngs[i]);
 			const outBase = path.join(baseDir, `page-${i + 1}`);
-			runBinaryOrThrow(tesseract, [pngPath, outBase, '--dpi', String(dpi), 'tsv'], { cwd: baseDir });
+			runBinaryOrThrow(tesseract, [pngPath, outBase, '--dpi', String(dpi), 'tsv'], {
+				cwd: baseDir,
+				env: { ...process.env, TESSDATA_PREFIX: tessdataDir },
+			});
 			const tsvPath = `${outBase}.tsv`;
 			const tsvText = fs.existsSync(tsvPath) ? fs.readFileSync(tsvPath, 'utf8') : '';
 			const words = parseTesseractTsv(tsvText);

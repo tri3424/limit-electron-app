@@ -24,17 +24,6 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Detect OCR binaries
-        shell: pwsh
-        run: |
-          $pdftoppm = Test-Path .\native\offline-ai\pdftoppm.exe
-          $tesseract = Test-Path .\native\offline-ai\tesseract.exe
-          if ($pdftoppm -and $tesseract) {
-            Write-Output "OCR binaries present"
-          } else {
-            Write-Output "OCR binaries missing; Windows installer will still be built in CI, but offline PDF OCR import will not work until binaries are bundled."
-          }
-
       - name: Sanity check installer config
         shell: pwsh
         run: |
