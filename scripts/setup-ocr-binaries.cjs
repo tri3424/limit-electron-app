@@ -152,6 +152,28 @@ function runPwsh(script) {
   return res;
 }
 
+function runExeOrThrow(exe, args) {
+  const res = spawnSync(exe, args, { encoding: 'utf8' });
+  if (res.error) throw res.error;
+  if (res.status !== 0) {
+    throw new Error(`Command failed: ${exe} ${args.join(' ')}\n${res.stderr || res.stdout || ''}`);
+  }
+  return res;
+}
+
+function tryExtractWith7zip(installerExePath, outDir) {
+  const candidates = ['7z', '7za', 'C\\\\Program Files\\\\7-Zip\\\\7z.exe'];
+  for (const c of candidates) {
+    try {
+      runExeOrThrow(c, ['x', '-y', `-o${outDir}`, installerExePath]);
+      return true;
+    } catch {
+      // try next
+    }
+  }
+  return false;
+}
+
 async function ensurePoppler(tempDir) {
   console.log('[ocr-bootstrap] Fetching Poppler (pdftoppm) ...');
 
@@ -227,26 +249,29 @@ async function ensureTesseract(tempDir) {
   rimraf(installDir);
   mkdirp(installDir);
 
-  // Most NSIS installers support: /S (silent) and /D=<dir> (install dir) as the last argument.
-  // We use PowerShell Start-Process to wait for completion.
-  const escapedExe = exePath.replace(/'/g, "''");
-  const escapedInstall = installDir.replace(/'/g, "''");
-  runPwsh(`$p = Start-Process -FilePath '${escapedExe}' -ArgumentList @('/S','/D=${escapedInstall}') -Wait -PassThru; if ($p.ExitCode -ne 0) { throw ('Tesseract installer exited with code ' + $p.ExitCode) }`);
+  // Prefer extracting the installer using 7-Zip. This is more reliable in CI than running
+  // silent installers (some ignore /D or require different flags).
+  const extracted = tryExtractWith7zip(exePath, installDir);
+  if (!extracted) {
+    console.warn('[ocr-bootstrap] 7-Zip extraction not available; falling back to silent install.');
 
-  const tesseractExe = path.join(installDir, 'tesseract.exe');
-  if (!exists(tesseractExe)) {
-    // Some installers nest into a subfolder; try to locate it.
-    const located = findFirstFile(installDir, (p) => p.toLowerCase().endsWith('tesseract.exe'));
-    if (!located) {
-      throw new Error('[ocr-bootstrap] tesseract.exe not found after installing Tesseract');
-    }
-    console.log(`[ocr-bootstrap] Copying Tesseract folder from ${path.dirname(located)} -> ${OFFLINE_DIR}`);
-    copyDirRecursive(path.dirname(located), OFFLINE_DIR);
-    return;
+    // Most NSIS installers support: /S (silent) and /D=<dir> (install dir) as the last argument.
+    // We use PowerShell Start-Process to wait for completion.
+    const escapedExe = exePath.replace(/'/g, "''");
+    const escapedInstall = installDir.replace(/'/g, "''");
+    runPwsh(
+      `$p = Start-Process -FilePath '${escapedExe}' -ArgumentList @('/S','/D=${escapedInstall}') -Wait -PassThru; if ($p.ExitCode -ne 0) { throw ('Tesseract installer exited with code ' + $p.ExitCode) }`
+    );
   }
 
-  console.log(`[ocr-bootstrap] Copying Tesseract folder from ${installDir} -> ${OFFLINE_DIR}`);
-  copyDirRecursive(installDir, OFFLINE_DIR);
+  // Locate tesseract.exe anywhere under the extracted/installed tree.
+  const located = findFirstFile(installDir, (p) => p.toLowerCase().endsWith('tesseract.exe'));
+  if (!located) {
+    throw new Error('[ocr-bootstrap] tesseract.exe not found after extracting/installing Tesseract');
+  }
+
+  console.log(`[ocr-bootstrap] Copying Tesseract folder from ${path.dirname(located)} -> ${OFFLINE_DIR}`);
+  copyDirRecursive(path.dirname(located), OFFLINE_DIR);
 }
 
 function hasOcrBinaries() {
