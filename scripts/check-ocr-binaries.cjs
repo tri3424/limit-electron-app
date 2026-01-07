@@ -28,6 +28,11 @@ function main() {
   const required = expected.filter((e) => e.platform === platform);
   if (!required.length) return;
 
+  if (process.env.SKIP_OCR_BINARY_CHECK === '1' || process.env.SKIP_OCR_BINARY_CHECK === 'true') {
+    console.warn('[build] SKIP_OCR_BINARY_CHECK is set; skipping OCR binary presence check.');
+    return;
+  }
+
   const missing = [];
   for (const r of required) {
     const p = path.join(OFFLINE_DIR, r.name);
