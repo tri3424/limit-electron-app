@@ -48,8 +48,6 @@ jobs:
           Write-Output "BUILD_VERSION=$ver" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: Build EXE
-        env:
-          SKIP_OCR_BINARY_CHECK: true
         run: npm run electron:build:win -- --publish never --config.extraMetadata.version=${{ env.BUILD_VERSION }}
 
       - name: Inspect dist output
