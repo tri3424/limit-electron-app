@@ -26,3 +26,6 @@ dist-ssr
 
 # Offline AI models (too large for git; downloaded in CI)
 native/offline-ai/models/*.gguf
+
+[A-Za-z]:*
+**/[A-Za-z]:*
