@@ -16,6 +16,14 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { toast } from 'sonner';
 import RichTextEditor from '@/components/RichTextEditor';
 import TypingAnswerMathInput from '@/components/TypingAnswerMathInput';
+import {
+	Dialog,
+	DialogContent,
+	DialogDescription,
+	DialogFooter,
+	DialogHeader,
+	DialogTitle,
+} from '@/components/ui/dialog';
 import { invalidateTagModelCache, suggestTagsAdvanced } from '@/lib/tagLearning';
 import { syncQuestionGlossary } from '@/lib/glossary';
 import { enqueueSemanticAnalysis, startSemanticBackgroundQueue, stopSemanticBackgroundQueue } from '@/lib/semanticQueue';
@@ -39,6 +47,60 @@ const TYPE_LABELS: Record<Question['type'], string> = {
   fill_blanks: 'Fill in the Blanks',
   matching: 'Matching',
 };
+
+async function blobToBase64(blob: Blob): Promise<string> {
+	return await new Promise((resolve, reject) => {
+		const reader = new FileReader();
+		reader.onerror = () => reject(new Error('Failed to read blob'));
+		reader.onload = () => {
+			const res = reader.result;
+			if (typeof res !== 'string') {
+				reject(new Error('Unexpected FileReader result'));
+				return;
+			}
+			const commaIdx = res.indexOf(',');
+			resolve(commaIdx >= 0 ? res.slice(commaIdx + 1) : res);
+		};
+		reader.readAsDataURL(blob);
+	});
+}
+
+async function tryFetchAsBlob(url: string): Promise<{ blob: Blob; mimeType: string } | null> {
+	try {
+		const res = await fetch(url);
+		if (!res.ok) return null;
+		const blob = await res.blob();
+		const mimeType = blob.type || res.headers.get('content-type') || 'application/octet-stream';
+		return { blob, mimeType };
+	} catch {
+		return null;
+	}
+}
+
+type ImportedOcrQuestion = {
+	pageIndex: number;
+	text: string;
+	questionImages: string[];
+	options: Record<string, { text: string; images: string[] }>;
+};
+
+function flattenOcrQuestions(res: any): ImportedOcrQuestion[] {
+	const out: ImportedOcrQuestion[] = [];
+	const pages = Array.isArray(res?.pages) ? res.pages : [];
+	for (const p of pages) {
+		const pageIndex = Number.isFinite(p?.pageIndex) ? p.pageIndex : 0;
+		const qs = Array.isArray(p?.questions) ? p.questions : [];
+		for (const q of qs) {
+			out.push({
+				pageIndex,
+				text: String(q?.text || ''),
+				questionImages: Array.isArray(q?.questionImages) ? q.questionImages.filter(Boolean) : [],
+				options: q?.options && typeof q.options === 'object' ? q.options : {},
+			});
+		}
+	}
+	return out;
+}
 
 function classicDifficultyToLevel(value?: 'easy' | 'medium' | 'hard'): number {
   if (value === 'easy') return 3;
@@ -71,6 +133,7 @@ export default function CreateQuestion() {
   // Form state
   const [questionType, setQuestionType] = useState<'mcq' | 'text' | 'fill_blanks' | 'matching'>('mcq');
   const [questionText, setQuestionText] = useState('');
+  const [questionImages, setQuestionImages] = useState<string[]>([]);
   const [options, setOptions] = useState([
     { id: uuidv4(), text: '' },
     { id: uuidv4(), text: '' },
@@ -98,7 +161,10 @@ export default function CreateQuestion() {
   const [difficultySpectrum, setDifficultySpectrum] = useState<
     { minLevel: number; maxLevel: number; recommendedLevel: number; sampleCount: number; source: 'corpus' | 'heuristic' } | null
   >(null);
-  const settings = useLiveQuery(() => db.settings.get('1'));
+	const [importPreviewOpen, setImportPreviewOpen] = useState(false);
+	const [importedOcrQuestions, setImportedOcrQuestions] = useState<ImportedOcrQuestion[]>([]);
+	const [selectedImportedIndexes, setSelectedImportedIndexes] = useState<Record<number, boolean>>({});
+  const settings = useLiveQuery(() => db.settings.get('1'), [], null as any);
   const aiOrchestrator = settings?.aiOrchestrator;
   const levelOptions = useMemo(() => mapLevelToSelectOptions(), []);
   const difficultyBand = useMemo(() => {
@@ -266,6 +332,7 @@ export default function CreateQuestion() {
 
     setQuestionType(existingQuestion.type);
     setQuestionText(existingQuestion.text || '');
+    setQuestionImages((existingQuestion as any).questionImages || []);
     setOptions(
       existingQuestion.type === 'mcq'
         ? existingQuestion.options || [
@@ -487,6 +554,7 @@ export default function CreateQuestion() {
       code: questionCode,
       text: questionText.trim(),
       type: questionType,
+      questionImages,
       options: questionType === 'mcq' ? options : undefined,
       correctAnswers: questionType === 'mcq' || questionType === 'text' ? correctAnswers : undefined,
       fillBlanks: questionType === 'fill_blanks' ? { blanks: nextFillBlanksMeta } : undefined,
@@ -505,6 +573,7 @@ export default function CreateQuestion() {
         await db.questions.update(id!, {
           text: questionData.text,
           type: questionData.type,
+          questionImages: (questionData as any).questionImages,
           options: questionData.options,
           correctAnswers: questionData.correctAnswers,
           fillBlanks: questionData.fillBlanks,
@@ -567,7 +636,170 @@ export default function CreateQuestion() {
             {isEditing ? 'Update question details' : 'Add a new question to your bank'}
           </p>
         </div>
+			<div className="ml-auto">
+				<Button
+					type="button"
+					variant="outline"
+					onClick={async () => {
+						try {
+							if (!window.ocr?.importExamPdf) {
+								toast.error('PDF import is only available in the desktop (Electron) app.');
+								return;
+							}
+							const rangeRaw = window.prompt('Import which pages? Examples: 1 or 1-3. Leave blank for all pages.', '');
+							let pageStart: number | undefined;
+							let pageEnd: number | undefined;
+							if (typeof rangeRaw === 'string' && rangeRaw.trim().length) {
+								const txt = rangeRaw.trim();
+								const m = txt.match(/^\s*(\d+)\s*(?:-\s*(\d+)\s*)?$/);
+								if (!m) {
+									toast.error('Invalid page range. Use 1 or 1-3');
+									return;
+								}
+								pageStart = Number(m[1]);
+								pageEnd = m[2] ? Number(m[2]) : Number(m[1]);
+							}
+							const res = await window.ocr.importExamPdf({ dpi: 300, pageStart, pageEnd });
+							const flattened = flattenOcrQuestions(res);
+							if (!flattened.length) {
+								toast.error('No questions detected');
+								return;
+							}
+							setImportedOcrQuestions(flattened);
+							setSelectedImportedIndexes(
+								Object.fromEntries(flattened.map((_, idx) => [idx, true])) as Record<number, boolean>
+							);
+							setImportPreviewOpen(true);
+						} catch (e) {
+							toast.error('Import failed');
+							console.error(e);
+						}
+					}}
+				>
+					Import PDF
+				</Button>
+			</div>
       </div>
+
+			<Dialog open={importPreviewOpen} onOpenChange={setImportPreviewOpen}>
+				<DialogContent className="max-w-4xl">
+					<DialogHeader>
+						<DialogTitle>Import Questions from PDF</DialogTitle>
+						<DialogDescription>Select which extracted questions to insert into your question bank.</DialogDescription>
+					</DialogHeader>
+					<div className="max-h-[70vh] overflow-auto space-y-4 pr-2">
+						{importedOcrQuestions.map((q, idx) => {
+							const checked = !!selectedImportedIndexes[idx];
+							const optionKeys = Object.keys(q.options || {});
+							return (
+								<Card key={`${q.pageIndex}-${idx}`} className="p-4 space-y-3">
+									<div className="flex items-start gap-3">
+										<Checkbox
+											checked={checked}
+											onCheckedChange={(v) => {
+												setSelectedImportedIndexes((prev) => ({ ...prev, [idx]: !!v }));
+											}}
+										/>
+										<div className="flex-1">
+											<div className="text-sm text-muted-foreground">Page {q.pageIndex + 1} • Extracted #{idx + 1}</div>
+											<div className="mt-2 whitespace-pre-wrap text-sm">{q.text?.slice(0, 800) || ''}</div>
+											{Array.isArray(q.questionImages) && q.questionImages.length > 0 ? (
+												<div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-3">
+													{q.questionImages.map((src, i2) => (
+														<img key={`${src}-${i2}`} src={src} className="max-w-full rounded-md border" loading="lazy" />
+													))}
+											</div>
+										) : null}
+										{optionKeys.length ? (
+											<div className="mt-3 space-y-2">
+												<div className="text-sm font-medium">Options</div>
+												{optionKeys.map((k) => (
+													<div key={k} className="text-sm">
+														<div className="font-medium">{k}</div>
+														<div className="whitespace-pre-wrap">{q.options[k]?.text || ''}</div>
+														{Array.isArray(q.options[k]?.images) && q.options[k].images.length > 0 ? (
+															<div className="mt-2 grid grid-cols-1 md:grid-cols-2 gap-3">
+																{q.options[k].images.map((src, oi) => (
+																	<img key={`${src}-${oi}`} src={src} className="max-w-full rounded-md border" loading="lazy" />
+																))}
+															</div>
+														) : null}
+													</div>
+												))}
+											</div>
+										) : null}
+									</div>
+								</div>
+							</Card>
+							);
+						})}
+					</div>
+					<DialogFooter>
+						<Button
+							variant="outline"
+							onClick={() => {
+								setSelectedImportedIndexes(Object.fromEntries(importedOcrQuestions.map((_, idx) => [idx, false])) as any);
+							}}
+						>
+							Select None
+						</Button>
+						<Button
+							variant="outline"
+							onClick={() => {
+								setSelectedImportedIndexes(Object.fromEntries(importedOcrQuestions.map((_, idx) => [idx, true])) as any);
+							}}
+						>
+							Select All
+						</Button>
+						<Button
+							onClick={async () => {
+							try {
+								const now = Date.now();
+								const chosen = importedOcrQuestions
+									.map((q, idx) => ({ q, idx }))
+									.filter(({ idx }) => !!selectedImportedIndexes[idx])
+									.map(({ q }) => q);
+								if (!chosen.length) {
+									toast.error('Select at least one question');
+									return;
+								}
+
+								const toInsert: Question[] = chosen.map((q) => {
+									const qid = uuidv4();
+									const optionKeys = Object.keys(q.options || {});
+									const opts = optionKeys.map((k) => ({
+										id: uuidv4(),
+										text: String(q.options[k]?.text || ''),
+										images: Array.isArray(q.options[k]?.images) ? q.options[k].images.filter(Boolean) : [],
+									}));
+									return {
+										id: qid,
+										code: `Q-${qid.slice(0, 8)}`,
+										text: String(q.text || '').trim(),
+										type: 'mcq',
+										questionImages: Array.isArray(q.questionImages) ? q.questionImages.filter(Boolean) : [],
+										options: opts,
+										correctAnswers: [],
+										tags: [],
+										modules: [],
+										metadata: { createdAt: now, updatedAt: now },
+									};
+								});
+
+								await db.questions.bulkAdd(toInsert);
+								toast.success(`Inserted ${toInsert.length} question${toInsert.length > 1 ? 's' : ''}`);
+								setImportPreviewOpen(false);
+							} catch (e) {
+								toast.error('Failed to insert questions');
+								console.error(e);
+							}
+						}}
+						>
+							Insert Selected
+						</Button>
+					</DialogFooter>
+				</DialogContent>
+			</Dialog>
 
       {/* Form */}
       <div className="pr-2">
@@ -614,6 +846,23 @@ export default function CreateQuestion() {
                 className="tk-question-editor"
               />
             </div>
+				{questionImages.length > 0 && (
+					<div className="mt-4 space-y-3">
+						{questionImages.map((src, idx) => (
+							<div key={`${src}-${idx}`} className="space-y-2">
+								<img src={src} alt={`question-figure-${idx + 1}`} className="max-w-full rounded-md border" loading="lazy" />
+								<Button
+									type="button"
+									variant="outline"
+									size="sm"
+									onClick={() => setQuestionImages((prev) => prev.filter((_, i) => i !== idx))}
+								>
+									Remove image
+								</Button>
+							</div>
+						))}
+					</div>
+				)}
           </Card>
 
         {/* Matching settings */}
@@ -738,6 +987,31 @@ export default function CreateQuestion() {
                     enableBlanksButton={false}
                     className="tk-option-editor"
                   />
+						{Array.isArray((option as any).images) && (option as any).images.length > 0 && (
+							<div className="space-y-2">
+								{(option as any).images.map((src: string, idx: number) => (
+									<div key={`${src}-${idx}`} className="space-y-2">
+										<img src={src} alt={`option-figure-${idx + 1}`} className="max-w-full rounded-md border" loading="lazy" />
+										<Button
+											type="button"
+											variant="outline"
+											size="sm"
+											onClick={() =>
+												setOptions((prev) =>
+													prev.map((o) =>
+														o.id === option.id
+															? { ...(o as any), images: (o as any).images.filter((_: any, i: number) => i !== idx) }
+															: o
+													)
+												)
+											}
+										>
+											Remove image
+										</Button>
+									</div>
+								))}
+							</div>
+						)}
                 </div>
               ))}
             </div>

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { v4 as uuidv4 } from 'uuid';
 import { db, Song, SongListeningEvent, SongModule, User } from '@/lib/db';
@@ -11,17 +11,22 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import type { CheckedState } from '@radix-ui/react-checkbox';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Pencil, Trash2, BarChart3 } from 'lucide-react';
+import { Pencil, Trash2, BarChart3, Eye, Play, Pause } from 'lucide-react';
 import { toast } from 'sonner';
+import AudioPlayer from '@/components/AudioPlayer';
 
 export default function SongModulesAdmin() {
-	const songs = useLiveQuery(() => db.songs.orderBy('createdAt').reverse().toArray(), [], [] as Song[]);
+	const songs = useLiveQuery(async () => {
+		const all = await db.songs.toArray();
+		return all.slice().sort((a, b) => (a.title || '').localeCompare(b.title || ''));
+	}, [], [] as Song[]);
 	const users = useLiveQuery(() => db.users.toArray(), [], [] as User[]);
 	const modules = useLiveQuery(() => db.songModules.orderBy('createdAt').reverse().toArray(), [], [] as SongModule[]);
 
 	const [title, setTitle] = useState('');
 	const [description, setDescription] = useState('');
 	const [selectedSongIds, setSelectedSongIds] = useState<string[]>([]);
+	const [songSearch, setSongSearch] = useState('');
 	const [saving, setSaving] = useState(false);
 
 	const [assignModuleId, setAssignModuleId] = useState<string | null>(null);
@@ -31,6 +36,7 @@ export default function SongModulesAdmin() {
 	const [editDescription, setEditDescription] = useState('');
 	const [editVisible, setEditVisible] = useState(true);
 	const [editSelectedSongIds, setEditSelectedSongIds] = useState<string[]>([]);
+	const [editSongSearch, setEditSongSearch] = useState('');
 	const [editSaving, setEditSaving] = useState(false);
 
 	const [listeningOpen, setListeningOpen] = useState(false);
@@ -40,8 +46,46 @@ export default function SongModulesAdmin() {
 	const [listeningUserIdFilter, setListeningUserIdFilter] = useState<string | 'all'>('all');
 
 	const [deleteId, setDeleteId] = useState<string | null>(null);
+	const [previewSong, setPreviewSong] = useState<Song | null>(null);
+	const [playingSongId, setPlayingSongId] = useState<string | null>(null);
+	const audioRef = useRef<HTMLAudioElement | null>(null);
 
 	const canCreate = title.trim().length > 0 && selectedSongIds.length > 0;
+
+	const togglePlaySong = (song: Song) => {
+		try {
+			if (!audioRef.current) audioRef.current = new Audio();
+			if (playingSongId === song.id) {
+				audioRef.current.pause();
+				setPlayingSongId(null);
+				return;
+			}
+			audioRef.current.pause();
+			audioRef.current.src = song.audioFileUrl;
+			void audioRef.current.play();
+			setPlayingSongId(song.id);
+			audioRef.current.onended = () => setPlayingSongId(null);
+		} catch (e) {
+			console.error(e);
+			toast.error('Failed to play audio');
+		}
+	};
+
+	const filteredCreateSongs = useMemo(() => {
+		const q = songSearch.trim().toLowerCase();
+		if (!q) return songs ?? [];
+		return (songs ?? []).filter((s) => {
+			return (s.title || '').toLowerCase().includes(q) || (s.singer || '').toLowerCase().includes(q);
+		});
+	}, [songSearch, songs]);
+
+	const filteredEditSongs = useMemo(() => {
+		const q = editSongSearch.trim().toLowerCase();
+		if (!q) return songs ?? [];
+		return (songs ?? []).filter((s) => {
+			return (s.title || '').toLowerCase().includes(q) || (s.singer || '').toLowerCase().includes(q);
+		});
+	}, [editSongSearch, songs]);
 
 	const usersById = useMemo(() => new Map((users ?? []).map((u) => [u.id, u])), [users]);
 	const songsById = useMemo(() => new Map((songs ?? []).map((s) => [s.id, s])), [songs]);
@@ -108,14 +152,15 @@ export default function SongModulesAdmin() {
 
 				<div className="space-y-2">
 					<Label>Select songs for this module</Label>
-					<div className="max-h-[260px] overflow-y-auto rounded-md border p-3 space-y-2">
+					<Input value={songSearch} onChange={(e) => setSongSearch(e.target.value)} placeholder="Search songs..." />
+					<div className="max-h-[260px] overflow-y-auto rounded-md border p-2 space-y-1">
 						{(songs ?? []).length === 0 && (
 							<div className="text-sm text-muted-foreground">No songs available. Upload songs first.</div>
 						)}
-						{(songs ?? []).map((s) => {
+						{filteredCreateSongs.map((s) => {
 							const checked = selectedSongIds.includes(s.id);
 							return (
-								<label key={s.id} className="flex items-center justify-between gap-3 rounded-md border px-3 py-2 text-sm">
+								<label key={s.id} className="flex items-center justify-between gap-2 rounded-md border px-2 py-1.5 text-sm">
 									<div className="flex items-center gap-2 min-w-0">
 										<Checkbox
 											checked={checked}
@@ -127,7 +172,33 @@ export default function SongModulesAdmin() {
 										/>
 										<span className="truncate">{s.title}</span>
 									</div>
-									<span className="text-xs text-muted-foreground truncate">{s.singer}</span>
+									<div
+										className="flex items-center gap-2"
+										onClick={(e) => {
+											e.preventDefault();
+											e.stopPropagation();
+										}}
+									>
+										<Button
+											variant="outline"
+											size="icon"
+											className="h-8 w-8"
+											aria-label={playingSongId === s.id ? 'Pause' : 'Play'}
+											onClick={() => togglePlaySong(s)}
+										>
+											{playingSongId === s.id ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
+										</Button>
+										<Button
+											variant="outline"
+											size="icon"
+											className="h-8 w-8"
+											aria-label="View"
+											onClick={() => setPreviewSong(s)}
+										>
+											<Eye className="h-4 w-4" />
+										</Button>
+										<span className="text-xs text-muted-foreground truncate max-w-[12rem]">{s.singer}</span>
+									</div>
 								</label>
 							);
 						})}
@@ -238,10 +309,11 @@ export default function SongModulesAdmin() {
 						setEditDescription('');
 						setEditVisible(true);
 						setEditSelectedSongIds([]);
+						setEditSongSearch('');
 					}
 				}}
 			>
-				<DialogContent className="max-w-2xl">
+				<DialogContent className="max-w-6xl">
 					<DialogHeader>
 						<DialogTitle>Edit module</DialogTitle>
 						<DialogDescription>Update title/description, choose songs, and toggle visibility.</DialogDescription>
@@ -263,11 +335,12 @@ export default function SongModulesAdmin() {
 						</label>
 						<div className="space-y-2">
 							<Label>Select songs for this module</Label>
-							<div className="max-h-[320px] overflow-y-auto rounded-md border p-3 space-y-2">
-								{(songs ?? []).map((s) => {
+							<Input value={editSongSearch} onChange={(e) => setEditSongSearch(e.target.value)} placeholder="Search songs..." />
+							<div className="max-h-[320px] overflow-y-auto rounded-md border p-2 space-y-1">
+								{filteredEditSongs.map((s) => {
 									const checked = editSelectedSongIds.includes(s.id);
 									return (
-										<label key={s.id} className="flex items-center justify-between gap-3 rounded-md border px-3 py-2 text-sm">
+										<label key={s.id} className="flex items-center justify-between gap-2 rounded-md border px-2 py-1.5 text-sm">
 											<div className="flex items-center gap-2 min-w-0">
 												<Checkbox
 													checked={checked}
@@ -279,7 +352,33 @@ export default function SongModulesAdmin() {
 												/>
 												<span className="truncate">{s.title}</span>
 											</div>
-											<span className="text-xs text-muted-foreground truncate">{s.singer}</span>
+											<div
+												className="flex items-center gap-2"
+												onClick={(e) => {
+													e.preventDefault();
+													e.stopPropagation();
+												}}
+											>
+												<Button
+													variant="outline"
+													size="icon"
+													className="h-8 w-8"
+													aria-label={playingSongId === s.id ? 'Pause' : 'Play'}
+													onClick={() => togglePlaySong(s)}
+												>
+													{playingSongId === s.id ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
+												</Button>
+												<Button
+													variant="outline"
+													size="icon"
+													className="h-8 w-8"
+													aria-label="View"
+													onClick={() => setPreviewSong(s)}
+												>
+													<Eye className="h-4 w-4" />
+												</Button>
+												<span className="text-xs text-muted-foreground truncate max-w-[12rem]">{s.singer}</span>
+											</div>
 										</label>
 									);
 								})}
@@ -313,6 +412,34 @@ export default function SongModulesAdmin() {
 						>
 							{editSaving ? 'Saving...' : 'Save changes'}
 						</Button>
+					</DialogFooter>
+				</DialogContent>
+			</Dialog>
+
+			<Dialog open={!!previewSong} onOpenChange={(open) => { if (!open) setPreviewSong(null); }}>
+				<DialogContent className="max-w-2xl">
+					<DialogHeader>
+						<DialogTitle>Song details</DialogTitle>
+						<DialogDescription>Preview song metadata and lyrics.</DialogDescription>
+					</DialogHeader>
+					{previewSong ? (
+						<div className="space-y-4">
+							<div>
+								<div className="text-xl font-semibold">{previewSong.title}</div>
+								{previewSong.singer ? <div className="text-sm text-muted-foreground">Singer: {previewSong.singer}</div> : null}
+								{previewSong.writer ? <div className="text-sm text-muted-foreground">Writer: {previewSong.writer}</div> : null}
+							</div>
+							<AudioPlayer src={previewSong.audioFileUrl} title={previewSong.title} />
+							<div>
+								<div className="text-sm font-semibold mb-2">Lyrics</div>
+								<div className="whitespace-pre-wrap border rounded-md bg-muted/30 p-4 text-base md:text-lg leading-relaxed max-h-[340px] overflow-y-auto overflow-x-hidden">
+									{previewSong.lyrics || 'No lyrics added yet.'}
+								</div>
+							</div>
+						</div>
+					) : null}
+					<DialogFooter>
+						<Button variant="outline" onClick={() => setPreviewSong(null)}>Close</Button>
 					</DialogFooter>
 				</DialogContent>
 			</Dialog>

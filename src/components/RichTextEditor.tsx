@@ -414,6 +414,21 @@ export default function RichTextEditor({ value, onChange, placeholder, className
       if (ref.current) ref.current.focus();
       ensureCaretInEditor();
       restoreSelection();
+      // Safety: never replace existing content when inserting a prompt.
+      // If a non-collapsed selection exists (e.g., editor content got selected),
+      // collapse to the end so we insert instead of overwrite.
+      const sel = window.getSelection();
+      const range = sel && sel.rangeCount > 0 ? sel.getRangeAt(0) : null;
+      if (ref.current && (!range || !isDescendant(ref.current, range.startContainer))) {
+        setCaretTextOffsetIn(ref.current, ref.current.textContent?.length ?? 0);
+      } else if (range && !range.collapsed) {
+        range.collapse(false);
+        if (sel) {
+          sel.removeAllRanges();
+          sel.addRange(range);
+        }
+        selectionRef.current = range.cloneRange();
+      }
       try {
         document.execCommand('insertText', false, content);
       } catch {

@@ -13,10 +13,14 @@ export interface Question {
   code?: string;
   text: string;
   type: 'mcq' | 'text' | 'fill_blanks' | 'matching';
+  questionImages?: string[];
+  questionImageAssetIds?: string[];
   options?: Array<{
     id: string;
     text: string;
     image?: string;
+    images?: string[];
+    imageAssetIds?: string[];
   }>;
   correctAnswers?: string[]; // option IDs for MCQ or text answers
   // For fill-in-the-blanks questions, blanks are represented inside the HTML text
@@ -445,9 +449,19 @@ export interface Song {
   lyrics: string;
   audioFilePath: string;
   audioFileUrl: string;
+  audioAssetId?: string;
   createdAt: number;
   updatedAt: number;
   visible?: boolean;
+}
+
+export interface BinaryAsset {
+	id: string;
+	kind: 'question_image' | 'option_image' | 'song_audio' | 'unknown';
+	mimeType: string;
+	data: Blob;
+	sourceUrl?: string;
+	createdAt: number;
 }
 
 export interface SongModule {
@@ -497,6 +511,7 @@ export class ExamDatabase extends Dexie {
 	songs!: Table<Song, string>;
 	songModules!: Table<SongModule, string>;
 	songListeningEvents!: Table<SongListeningEvent, string>;
+	binaryAssets!: Table<BinaryAsset, string>;
 
   constructor() {
     super('ExamDatabase');
@@ -1005,6 +1020,53 @@ export class ExamDatabase extends Dexie {
 			songModules: 'id, visible, createdAt, updatedAt',
 			songListeningEvents: 'id, date, timestamp, songModuleId, userId, songId, [date+songModuleId], [songModuleId+date], [songModuleId+userId], [songModuleId+songId]'
 		});
+
+		// v20: add file-based question/option image references on questions
+		this.version(20).stores({
+			questions: 'id, type, *tags, *modules, metadata.createdAt',
+			modules: 'id, type, *tags, createdAt, visible, locked',
+			attempts: 'id, moduleId, type, startedAt, syncStatus',
+			integrityEvents: 'id, attemptId, type, timestamp',
+			tags: 'id, name',
+			semanticOntologyTags: 'id, kind, parentId, name, updatedAt',
+			semanticEmbeddings: 'id, [scope+scopeId], scope, scopeId, modelId, createdAt',
+			questionSemanticAnalyses: 'id, questionId, createdAt, [questionId+analysisVersion], [questionId+modelId], source',
+			questionSemanticOverrides: 'id, questionId, updatedAt, baseAnalysisId, [questionId+updatedAt]',
+			settings: 'id',
+			dailyStats: 'id, date, moduleId, [date+moduleId], [moduleId+date], moduleType, createdAt',
+			users: 'id, username',
+			globalGlossary: 'id, normalizedWord, word',
+			intelligenceSignals: 'id, type, questionId, moduleId, [type+moduleId], [questionId+type]',
+			reviewInteractions: 'id, attemptId, moduleId, userId, questionId, timestamp, [attemptId+questionId], [moduleId+userId]',
+			errorReports: 'id, status, createdAt, updatedAt, moduleId, questionId, questionCode, reporterUserId, [status+createdAt]',
+			songs: 'id, visible, createdAt, updatedAt',
+			songModules: 'id, visible, createdAt, updatedAt',
+			songListeningEvents: 'id, date, timestamp, songModuleId, userId, songId, [date+songModuleId], [songModuleId+date], [songModuleId+userId], [songModuleId+songId]'
+		});
+
+		// v21: store binary blobs (images/audio) directly in IndexedDB
+		this.version(21).stores({
+			questions: 'id, type, *tags, *modules, metadata.createdAt',
+			modules: 'id, type, *tags, createdAt, visible, locked',
+			attempts: 'id, moduleId, type, startedAt, syncStatus',
+			integrityEvents: 'id, attemptId, type, timestamp',
+			tags: 'id, name',
+			semanticOntologyTags: 'id, kind, parentId, name, updatedAt',
+			semanticEmbeddings: 'id, [scope+scopeId], scope, scopeId, modelId, createdAt',
+			questionSemanticAnalyses: 'id, questionId, createdAt, [questionId+analysisVersion], [questionId+modelId], source',
+			questionSemanticOverrides: 'id, questionId, updatedAt, baseAnalysisId, [questionId+updatedAt]',
+			settings: 'id',
+			dailyStats: 'id, date, moduleId, [date+moduleId], [moduleId+date], moduleType, createdAt',
+			users: 'id, username',
+			globalGlossary: 'id, normalizedWord, word',
+			intelligenceSignals: 'id, type, questionId, moduleId, [type+moduleId], [questionId+type]',
+			reviewInteractions: 'id, attemptId, moduleId, userId, questionId, timestamp, [attemptId+questionId], [moduleId+userId]',
+			errorReports: 'id, status, createdAt, updatedAt, moduleId, questionId, questionCode, reporterUserId, [status+createdAt]',
+			songs: 'id, visible, createdAt, updatedAt',
+			songModules: 'id, visible, createdAt, updatedAt',
+			songListeningEvents: 'id, date, timestamp, songModuleId, userId, songId, [date+songModuleId], [songModuleId+date], [songModuleId+userId], [songModuleId+songId]',
+			binaryAssets: 'id, kind, createdAt'
+		});
   }
 }
 
@@ -1063,7 +1125,13 @@ export const db = new ExamDatabase();
 
 // Initialize default settings
 export async function initializeSettings() {
-  const existingSettings = await db.settings.get('1');
+  let existingSettings: AppSettings | undefined;
+  try {
+    existingSettings = await db.settings.get('1');
+  } catch (e) {
+    console.error(e);
+    throw e;
+  }
   
   if (!existingSettings) {
       const defaultSettings: AppSettings = {

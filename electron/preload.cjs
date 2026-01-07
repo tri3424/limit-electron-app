@@ -25,3 +25,15 @@ contextBridge.exposeInMainWorld('songs', {
     return ipcRenderer.invoke('songs:deleteAudioFile', payload);
   },
 });
+
+contextBridge.exposeInMainWorld('ocr', {
+  importExamPdf: async (payload) => {
+    return ipcRenderer.invoke('ocr:importExamPdf', payload);
+  },
+});
+
+contextBridge.exposeInMainWorld('data', {
+  exportJsonToFile: async (payload) => {
+    return ipcRenderer.invoke('data:exportJsonToFile', payload);
+  },
+});

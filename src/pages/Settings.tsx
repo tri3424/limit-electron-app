@@ -41,7 +41,7 @@ import {
 } from '@/components/ui/tooltip';
 
 export default function Settings() {
-  const settings = useLiveQuery(() => db.settings.get('1'));
+  const settings = useLiveQuery(() => db.settings.get('1'), [], null as any);
   const users = useLiveQuery(() => db.users.toArray());
   const errorReports = useLiveQuery(
     () => db.errorReports.orderBy('createdAt').reverse().toArray(),
@@ -52,7 +52,7 @@ export default function Settings() {
   const [errorReportFilter, setErrorReportFilter] = useState<'all' | 'new' | 'read' | 'fixed'>('all');
   const [showClearDialog, setShowClearDialog] = useState(false);
   const [localSettings, setLocalSettings] = useState<AppSettings | null>(null);
-  const [clearQuestions, setClearQuestions] = useState(true);
+  const [clearQuestions, setClearQuestions] = useState(false);
   const [clearModules, setClearModules] = useState(true);
   const [clearAttempts, setClearAttempts] = useState(true);
   const [clearIntegrityEvents, setClearIntegrityEvents] = useState(true);
@@ -151,6 +151,7 @@ export default function Settings() {
       const errorReports = await db.errorReports.toArray();
       const songsRaw = await db.songs.toArray();
       const songModules = await db.songModules.toArray();
+			const binaryAssetsRaw = await db.binaryAssets.toArray();
 
 			const songs = await Promise.all(
 				songsRaw.map(async (s) => {
@@ -173,6 +174,35 @@ export default function Settings() {
 				}),
 			);
 
+			const binaryAssets = await Promise.all(
+				binaryAssetsRaw.map(async (a) => {
+					try {
+						const blob = (a as any).data as Blob;
+						const readerRes = await new Promise<string>((resolve, reject) => {
+							const reader = new FileReader();
+							reader.onerror = () => reject(new Error('Failed to read asset blob'));
+							reader.onload = () => {
+								const res = reader.result;
+								if (typeof res !== 'string') {
+									reject(new Error('Unexpected FileReader result'));
+									return;
+								}
+								const commaIdx = res.indexOf(',');
+								resolve(commaIdx >= 0 ? res.slice(commaIdx + 1) : res);
+							};
+							reader.readAsDataURL(blob);
+						});
+						return {
+							...a,
+							dataBase64: readerRes,
+							data: undefined,
+						} as any;
+					} catch {
+						return { ...a, data: undefined } as any;
+					}
+				}),
+			);
+
       const data = {
         questions,
         modules,
@@ -187,8 +217,9 @@ export default function Settings() {
         errorReports,
         songs,
         songModules,
+				binaryAssets,
         exportedAt: new Date().toISOString(),
-        schemaVersion: 14,
+        schemaVersion: 21,
       };
 
       // Derive top tags from question usage to include in filename
@@ -228,13 +259,21 @@ export default function Settings() {
 
       const fileName = `Limit-backup-${tagsPart}-${timestampPart}.json`;
 
-      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = fileName;
-      a.click();
-      URL.revokeObjectURL(url);
+			const dataText = JSON.stringify(data, null, 2);
+			if (window.data?.exportJsonToFile) {
+				const res = await window.data.exportJsonToFile({ defaultFileName: fileName, dataText });
+				if (res?.canceled) {
+					return;
+				}
+			} else {
+				const blob = new Blob([dataText], { type: 'application/json' });
+				const url = URL.createObjectURL(blob);
+				const a = document.createElement('a');
+				a.href = url;
+				a.download = fileName;
+				a.click();
+				URL.revokeObjectURL(url);
+			}
       
       toast.success('Data exported successfully');
     } catch (error) {
@@ -242,6 +281,43 @@ export default function Settings() {
       console.error(error);
     }
   };
+
+	const handleExportQuestionsOnly = async () => {
+		try {
+			const questions = await db.questions.toArray();
+			const data = {
+				questions,
+				exportedAt: new Date().toISOString(),
+				kind: 'questions_only',
+				schemaVersion: 21,
+			};
+			const now = new Date();
+			const yyyy = now.getFullYear();
+			const mm = String(now.getMonth() + 1).padStart(2, '0');
+			const dd = String(now.getDate()).padStart(2, '0');
+			const hh = String(now.getHours()).padStart(2, '0');
+			const min = String(now.getMinutes()).padStart(2, '0');
+			const timestampPart = `${yyyy}${mm}${dd}-${hh}${min}`;
+			const fileName = `Limit-questions-${timestampPart}.json`;
+			const dataText = JSON.stringify(data, null, 2);
+			if (window.data?.exportJsonToFile) {
+				const res = await window.data.exportJsonToFile({ defaultFileName: fileName, dataText });
+				if (res?.canceled) return;
+			} else {
+				const blob = new Blob([dataText], { type: 'application/json' });
+				const url = URL.createObjectURL(blob);
+				const a = document.createElement('a');
+				a.href = url;
+				a.download = fileName;
+				a.click();
+				URL.revokeObjectURL(url);
+			}
+			toast.success('Questions exported successfully');
+		} catch (error) {
+			toast.error('Failed to export questions');
+			console.error(error);
+		}
+	};
 
   const questionsStructurallyMatch = (a: any, b: any): boolean => {
     if (!a || !b) return false;
@@ -1052,6 +1128,11 @@ export default function Settings() {
             <Download className="h-4 w-4 mr-2" />
             Export Data
           </Button>
+
+					<Button onClick={handleExportQuestionsOnly} variant="outline" className="w-full">
+						<FileText className="h-4 w-4 mr-2" />
+						Export Questions Only
+					</Button>
 
           <div className="relative">
             <Input

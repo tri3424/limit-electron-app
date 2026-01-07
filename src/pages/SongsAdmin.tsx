@@ -11,7 +11,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Command, CommandEmpty, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
-import { Check, ChevronsUpDown, Eye, Pencil, Trash2 } from "lucide-react";
+import { Check, ChevronsUpDown, Eye, Pencil, Play, Pause, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import AudioPlayer from "@/components/AudioPlayer";
 
@@ -140,8 +140,12 @@ async function fileToDataUrl(file: File): Promise<string> {
 }
 
 export default function SongsAdmin() {
-	const songs = useLiveQuery(() => db.songs.orderBy("createdAt").reverse().toArray(), [], [] as Song[]);
+	const songs = useLiveQuery(async () => {
+		const all = await db.songs.toArray();
+		return all.slice().sort((a, b) => (a.title || '').localeCompare(b.title || ''));
+	}, [], [] as Song[]);
 	const uploadAudioInputRef = useRef<HTMLInputElement | null>(null);
+	const bulkUploadAudioInputRef = useRef<HTMLInputElement | null>(null);
 
 	const [title, setTitle] = useState("");
 	const [singer, setSinger] = useState("");
@@ -161,13 +165,197 @@ export default function SongsAdmin() {
 	const [editAudioFile, setEditAudioFile] = useState<File | null>(null);
 	const [editing, setEditing] = useState(false);
 
+	const [duplicateDialogOpen, setDuplicateDialogOpen] = useState(false);
+	const [duplicateIncomingTitle, setDuplicateIncomingTitle] = useState('');
+	const [duplicateIncomingLyrics, setDuplicateIncomingLyrics] = useState<string | undefined>(undefined);
+	const [duplicateIncomingSinger, setDuplicateIncomingSinger] = useState<string | undefined>(undefined);
+	const [duplicateIncomingWriter, setDuplicateIncomingWriter] = useState<string | undefined>(undefined);
+	const [duplicateMode, setDuplicateMode] = useState<'create' | 'bulk' | 'edit'>('create');
+	const [duplicateExcludeId, setDuplicateExcludeId] = useState<string | undefined>(undefined);
+	const [duplicateDupes, setDuplicateDupes] = useState<Song[]>([]);
+	const [duplicateSelectedDupeId, setDuplicateSelectedDupeId] = useState<string>('');
+	const [duplicateRenameIncoming, setDuplicateRenameIncoming] = useState('');
+	const [duplicateRenameExisting, setDuplicateRenameExisting] = useState('');
+	const duplicateResolveRef = useRef<((value: { action: 'keep' } | { action: 'renameIncoming'; title: string } | { action: 'renameExisting'; dupeId: string; title: string } | { action: 'replaceExisting'; dupeId: string } | { action: 'cancel' }) => void) | null>(null);
+
+	const [playingSongId, setPlayingSongId] = useState<string | null>(null);
+	const audioRef = useRef<HTMLAudioElement | null>(null);
+
 	const canSave = useMemo(() => {
-		return (
-			title.trim().length > 0 &&
-			lyrics.trim().length > 0 &&
-			audioFile != null
-		);
-	}, [title, lyrics, audioFile]);
+		return title.trim().length > 0 && audioFile != null;
+	}, [title, audioFile]);
+
+	const normalizeSongTitle = (value: string) => value.trim().replace(/\s+/g, ' ').toLowerCase();
+
+	const findDuplicateSongsByTitle = async (nextTitle: string, excludeId?: string) => {
+		const normalized = normalizeSongTitle(nextTitle);
+		if (!normalized) return [] as Song[];
+		const all = await db.songs.toArray();
+		return all.filter((s) => normalizeSongTitle(s.title || '') === normalized && (!excludeId || s.id !== excludeId));
+	};
+
+	const togglePlaySong = (song: Song) => {
+		try {
+			if (!audioRef.current) audioRef.current = new Audio();
+			if (playingSongId === song.id) {
+				audioRef.current.pause();
+				setPlayingSongId(null);
+				return;
+			}
+			audioRef.current.pause();
+			audioRef.current.src = song.audioFileUrl;
+			void audioRef.current.play();
+			setPlayingSongId(song.id);
+			audioRef.current.onended = () => setPlayingSongId(null);
+		} catch (e) {
+			console.error(e);
+			toast.error('Failed to play audio');
+		}
+	};
+
+	const openDuplicateDialog = async (opts: {
+		mode: 'create' | 'bulk' | 'edit';
+		incomingTitle: string;
+		incomingLyrics?: string;
+		incomingSinger?: string;
+		incomingWriter?: string;
+		excludeId?: string;
+	}) => {
+		const dupes = await findDuplicateSongsByTitle(opts.incomingTitle, opts.excludeId);
+		if (!dupes.length) return { action: 'keep' } as const;
+		setDuplicateMode(opts.mode);
+		setDuplicateIncomingTitle(opts.incomingTitle);
+		setDuplicateIncomingLyrics(opts.incomingLyrics);
+		setDuplicateIncomingSinger(opts.incomingSinger);
+		setDuplicateIncomingWriter(opts.incomingWriter);
+		setDuplicateExcludeId(opts.excludeId);
+		setDuplicateDupes(dupes);
+		setDuplicateSelectedDupeId(dupes[0]?.id || '');
+		setDuplicateRenameIncoming('');
+		setDuplicateRenameExisting('');
+		setDuplicateDialogOpen(true);
+		return await new Promise<
+			{ action: 'keep' }
+			| { action: 'renameIncoming'; title: string }
+			| { action: 'renameExisting'; dupeId: string; title: string }
+			| { action: 'replaceExisting'; dupeId: string }
+			| { action: 'cancel' }
+		>((resolve) => {
+			duplicateResolveRef.current = resolve;
+		});
+	};
+
+	const closeDuplicateDialog = (result: Parameters<NonNullable<typeof duplicateResolveRef.current>>[0]) => {
+		setDuplicateDialogOpen(false);
+		const r = duplicateResolveRef.current;
+		duplicateResolveRef.current = null;
+		if (r) r(result);
+	};
+
+	const resolveDuplicateBeforeCreateOrEdit = async (opts: {
+		mode: 'create' | 'bulk' | 'edit';
+		incomingTitle: string;
+		incomingLyrics?: string;
+		incomingSinger?: string;
+		incomingWriter?: string;
+		excludeId?: string;
+	}) => {
+		let incomingTitle = opts.incomingTitle;
+		// eslint-disable-next-line no-constant-condition
+		while (true) {
+			const dupes = await findDuplicateSongsByTitle(incomingTitle, opts.excludeId);
+			if (!dupes.length) return { action: 'keep', title: incomingTitle } as const;
+			const decision = await openDuplicateDialog({
+				mode: opts.mode,
+				incomingTitle,
+				incomingLyrics: opts.incomingLyrics,
+				incomingSinger: opts.incomingSinger,
+				incomingWriter: opts.incomingWriter,
+				excludeId: opts.excludeId,
+			});
+			if (decision.action === 'cancel') return { action: 'cancel' } as const;
+			if (decision.action === 'keep') return { action: 'keep', title: incomingTitle } as const;
+			if (decision.action === 'renameIncoming') {
+				incomingTitle = decision.title;
+				continue;
+			}
+			if (decision.action === 'renameExisting') {
+				await db.songs.update(decision.dupeId, { title: decision.title.trim(), updatedAt: Date.now() });
+				return { action: 'keep', title: incomingTitle } as const;
+			}
+			if (decision.action === 'replaceExisting') {
+				return { action: 'replaceExisting', title: incomingTitle, dupeId: decision.dupeId } as const;
+			}
+		}
+	};
+
+	const persistAudioFile = async (file: File) => {
+		let audioFilePath = '';
+		let audioFileUrl = '';
+		let audioAssetId: string | undefined;
+
+		try {
+			const assetId = uuidv4();
+			await db.binaryAssets.add({
+				id: assetId,
+				kind: 'song_audio',
+				mimeType: file.type || 'application/octet-stream',
+				data: file,
+				createdAt: Date.now(),
+			});
+			audioAssetId = assetId;
+		} catch {
+			// ignore: keep existing file-based persistence as primary path
+		}
+		// Electron mode: persist to userData via preload IPC
+		if (window.songs?.saveAudioFile) {
+			const dataBase64 = await fileToBase64(file);
+			const saved = await window.songs.saveAudioFile({
+				fileName: file.name,
+				dataBase64,
+			});
+			audioFilePath = saved.filePath;
+			audioFileUrl = saved.fileUrl;
+		} else {
+			// Browser mode fallback: store a data URL in Dexie (fully offline)
+			audioFileUrl = await fileToDataUrl(file);
+		}
+		return { audioFilePath, audioFileUrl, audioAssetId };
+	};
+
+	const addSongFromFile = async (file: File) => {
+		const now = Date.now();
+		const resolvedTitle = fileNameToTitle(file.name);
+		const decision = await resolveDuplicateBeforeCreateOrEdit({ mode: 'bulk', incomingTitle: resolvedTitle });
+		if (decision.action === 'cancel') throw new Error('Canceled');
+		const artist = await readArtistFromAudioFile(file);
+		const { audioFilePath, audioFileUrl, audioAssetId } = await persistAudioFile(file);
+		if (decision.action === 'replaceExisting') {
+			await db.songs.update(decision.dupeId, {
+				title: resolvedTitle,
+				singer: artist ?? '',
+				writer: '',
+				audioFilePath,
+				audioFileUrl,
+				audioAssetId,
+				updatedAt: now,
+			});
+			return;
+		}
+		await db.songs.add({
+			id: uuidv4(),
+			title: decision.title,
+			singer: artist ?? '',
+			writer: '',
+			lyrics: '',
+			audioFilePath,
+			audioFileUrl,
+			audioAssetId,
+			createdAt: now,
+			updatedAt: now,
+			visible: true,
+		});
+	};
 
 	const singerOptions = useMemo(() => {
 		const set = new Set(
@@ -232,49 +420,89 @@ export default function SongsAdmin() {
 								}
 							}}
 						/>
+						<Input
+							ref={bulkUploadAudioInputRef}
+							type="file"
+							accept="audio/*"
+							multiple
+							className="hidden"
+							onChange={(e) => {
+								const files = Array.from(e.target.files || []);
+								if (!files.length) return;
+								void (async () => {
+									setSaving(true);
+									try {
+										for (const f of files) {
+											await addSongFromFile(f);
+										}
+										toast.success(window.songs?.saveAudioFile ? 'Songs uploaded' : 'Songs uploaded (stored locally)');
+									} catch (err) {
+										console.error(err);
+										toast.error('Failed to bulk upload songs');
+									} finally {
+										setSaving(false);
+										if (bulkUploadAudioInputRef.current) bulkUploadAudioInputRef.current.value = '';
+									}
+								})();
+							}}
+						/>
 					</div>
 				</div>
 				<div className="space-y-2">
 					<Label>Lyrics</Label>
 					<Textarea value={lyrics} onChange={(e) => setLyrics(e.target.value)} rows={8} placeholder="Paste lyrics here..." />
 				</div>
-				<div className="flex justify-end">
+				<div className="flex items-center justify-end gap-2">
+					<Button
+						variant="outline"
+						disabled={saving}
+						onClick={() => bulkUploadAudioInputRef.current?.click()}
+					>
+						Bulk upload audio
+					</Button>
 					<Button
 						disabled={!canSave || saving}
 						onClick={async () => {
 							if (!canSave || !audioFile) return;
 							setSaving(true);
 							try {
-								let audioFilePath = '';
-								let audioFileUrl = '';
-
-								// Electron mode: persist to userData via preload IPC
-								if (window.songs?.saveAudioFile) {
-									const dataBase64 = await fileToBase64(audioFile);
-									const saved = await window.songs.saveAudioFile({
-										fileName: audioFile.name,
-										dataBase64,
-									});
-									audioFilePath = saved.filePath;
-									audioFileUrl = saved.fileUrl;
-								} else {
-									// Browser mode fallback: store a data URL in Dexie (fully offline)
-									audioFileUrl = await fileToDataUrl(audioFile);
-								}
+								const decision = await resolveDuplicateBeforeCreateOrEdit({
+									mode: 'create',
+									incomingTitle: title.trim(),
+									incomingLyrics: lyrics,
+									incomingSinger: singer.trim(),
+									incomingWriter: writer.trim(),
+								});
+								if (decision.action === 'cancel') return;
+								const { audioFilePath, audioFileUrl } = await persistAudioFile(audioFile);
 
 								const now = Date.now();
-								await db.songs.add({
-									id: uuidv4(),
-									title: title.trim(),
-									singer: singer.trim(),
-									writer: writer.trim(),
-									lyrics,
-									audioFilePath,
-									audioFileUrl,
-									createdAt: now,
-									updatedAt: now,
-									visible: true,
-								});
+								if (decision.action === 'replaceExisting') {
+									const targetId = decision.dupeId;
+									const existing = await db.songs.get(targetId);
+									await db.songs.update(targetId, {
+										title: title.trim(),
+										singer: singer.trim(),
+										writer: writer.trim(),
+										lyrics: lyrics?.trim().length ? lyrics : (existing?.lyrics || ''),
+										audioFilePath,
+										audioFileUrl,
+										updatedAt: now,
+									});
+								} else {
+									await db.songs.add({
+										id: uuidv4(),
+										title: decision.title,
+										singer: singer.trim(),
+										writer: writer.trim(),
+										lyrics,
+										audioFilePath,
+										audioFileUrl,
+										createdAt: now,
+										updatedAt: now,
+										visible: true,
+									});
+								}
 								setTitle("");
 								setSinger("");
 								setWriter("");
@@ -295,26 +523,31 @@ export default function SongsAdmin() {
 				</div>
 			</Card>
 
-			<div className="space-y-3">
-				{songs.map((s) => (
-					<Card key={s.id} className="p-4 flex items-start justify-between gap-4 w-full">
-						<div className="min-w-0 flex-1">
-							<div className="text-lg font-semibold truncate">{s.title}</div>
-							<div className="text-sm text-muted-foreground">Singer: {s.singer}</div>
-							<div className="text-sm text-muted-foreground">Writer: {s.writer}</div>
-							<div className="mt-2">
-								<AudioPlayer src={s.audioFileUrl} title={s.title} />
+			<Card className="p-3">
+				<div className="max-h-[68vh] overflow-y-auto space-y-1 pr-1">
+					{songs.map((s) => (
+						<div key={s.id} className="flex items-center justify-between gap-2 rounded-md border px-2 py-1.5 text-sm">
+							<div className="min-w-0 flex-1">
+								<div className="font-medium truncate">{s.title}</div>
+								<div className="text-xs text-muted-foreground truncate">{s.singer}</div>
 							</div>
-						</div>
-
-						<div className="shrink-0 flex flex-col items-end gap-3">
-							<div className="flex items-center gap-2">
-								<Button variant="outline" size="icon" onClick={() => setViewTarget(s)} aria-label="View">
+							<div className="flex items-center gap-2 shrink-0">
+								<Button
+									variant="outline"
+									size="icon"
+									className="h-8 w-8"
+									aria-label={playingSongId === s.id ? 'Pause' : 'Play'}
+									onClick={() => togglePlaySong(s)}
+								>
+									{playingSongId === s.id ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
+								</Button>
+								<Button variant="outline" size="icon" className="h-8 w-8" onClick={() => setViewTarget(s)} aria-label="View">
 									<Eye className="h-4 w-4" />
 								</Button>
 								<Button
 									variant="outline"
 									size="icon"
+									className="h-8 w-8"
 									onClick={() => {
 										setEditTarget(s);
 										setEditTitle(s.title);
@@ -327,31 +560,124 @@ export default function SongsAdmin() {
 								>
 									<Pencil className="h-4 w-4" />
 								</Button>
-							</div>
-							<label className="flex items-center gap-2 text-sm">
-								<Checkbox
-									checked={s.visible !== false}
-									onCheckedChange={async (v) => {
-										try {
-											const nextVisible = v === true;
-											await db.songs.update(s.id, { visible: nextVisible, updatedAt: Date.now() });
-											toast.success(nextVisible ? "Visible to users" : "Hidden from users");
-										} catch (err) {
-											console.error(err);
-											toast.error("Failed to update visibility");
-										}
+								<label className="flex items-center gap-2 text-xs text-muted-foreground pl-1">
+									<Checkbox
+										checked={s.visible !== false}
+										onCheckedChange={async (v) => {
+											try {
+												const nextVisible = v === true;
+												await db.songs.update(s.id, { visible: nextVisible, updatedAt: Date.now() });
+												toast.success(nextVisible ? 'Visible to users' : 'Hidden from users');
+											} catch (err) {
+												console.error(err);
+												toast.error('Failed to update visibility');
+											}
 									}}
-								/>
-								<span>Visible</span>
-							</label>
-							<Button variant="destructive" size="icon" onClick={() => setDeleteTarget(s)} aria-label="Delete">
-								<Trash2 className="h-4 w-4" />
-							</Button>
+									/>
+									<span>Visible</span>
+								</label>
+								<Button variant="destructive" size="icon" className="h-8 w-8" onClick={() => setDeleteTarget(s)} aria-label="Delete">
+									<Trash2 className="h-4 w-4" />
+								</Button>
+							</div>
 						</div>
-					</Card>
-				))}
-				{songs.length === 0 && <Card className="p-8 text-center text-muted-foreground">No songs yet.</Card>}
-			</div>
+					))}
+					{songs.length === 0 && <div className="p-8 text-center text-muted-foreground">No songs yet.</div>}
+				</div>
+			</Card>
+
+			<Dialog
+				open={duplicateDialogOpen}
+				onOpenChange={(open) => {
+					if (!open && duplicateDialogOpen) {
+						closeDuplicateDialog({ action: 'cancel' });
+					}
+				}}
+			>
+				<DialogContent className="max-w-2xl">
+					<DialogHeader>
+						<DialogTitle>Duplicate song title</DialogTitle>
+						<DialogDescription>
+							A song with the title <span className="font-semibold">{duplicateIncomingTitle}</span> already exists. Choose how you want to proceed.
+						</DialogDescription>
+					</DialogHeader>
+					<div className="space-y-4">
+						<div className="space-y-2">
+							<div className="text-sm font-medium">Existing matches</div>
+							<div className="rounded-md border p-2 max-h-[200px] overflow-y-auto space-y-2">
+								{duplicateDupes.map((d) => (
+									<label key={d.id} className="flex items-start gap-2 text-sm">
+										<input
+											type="radio"
+											name="duplicateDupe"
+											checked={duplicateSelectedDupeId === d.id}
+											onChange={() => setDuplicateSelectedDupeId(d.id)}
+										/>
+										<span className="min-w-0">
+											<span className="font-medium">{d.title}</span>
+											{d.singer ? <span className="text-xs text-muted-foreground"> — {d.singer}</span> : null}
+										</span>
+									</label>
+								))}
+							</div>
+						</div>
+
+						<div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+							<div className="space-y-2">
+								<div className="text-sm font-medium">Rename the incoming song</div>
+								<Input
+									value={duplicateRenameIncoming}
+									onChange={(e) => setDuplicateRenameIncoming(e.target.value)}
+									placeholder="New title for the uploaded song"
+								/>
+								<Button
+									variant="outline"
+									disabled={!duplicateRenameIncoming.trim()}
+									onClick={() => closeDuplicateDialog({ action: 'renameIncoming', title: duplicateRenameIncoming.trim() })}
+								>
+									Rename incoming & continue
+								</Button>
+							</div>
+							<div className="space-y-2">
+								<div className="text-sm font-medium">Rename the existing song</div>
+								<Input
+									value={duplicateRenameExisting}
+									onChange={(e) => setDuplicateRenameExisting(e.target.value)}
+									placeholder="New title for the selected existing song"
+								/>
+								<Button
+									variant="outline"
+									disabled={!duplicateRenameExisting.trim() || !duplicateSelectedDupeId}
+									onClick={() =>
+										closeDuplicateDialog({
+											action: 'renameExisting',
+											dupeId: duplicateSelectedDupeId,
+											title: duplicateRenameExisting.trim(),
+										})
+									}
+								>
+									Rename existing & continue
+								</Button>
+							</div>
+						</div>
+					</div>
+					<DialogFooter>
+						<Button type="button" variant="outline" onClick={() => closeDuplicateDialog({ action: 'keep' })}>
+							Keep duplicate
+						</Button>
+						<Button
+							type="button"
+							disabled={!duplicateSelectedDupeId}
+							onClick={() => closeDuplicateDialog({ action: 'replaceExisting', dupeId: duplicateSelectedDupeId })}
+						>
+							Replace existing
+						</Button>
+						<Button type="button" variant="outline" onClick={() => closeDuplicateDialog({ action: 'cancel' })}>
+							Cancel
+						</Button>
+					</DialogFooter>
+				</DialogContent>
+			</Dialog>
 
 			<Dialog
 				open={!!viewTarget}
@@ -429,11 +755,20 @@ export default function SongsAdmin() {
 							Cancel
 						</Button>
 						<Button
-							disabled={!editTarget || editing || !editTitle.trim() || !editLyrics.trim()}
+							disabled={!editTarget || editing || !editTitle.trim()}
 							onClick={async () => {
 								if (!editTarget) return;
 								setEditing(true);
 								try {
+									const decision = await resolveDuplicateBeforeCreateOrEdit({
+										mode: 'edit',
+										incomingTitle: editTitle.trim(),
+										incomingLyrics: editLyrics,
+										incomingSinger: editSinger.trim(),
+										incomingWriter: editWriter.trim(),
+										excludeId: editTarget.id,
+									});
+									if (decision.action === 'cancel') return;
 									let nextAudioFilePath = editTarget.audioFilePath;
 									let nextAudioFileUrl = editTarget.audioFileUrl;
 
@@ -459,7 +794,7 @@ export default function SongsAdmin() {
 									}
 
 									await db.songs.update(editTarget.id, {
-										title: editTitle.trim(),
+										title: decision.title,
 										singer: editSinger.trim(),
 										writer: editWriter.trim(),
 										lyrics: editLyrics,

@@ -16,7 +16,7 @@ export default function Songs() {
 			return all
 				.filter((s) => s.visible !== false)
 				.slice()
-				.sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0));
+				.sort((a, b) => (a.title || '').localeCompare(b.title || ''));
 		},
 		[],
 		[] as Song[],

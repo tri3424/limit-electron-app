@@ -48,17 +48,21 @@ export default function SongModuleRunner() {
 			.filter((s): s is Song => !!s && s.visible !== false);
 	}, [module, songs]);
 
+	const sortedModuleSongs = useMemo(() => {
+		return moduleSongs.slice().sort((a, b) => (a.title || '').localeCompare(b.title || ''));
+	}, [moduleSongs]);
+
 	const filteredSongs = useMemo(() => {
 		const q = search.trim().toLowerCase();
-		if (!q) return moduleSongs;
-		return moduleSongs.filter((s) => {
+		if (!q) return sortedModuleSongs;
+		return sortedModuleSongs.filter((s) => {
 			return (
 				s.title.toLowerCase().includes(q) ||
 				s.singer.toLowerCase().includes(q) ||
 				s.writer.toLowerCase().includes(q)
 			);
 		});
-	}, [moduleSongs, search]);
+	}, [sortedModuleSongs, search]);
 
 	const selectedSong = useMemo(() => {
 		if (!filteredSongs.length) return null;
@@ -208,7 +212,7 @@ export default function SongModuleRunner() {
 					<Input
 						value={search}
 						onChange={(e) => setSearch(e.target.value)}
-						placeholder="Search by title / singer / writer..."
+						placeholder="Search list"
 						className="mb-3"
 					/>
 					<div className="space-y-2 max-h-[60vh] overflow-y-auto overflow-x-hidden pr-1">
@@ -271,7 +275,7 @@ export default function SongModuleRunner() {
 
 							<div>
 								<div className="text-sm font-semibold mb-2">Lyrics</div>
-								<div className="whitespace-pre-wrap border rounded-md bg-muted/30 p-4 text-base md:text-lg leading-relaxed max-h-[340px] overflow-y-auto overflow-x-hidden">
+								<div className="whitespace-pre-wrap border rounded-md bg-muted/30 p-4 text-lg md:text-xl leading-relaxed max-h-[340px] overflow-y-auto overflow-x-hidden">
 									{selectedSong.lyrics}
 								</div>
 							</div>

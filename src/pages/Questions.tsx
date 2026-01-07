@@ -20,8 +20,6 @@ import { copyTextToClipboard } from '@/utils/codeBlockCopy';
 import { toast } from 'sonner';
 import { summarizeDifficulty } from '@/lib/intelligenceEngine';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
-import { v4 as uuidv4 } from 'uuid';
-import { mapScoreToBand } from '@/lib/semanticEngine';
 
 export default function Questions() {
   const location = useLocation();
@@ -337,37 +335,9 @@ function QuestionCard({
     () => db.questionSemanticAnalyses.where('questionId').equals(question.id).last(),
     [question.id],
   );
-  const semanticOverride = useLiveQuery(
-    () => db.questionSemanticOverrides.where('questionId').equals(question.id).last(),
-    [question.id],
-  );
-  const [overrideTagsText, setOverrideTagsText] = useState('');
-  const [overrideDifficultyText, setOverrideDifficultyText] = useState('');
-  const [overrideSaving, setOverrideSaving] = useState(false);
-
-  useEffect(() => {
-    if (!semanticOverride) {
-      setOverrideTagsText('');
-      setOverrideDifficultyText('');
-      return;
-    }
-    const tags = semanticOverride.tags?.applied?.map((t) => t.tagName).filter(Boolean) ?? [];
-    setOverrideTagsText(tags.join(', '));
-    if (typeof semanticOverride.difficulty?.difficultyScore === 'number') {
-      setOverrideDifficultyText(String(semanticOverride.difficulty.difficultyScore));
-    } else {
-      setOverrideDifficultyText('');
-    }
-  }, [semanticOverride]);
-
-  const effectiveTags = semanticOverride?.tags?.applied?.length
-    ? semanticOverride.tags.applied
-    : semanticAnalysis?.tags;
-  const effectiveDifficultyScore =
-    typeof semanticOverride?.difficulty?.difficultyScore === 'number'
-      ? semanticOverride.difficulty.difficultyScore
-      : semanticAnalysis?.difficultyScore;
-  const effectiveDifficultyBand = semanticOverride?.difficulty?.difficultyBand || semanticAnalysis?.difficultyBand;
+  const effectiveTags = semanticAnalysis?.tags;
+  const effectiveDifficultyScore = semanticAnalysis?.difficultyScore;
+  const effectiveDifficultyBand = semanticAnalysis?.difficultyBand;
   const hasPicture = question.text.toLowerCase().includes('<img');
   const compressedHtml = (() => {
     const withoutImages = question.text.replace(/<img[^>]*>/gi, '');
@@ -570,15 +540,6 @@ function QuestionCard({
               </Badge>
             )}
 
-            {semanticOverride?.difficulty?.difficultyBand && (
-              <Badge variant="default" className="text-xs">
-                Override: {semanticOverride.difficulty.difficultyBand.replace(/_/g, ' ')}
-                {typeof semanticOverride.difficulty.difficultyScore === 'number'
-                  ? ` (${Math.round(semanticOverride.difficulty.difficultyScore * 100)}/100)`
-                  : ''}
-              </Badge>
-            )}
-
             {question.tags.length > 0 && (
               <div className="flex items-center gap-2">
                 <TagIcon className="h-3 w-3 text-muted-foreground" />
@@ -599,8 +560,8 @@ function QuestionCard({
               <div className="flex items-center gap-2">
                 <TagIcon className="h-3 w-3 text-muted-foreground" />
                 {effectiveTags.slice(0, 3).map((t) => (
-                  <Badge key={t.tagId} variant={semanticOverride?.tags?.applied?.length ? 'default' : 'secondary'} className="text-xs">
-                    {semanticOverride?.tags?.applied?.length ? `Override: ${t.tagName}` : t.tagName}
+                  <Badge key={t.tagId} variant="secondary" className="text-xs">
+                    {t.tagName}
                   </Badge>
                 ))}
                 {effectiveTags.length > 3 && (
@@ -660,6 +621,19 @@ function QuestionCard({
                     <div className="text-sm text-muted-foreground mb-1">Question</div>
                     <div className="prose prose-base max-w-none content-html" dangerouslySetInnerHTML={{ __html: prepareContentForDisplay(question.text) }} />
                   </div>
+                  {Array.isArray((question as any).questionImages) && (question as any).questionImages.length > 0 && (
+                    <div className="space-y-2">
+                      {(question as any).questionImages.map((src: string, idx: number) => (
+                        <img
+                          key={`${src}-${idx}`}
+                          src={src}
+                          alt={`question-figure-${idx + 1}`}
+                          className="max-w-full rounded-md border"
+                          loading="lazy"
+                        />
+                      ))}
+                    </div>
+                  )}
                   {question.type === 'mcq' && question.options && (
                     <div>
                       <div className="text-sm text-muted-foreground mb-1">Options</div>
@@ -672,6 +646,19 @@ function QuestionCard({
                               className={`rounded-md border p-3 text-base ${isCorrect ? 'border-green-500 bg-green-50' : ''}`}
                             >
                               <div className="content-html" dangerouslySetInnerHTML={{ __html: prepareContentForDisplay(o.text) }} />
+                              {Array.isArray((o as any).images) && (o as any).images.length > 0 && (
+                                <div className="mt-2 space-y-2">
+                                  {(o as any).images.map((src: string, idx: number) => (
+                                    <img
+                                      key={`${src}-${idx}`}
+                                      src={src}
+                                      alt={`option-figure-${idx + 1}`}
+                                      className="max-w-full rounded-md border"
+                                      loading="lazy"
+                                    />
+                                  ))}
+                                </div>
+                              )}
                             </div>
                           );
                         })}
@@ -749,298 +736,13 @@ function QuestionCard({
                           : ''}
                       </Badge>
                     )}
-                    {semanticOverride?.difficulty?.difficultyBand && (
-                      <Badge variant="default" className="text-xs">
-                        Override: {semanticOverride.difficulty.difficultyBand.replace(/_/g, ' ')}
-                        {typeof semanticOverride.difficulty.difficultyScore === 'number'
-                          ? ` (${Math.round(semanticOverride.difficulty.difficultyScore * 100)}/100)`
-                          : ''}
-                      </Badge>
-                    )}
                     {question.tags.map(tag => (
                       <Badge key={tag} variant="secondary" className="text-xs">{tag}</Badge>
                     ))}
                     {semanticAnalysis?.tags?.map((t) => (
                       <Badge key={t.tagId} variant="secondary" className="text-xs">{t.tagName}</Badge>
                     ))}
-                    {semanticOverride?.tags?.applied?.map((t) => (
-                      <Badge key={`override-${t.tagId}`} variant="default" className="text-xs">Override: {t.tagName}</Badge>
-                    ))}
                   </div>
-
-                  {semanticAnalysis ? (
-                    <div className="pt-4">
-                      <Accordion type="single" collapsible>
-                        <AccordionItem value="why">
-                          <AccordionTrigger className="text-sm">Why this was determined</AccordionTrigger>
-                          <AccordionContent>
-                            <div className="space-y-3">
-                              <div className="text-xs text-muted-foreground">
-                                Model: <span className="font-mono text-foreground">{semanticAnalysis.modelId}</span>
-                              </div>
-
-                              {semanticAnalysis.tags?.length ? (
-                                <div>
-                                  <div className="text-xs font-semibold mb-2">Top semantic matches</div>
-                                  <div className="space-y-1">
-                                    {semanticAnalysis.tags.slice(0, 6).map((t) => (
-                                      <div key={t.tagId} className="flex items-center justify-between gap-3 text-xs">
-                                        <div className="text-foreground">{t.tagName}</div>
-                                        <div className="font-mono text-muted-foreground">{(t.score * 100).toFixed(0)}%</div>
-                                      </div>
-                                    ))}
-                                  </div>
-                                </div>
-                              ) : null}
-
-                              <div>
-                                <div className="text-xs font-semibold mb-2">Difficulty factors</div>
-                                <div className="grid grid-cols-2 gap-2 text-xs">
-                                  <div className="text-muted-foreground">Semantic complexity</div>
-                                  <div className="font-mono text-foreground">{Math.round((semanticAnalysis.difficultyFactors.semanticComplexity || 0) * 100)}/100</div>
-                                  <div className="text-muted-foreground">Conceptual depth</div>
-                                  <div className="font-mono text-foreground">{Math.round((semanticAnalysis.difficultyFactors.conceptualDepth || 0) * 100)}/100</div>
-                                  <div className="text-muted-foreground">Reasoning steps</div>
-                                  <div className="font-mono text-foreground">{Math.round((semanticAnalysis.difficultyFactors.reasoningSteps || 0) * 100)}/100</div>
-                                  <div className="text-muted-foreground">Abstraction level</div>
-                                  <div className="font-mono text-foreground">{Math.round((semanticAnalysis.difficultyFactors.abstractionLevel || 0) * 100)}/100</div>
-                                  <div className="text-muted-foreground">Symbol density</div>
-                                  <div className="font-mono text-foreground">{Math.round((semanticAnalysis.difficultyFactors.symbolDensity || 0) * 100)}/100</div>
-                                  <div className="text-muted-foreground">Prerequisite load</div>
-                                  <div className="font-mono text-foreground">{Math.round((semanticAnalysis.difficultyFactors.prerequisiteLoad || 0) * 100)}/100</div>
-                                </div>
-                              </div>
-
-                              {semanticAnalysis.rationale?.topSignals?.length ? (
-                                <div>
-                                  <div className="text-xs font-semibold mb-2">Key signals</div>
-                                  <ul className="list-disc pl-4 space-y-1 text-xs text-foreground">
-                                    {semanticAnalysis.rationale.topSignals.slice(0, 5).map((s, idx) => (
-                                      <li key={`${s.label}-${idx}`}>
-                                        <span className="font-semibold">{s.label}</span>
-                                        {s.detail ? ` — ${s.detail}` : ''}
-                                      </li>
-                                    ))}
-                                  </ul>
-                                </div>
-                              ) : null}
-
-                              {semanticAnalysis.rationale?.difficultyComponents ? (
-                                <div>
-                                  <div className="text-xs font-semibold mb-2">Difficulty components (normalized)</div>
-                                  <div className="grid grid-cols-2 gap-2 text-xs">
-                                    <div className="text-muted-foreground">Foundational distance</div>
-                                    <div className="font-mono text-foreground">{semanticAnalysis.rationale.difficultyComponents.foundationalDistance.toFixed(6)}</div>
-                                    <div className="text-muted-foreground">Abstraction depth</div>
-                                    <div className="font-mono text-foreground">{semanticAnalysis.rationale.difficultyComponents.abstractionDepth.toFixed(6)}</div>
-                                    <div className="text-muted-foreground">Reasoning chain</div>
-                                    <div className="font-mono text-foreground">{semanticAnalysis.rationale.difficultyComponents.reasoningChain.toFixed(6)}</div>
-                                    <div className="text-muted-foreground">Prerequisite breadth</div>
-                                    <div className="font-mono text-foreground">{semanticAnalysis.rationale.difficultyComponents.prerequisiteBreadth.toFixed(6)}</div>
-                                  </div>
-                                </div>
-                              ) : null}
-
-                              {semanticAnalysis.rationale?.consistency?.length ? (
-                                <div>
-                                  <div className="text-xs font-semibold mb-2">Consistency validation</div>
-                                  <ul className="list-disc pl-4 space-y-1 text-xs text-foreground">
-                                    {semanticAnalysis.rationale.consistency.slice(0, 8).map((r, idx) => (
-                                      <li key={`${r.rule}-${idx}`}>
-                                        <span className="font-semibold">{r.rule}</span>
-                                        <span className="font-mono"> ({r.delta.toFixed(6)})</span>
-                                        {r.detail ? ` — ${r.detail}` : ''}
-                                      </li>
-                                    ))}
-                                  </ul>
-                                </div>
-                              ) : null}
-
-                              {semanticAnalysis.rationale?.heuristics?.length ? (
-                                <div>
-                                  <div className="text-xs font-semibold mb-2">Heuristic contributions</div>
-                                  <div className="space-y-2">
-                                    {semanticAnalysis.rationale.heuristics.slice(0, 6).map((h, idx) => (
-                                      <div key={`${h.key}-${idx}`} className="rounded-md border bg-muted/20 p-2">
-                                        <div className="flex items-center justify-between gap-2 text-xs">
-                                          <div className="font-mono text-foreground">{h.key}</div>
-                                          <div className="font-mono text-muted-foreground">{h.score.toFixed(6)}</div>
-                                        </div>
-                                        {h.contributedTo?.length ? (
-                                          <div className="mt-1 grid grid-cols-1 md:grid-cols-2 gap-x-3 gap-y-1 text-[11px]">
-                                            {h.contributedTo.slice(0, 6).map((c, j) => (
-                                              <div key={`${c.tagId}-${j}`} className="flex items-center justify-between gap-2">
-                                                <div className="text-muted-foreground truncate">{c.tagId}</div>
-                                                <div className="font-mono text-foreground">{c.weight.toFixed(6)}</div>
-                                              </div>
-                                            ))}
-                                          </div>
-                                        ) : null}
-                                      </div>
-                                    ))}
-                                  </div>
-                                </div>
-                              ) : null}
-
-                              {semanticAnalysis.rationale?.activatedNodes?.length ? (
-                                <div>
-                                  <div className="text-xs font-semibold mb-2">Activated ontology nodes (score breakdown)</div>
-                                  <div className="space-y-1">
-                                    {semanticAnalysis.rationale.activatedNodes.slice(0, 12).map((n, idx) => (
-                                      <div key={`${n.tagId}-${idx}`} className="rounded-md border p-2">
-                                        <div className="flex items-center justify-between gap-2 text-xs">
-                                          <div className="text-foreground font-semibold">{n.tagName}</div>
-                                          <div className="font-mono text-foreground">{n.finalScore.toFixed(6)}</div>
-                                        </div>
-                                        <div className="mt-1 grid grid-cols-2 gap-2 text-[11px]">
-                                          <div className="text-muted-foreground">base</div>
-                                          <div className="font-mono text-foreground">{n.baseSimilarity.toFixed(6)}</div>
-                                          <div className="text-muted-foreground">heuristic</div>
-                                          <div className="font-mono text-foreground">{n.heuristicBoost.toFixed(6)}</div>
-                                          <div className="text-muted-foreground">up-prop</div>
-                                          <div className="font-mono text-foreground">{n.propagatedFromChildren.toFixed(6)}</div>
-                                          <div className="text-muted-foreground">down-prop</div>
-                                          <div className="font-mono text-foreground">{n.propagatedToChildren.toFixed(6)}</div>
-                                        </div>
-                                      </div>
-                                    ))}
-                                  </div>
-                                  {semanticAnalysis.rationale.hierarchy?.rootsActivated?.length ? (
-                                    <div className="mt-3 text-xs">
-                                      <div className="font-semibold mb-1">Root activations</div>
-                                      <div className="flex flex-wrap gap-2">
-                                        {semanticAnalysis.rationale.hierarchy.rootsActivated.map((r) => (
-                                          <Badge key={r.tagId} variant="outline" className="text-[10px]">
-                                            {r.tagName} {r.score.toFixed(6)}
-                                          </Badge>
-                                        ))}
-                                        {semanticAnalysis.rationale.hierarchy.siblingSuppressionApplied ? (
-                                          <Badge variant="secondary" className="text-[10px]">Sibling suppression applied</Badge>
-                                        ) : null}
-                                      </div>
-                                    </div>
-                                  ) : null}
-                                </div>
-                              ) : null}
-                            </div>
-                          </AccordionContent>
-                        </AccordionItem>
-                        <AccordionItem value="override">
-                          <AccordionTrigger className="text-sm">Override (admin)</AccordionTrigger>
-                          <AccordionContent>
-                            <div className="space-y-3">
-                              <div className="text-xs text-muted-foreground">
-                                Overrides are stored locally and never overwrite the AI record.
-                              </div>
-                              <div className="space-y-1">
-                                <div className="text-xs font-semibold">Override tags (comma-separated)</div>
-                                <Input
-                                  value={overrideTagsText}
-                                  onChange={(e) => setOverrideTagsText(e.target.value)}
-                                  placeholder="e.g. Mathematics, Algebra, Linear Equations"
-                                />
-                              </div>
-                              <div className="space-y-1">
-                                <div className="text-xs font-semibold">Override difficulty score (0 to 1)</div>
-                                <Input
-                                  value={overrideDifficultyText}
-                                  onChange={(e) => setOverrideDifficultyText(e.target.value)}
-                                  placeholder="e.g. 0.523456"
-                                />
-                                <div className="text-[11px] text-muted-foreground">
-                                  Stored with 6-decimal precision and mapped to a band deterministically.
-                                </div>
-                              </div>
-                              <div className="flex items-center gap-2">
-                                <Button
-                                  type="button"
-                                  size="sm"
-                                  disabled={overrideSaving}
-                                  onClick={async () => {
-                                    if (!semanticAnalysis) return;
-                                    setOverrideSaving(true);
-                                    try {
-                                      const now = Date.now();
-                                      const rawTags = overrideTagsText
-                                        .split(',')
-                                        .map((t) => t.trim())
-                                        .filter(Boolean);
-                                      const appliedTags = rawTags.map((name, idx) => ({
-                                        tagId: `user:${name.toLowerCase().replace(/\s+/g, '-')}`,
-                                        tagName: name,
-                                        score: 1,
-                                        rank: idx + 1,
-                                        explanation: 'User override',
-                                      }));
-
-                                      const parsedScore = overrideDifficultyText.trim() ? Number(overrideDifficultyText) : NaN;
-                                      const hasDifficulty = Number.isFinite(parsedScore);
-                                      const clamped = hasDifficulty ? Math.max(0, Math.min(1, parsedScore)) : undefined;
-                                      const rounded = typeof clamped === 'number' ? Math.round(clamped * 1_000_000) / 1_000_000 : undefined;
-
-                                      const payload = {
-                                        id: semanticOverride?.id || uuidv4(),
-                                        questionId: question.id,
-                                        baseAnalysisId: semanticAnalysis.id,
-                                        createdAt: semanticOverride?.createdAt || now,
-                                        updatedAt: now,
-                                        tags: rawTags.length ? { applied: appliedTags } : undefined,
-                                        difficulty: typeof rounded === 'number'
-                                          ? {
-                                              difficultyScore: rounded,
-                                              difficultyBand: mapScoreToBand(rounded),
-                                            }
-                                          : undefined,
-                                      };
-                                      await db.questionSemanticOverrides.put(payload as any);
-                                      toast.success('Override saved');
-                                    } catch (e) {
-                                      console.error(e);
-                                      toast.error('Failed to save override');
-                                    } finally {
-                                      setOverrideSaving(false);
-                                    }
-                                  }}
-                                >
-                                  Save Override
-                                </Button>
-                                <Button
-                                  type="button"
-                                  size="sm"
-                                  variant="outline"
-                                  disabled={overrideSaving || !semanticOverride}
-                                  onClick={async () => {
-                                    if (!semanticOverride) return;
-                                    setOverrideSaving(true);
-                                    try {
-                                      await db.questionSemanticOverrides.delete(semanticOverride.id);
-                                      toast.success('Override cleared');
-                                    } catch (e) {
-                                      console.error(e);
-                                      toast.error('Failed to clear override');
-                                    } finally {
-                                      setOverrideSaving(false);
-                                    }
-                                  }}
-                                >
-                                  Clear Override
-                                </Button>
-                              </div>
-
-                              {effectiveDifficultyBand && (
-                                <div className="text-xs text-muted-foreground">
-                                  Effective difficulty: <span className="font-semibold text-foreground">{effectiveDifficultyBand.replace(/_/g, ' ')}</span>
-                                  {typeof effectiveDifficultyScore === 'number'
-                                    ? <span className="font-mono"> {effectiveDifficultyScore.toFixed(6)}</span>
-                                    : null}
-                                </div>
-                              )}
-                            </div>
-                          </AccordionContent>
-                        </AccordionItem>
-                      </Accordion>
-                    </div>
-                  ) : null}
                 </div>
               </ScrollArea>
             </DialogContent>

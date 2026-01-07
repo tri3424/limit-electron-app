@@ -165,8 +165,12 @@ export function startSemanticBackgroundQueue(params?: { intervalMs?: number; bat
 	}, intervalMs);
 
 	void (async () => {
-		const all = await db.questions.toArray();
-		enqueue(all.map((q) => q.id));
+		try {
+			const all = await db.questions.toArray();
+			enqueue(all.map((q) => q.id));
+		} catch (e) {
+			console.error(e);
+		}
 	})();
 }
 

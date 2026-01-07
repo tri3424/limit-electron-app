@@ -21,6 +21,29 @@ declare global {
 			readAudioFile?: (payload: { filePath: string }) => Promise<{ dataBase64: string }>;
 			deleteAudioFile: (payload: { filePath: string }) => Promise<{ ok: true }>;
 		};
+		data?: {
+			exportJsonToFile: (payload: { defaultFileName: string; dataText: string }) => Promise<{ canceled: boolean; filePath?: string }>;
+		};
+		ocr?: {
+			importExamPdf: (payload?: {
+				dpi?: number;
+				pageStart?: number;
+				pageEnd?: number;
+				pdfFilePath?: string;
+			}) => Promise<{
+				documentId: string;
+				pdfFilePath: string;
+				pages: Array<{
+					pageIndex: number;
+					questions: Array<{
+						number?: number;
+						text: string;
+						questionImages: string[];
+						options: Record<string, { text: string; images: string[] }>;
+					}>;
+				}>;
+			}>;
+		};
 	}
 }
 
