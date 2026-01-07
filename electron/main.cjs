@@ -43,13 +43,22 @@ function getOcrBundleDirName() {
 function resolveBundledFile(...segments) {
   const candidates = [];
   const appPath = app.getAppPath();
+  const isNativeAsset = segments && segments[0] === 'native';
+  if (app.isPackaged && isNativeAsset) {
+    // Prefer unpacked location for native assets/binaries.
+    // Executables cannot be spawned from inside app.asar.
+    candidates.push(path.join(process.resourcesPath, 'app.asar.unpacked', ...segments));
+  }
+
   candidates.push(path.join(appPath, ...segments));
   candidates.push(path.join(__dirname, '..', ...segments));
   if (app.isPackaged) {
     // When packaged, files under asarUnpack live at:
     // <resources>/app.asar.unpacked/<path>
     // while app.getAppPath() points at <resources>/app.asar
-    candidates.push(path.join(process.resourcesPath, 'app.asar.unpacked', ...segments));
+    if (!isNativeAsset) {
+      candidates.push(path.join(process.resourcesPath, 'app.asar.unpacked', ...segments));
+    }
   }
   const hit = candidates.find((p) => fs.existsSync(p));
   return hit || null;
