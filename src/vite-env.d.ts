@@ -25,6 +25,7 @@ declare global {
 			exportJsonToFile: (payload: { defaultFileName: string; dataText: string }) => Promise<{ canceled: boolean; filePath?: string }>;
 		};
 		ocr?: {
+			pickPdf?: () => Promise<{ canceled: boolean; pdfFilePath: string }>;
 			importExamPdf: (payload?: {
 				dpi?: number;
 				pageStart?: number;

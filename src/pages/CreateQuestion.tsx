@@ -114,8 +114,8 @@ export default function CreateQuestion() {
   const isEditing = !!id;
 
   const [importConfigOpen, setImportConfigOpen] = useState(false);
+  const [importPdfFilePath, setImportPdfFilePath] = useState<string>('');
   const [importRangeText, setImportRangeText] = useState('');
-  const [importDpi, setImportDpi] = useState<number>(300);
   const [isImportingPdf, setIsImportingPdf] = useState(false);
 
 	useEffect(() => {
@@ -646,11 +646,22 @@ export default function CreateQuestion() {
 					type="button"
 					variant="outline"
 					onClick={() => {
-						if (!window.ocr?.importExamPdf) {
+						if (!window.ocr?.pickPdf || !window.ocr?.importExamPdf) {
 							toast.error('PDF import is only available in the desktop (Electron) app.');
 							return;
 						}
-						setImportConfigOpen(true);
+						void (async () => {
+							try {
+								const picked = await window.ocr!.pickPdf!();
+								if (picked?.canceled || !picked?.pdfFilePath) return;
+								setImportPdfFilePath(picked.pdfFilePath);
+								setImportRangeText('');
+								setImportConfigOpen(true);
+							} catch (e) {
+								toast.error('Failed to open PDF picker');
+								console.error(e);
+							}
+						})();
 					}}
 				>
 					Import PDF
@@ -663,10 +674,14 @@ export default function CreateQuestion() {
 					<DialogHeader>
 						<DialogTitle>Import PDF</DialogTitle>
 						<DialogDescription>
-							Choose a page range (optional) and import resolution. After you click Import, a file picker will open to select the PDF.
+							Choose a page range (optional), then click Import to extract questions from the selected PDF.
 						</DialogDescription>
 					</DialogHeader>
 					<div className="space-y-3">
+						<div className="space-y-1">
+							<Label>Selected PDF</Label>
+							<div className="text-xs text-muted-foreground break-all">{importPdfFilePath || '—'}</div>
+						</div>
 						<div className="space-y-1">
 							<Label>Page range (optional)</Label>
 							<Input
@@ -674,20 +689,6 @@ export default function CreateQuestion() {
 								onChange={(e) => setImportRangeText(e.target.value)}
 								placeholder="Examples: 1 or 1-3 (leave blank for all pages)"
 							/>
-						</div>
-						<div className="space-y-1">
-							<Label>DPI</Label>
-							<Input
-								type="number"
-								value={String(importDpi)}
-								onChange={(e) => {
-									const n = Number(e.target.value);
-									setImportDpi(Number.isFinite(n) ? n : 300);
-								}}
-								min={150}
-								max={600}
-							/>
-							<div className="text-xs text-muted-foreground">Higher DPI can improve OCR but will be slower.</div>
 						</div>
 					</div>
 					<DialogFooter>
@@ -701,6 +702,10 @@ export default function CreateQuestion() {
 							try {
 								if (!window.ocr?.importExamPdf) {
 									toast.error('PDF import is only available in the desktop (Electron) app.');
+									return;
+								}
+								if (!importPdfFilePath) {
+									toast.error('No PDF selected');
 									return;
 								}
 								let pageStart: number | undefined;
@@ -717,9 +722,10 @@ export default function CreateQuestion() {
 								}
 								setIsImportingPdf(true);
 								const res = await window.ocr.importExamPdf({
-									dpi: importDpi,
+									dpi: 300,
 									pageStart,
 									pageEnd,
+									pdfFilePath: importPdfFilePath,
 								});
 								const flattened = flattenOcrQuestions(res);
 								if (!flattened.length) {
@@ -740,7 +746,7 @@ export default function CreateQuestion() {
 							}
 						}}
 						>
-							{isImportingPdf ? 'Importing…' : 'Choose PDF & Import'}
+							{isImportingPdf ? 'Importing…' : 'Import'}
 						</Button>
 					</DialogFooter>
 				</DialogContent>

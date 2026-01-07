@@ -1,7 +1,7 @@
 {
   "name": "limit",
   "private": true,
-  "version": "1.0.11",
+  "version": "1.0.12",
   "description": "Limit Desktop Application",
   "type": "module",
   "main": "electron/main.cjs",
@@ -14,8 +14,8 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "electron:dev": "concurrently \"vite\" \"wait-on http://localhost:8080 && electron .\"",
-    "electron:build": "vite build && electron-builder",
-    "electron:build:win": "vite build && electron-builder --win --x64"
+    "electron:build": "node scripts/check-ocr-binaries.cjs && vite build && electron-builder",
+    "electron:build:win": "node scripts/check-ocr-binaries.cjs && vite build && electron-builder --win --x64"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",

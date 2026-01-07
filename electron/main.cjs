@@ -368,6 +368,21 @@ app.on('ready', () => {
 		return { canceled: false, filePath: pick.filePath };
 	});
 
+	ipcMain.handle('ocr:pickPdf', async () => {
+		if (!mainWindow || mainWindow.isDestroyed()) {
+			throw new Error('Main window is not available');
+		}
+		const pick = await dialog.showOpenDialog(mainWindow, {
+			title: 'Select exam PDF',
+			properties: ['openFile'],
+			filters: [{ name: 'PDF', extensions: ['pdf'] }],
+		});
+		if (pick.canceled || !pick.filePaths || !pick.filePaths[0]) {
+			return { canceled: true, pdfFilePath: '' };
+		}
+		return { canceled: false, pdfFilePath: pick.filePaths[0] };
+	});
+
 	ipcMain.handle('ocr:importExamPdf', async (_event, payload) => {
 		if (!mainWindow || mainWindow.isDestroyed()) {
 			throw new Error('Main window is not available');
@@ -378,27 +393,28 @@ app.on('ready', () => {
 		const pageEndRaw = payload && Number.isFinite(payload.pageEnd) ? Math.floor(payload.pageEnd) : null;
 		const pageStart = pageStartRaw && pageStartRaw > 0 ? pageStartRaw : null;
 		const pageEnd = pageEndRaw && pageEndRaw > 0 ? pageEndRaw : null;
+
+		let pdfFilePath = payload && typeof payload.pdfFilePath === 'string' ? payload.pdfFilePath : '';
+		if (!pdfFilePath) {
+			const pick = await dialog.showOpenDialog(mainWindow, {
+				title: 'Select exam PDF',
+				properties: ['openFile'],
+				filters: [{ name: 'PDF', extensions: ['pdf'] }],
+			});
+			if (pick.canceled || !pick.filePaths || !pick.filePaths[0]) {
+				return { documentId: '', pdfFilePath: '', pages: [] };
+			}
+			pdfFilePath = pick.filePaths[0];
+		}
+
 		const pdftoppmName = process.platform === 'win32' ? 'pdftoppm.exe' : 'pdftoppm';
 		const tesseractName = process.platform === 'win32' ? 'tesseract.exe' : 'tesseract';
 		const pdftoppm = resolveBundledFile('native', 'offline-ai', pdftoppmName) || resolveBundledFile('native', 'offline-ai', 'pdftoppm');
 		const tesseract = resolveBundledFile('native', 'offline-ai', tesseractName) || resolveBundledFile('native', 'offline-ai', 'tesseract');
 		if (!pdftoppm || !tesseract) {
 			throw new Error(
-				'Missing bundled OCR binaries. Expected native/offline-ai/pdftoppm(.exe) and native/offline-ai/tesseract(.exe) to be present (and unpacked when packaged).'
+				`Missing bundled OCR binaries.\n\nExpected the following files to be bundled with the installer:\n- native/offline-ai/${pdftoppmName}\n- native/offline-ai/${tesseractName}\n\nFix: add these binaries into the repository (or your build pipeline) under native/offline-ai and rebuild the Windows installer.\nNote: electron-builder is configured to unpack native/** via asarUnpack, but the files must exist at build time.`
 			);
-		}
-
-		let pdfFilePath = payload && typeof payload.pdfFilePath === 'string' ? payload.pdfFilePath : '';
-		if (!pdfFilePath) {
-			const pick = await dialog.showOpenDialog(mainWindow, {
-			title: 'Select exam PDF',
-			properties: ['openFile'],
-			filters: [{ name: 'PDF', extensions: ['pdf'] }],
-		});
-			if (pick.canceled || !pick.filePaths || !pick.filePaths[0]) {
-				return { documentId: '', pdfFilePath: '', pages: [] };
-			}
-			pdfFilePath = pick.filePaths[0];
 		}
 		const stat = fs.statSync(pdfFilePath);
 		const docId = sha1(`${pdfFilePath}::${stat.size}::${stat.mtimeMs}`);
