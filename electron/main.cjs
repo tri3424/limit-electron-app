@@ -76,7 +76,14 @@ function runBinaryOrThrow(exePath, args, opts) {
 	});
 	if (res.error) throw res.error;
 	if (res.status !== 0) {
-		throw new Error(`Command failed: ${path.basename(exePath)} ${args.join(' ')}\n${res.stderr || res.stdout || ''}`);
+		const details = [
+			`Command failed: ${path.basename(exePath)} ${args.join(' ')}`,
+			`exitCode=${res.status}`, 
+			res.stderr ? `\n--- stderr ---\n${res.stderr}` : '',
+			!res.stderr && res.stdout ? `\n--- stdout ---\n${res.stdout}` : '',
+			!res.stderr && !res.stdout ? '\n(no output)' : '',
+		].filter(Boolean);
+		throw new Error(details.join('\n'));
 	}
 	return res;
 }
