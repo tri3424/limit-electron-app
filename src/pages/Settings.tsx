@@ -87,6 +87,17 @@ export default function Settings() {
   }, [settings]);
 
   useEffect(() => {
+    const fromSettings = settings?.questionPrompts;
+    if (Array.isArray(fromSettings)) {
+      setQuestionPrompts(
+        fromSettings
+          .filter((p) => p && typeof (p as any).id === 'string')
+          .map((p: any) => ({ id: String(p.id), title: String(p.title ?? ''), content: String(p.content ?? '') }))
+      );
+      return;
+    }
+
+    // Backward compatibility: migrate prompts from localStorage into IndexedDB once.
     try {
       const raw = window.localStorage.getItem('questionPrompts');
       if (!raw) {
@@ -94,17 +105,21 @@ export default function Settings() {
         return;
       }
       const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed)) {
-        setQuestionPrompts(
-          parsed
-            .filter((p) => p && typeof p.id === 'string')
-            .map((p) => ({ id: String(p.id), title: String(p.title ?? ''), content: String(p.content ?? '') }))
-        );
+      if (!Array.isArray(parsed)) {
+        setQuestionPrompts([]);
+        return;
+      }
+      const migrated = parsed
+        .filter((p) => p && typeof p.id === 'string')
+        .map((p) => ({ id: String(p.id), title: String(p.title ?? ''), content: String(p.content ?? '') }));
+      setQuestionPrompts(migrated);
+      if (settings) {
+        void db.settings.update('1', { questionPrompts: migrated });
       }
     } catch {
       setQuestionPrompts([]);
     }
-  }, []);
+  }, [settings]);
 
   const persistPrompts = (next: { id: string; title: string; content: string }[]) => {
     setQuestionPrompts(next);
@@ -112,6 +127,7 @@ export default function Settings() {
       window.localStorage.setItem('questionPrompts', JSON.stringify(next));
     } catch {
     }
+    void db.settings.update('1', { questionPrompts: next });
   };
 
   useEffect(() => {

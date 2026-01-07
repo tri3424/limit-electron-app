@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
-import { Link, useLocation } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { Plus, Search, Edit, Eye, Tag as TagIcon, FileQuestion, Trash2 } from 'lucide-react';
 import { db, Question, GlobalGlossaryEntry, normalizeGlossaryMeaning, normalizeGlossaryWord } from '@/lib/db';
 import { Button } from '@/components/ui/button';
@@ -23,6 +23,7 @@ import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/
 
 export default function Questions() {
   const location = useLocation();
+  const navigate = useNavigate();
   const [searchQuery, setSearchQuery] = useState('');
   const [typeFilter, setTypeFilter] = useState<'all' | 'mcq' | 'text' | 'fill_blanks' | 'matching'>('all');
   const [tagFilter, setTagFilter] = useState<string>('all');
@@ -30,6 +31,7 @@ export default function Questions() {
   const [confirmDeleteIds, setConfirmDeleteIds] = useState<string[] | null>(null);
   const [mergingGlossary, setMergingGlossary] = useState(false);
   const [highlightQuestionId, setHighlightQuestionId] = useState<string | null>(null);
+  const handledScrollRequestRef = useRef<string | null>(null);
 
   const questions = useLiveQuery(async () => {
     let query = db.questions.toArray();
@@ -67,8 +69,13 @@ export default function Questions() {
     if (!targetId) return;
     if (!questions || !questions.length) return;
 
+    const requestKey = `${location.key}:${targetId}`;
+    if (handledScrollRequestRef.current === requestKey) return;
+
     const exists = questions.some((q) => q.id === targetId);
     if (!exists) return;
+
+    handledScrollRequestRef.current = requestKey;
 
     const handle = window.setTimeout(() => {
       const el = document.querySelector<HTMLElement>(`[data-question-id="${targetId}"]`);
@@ -79,8 +86,11 @@ export default function Questions() {
       }
     }, 50);
 
+    // Clear the router state so this scroll/highlight doesn't retrigger on subsequent question list updates.
+    navigate(location.pathname + location.search + location.hash, { replace: true, state: null });
+
     return () => window.clearTimeout(handle);
-  }, [location.state, questions]);
+  }, [location.state, questions, location.key, location.pathname, location.search, location.hash, navigate]);
 
   // Filter questions
   const normalizedSearchTokens = useMemo(() => {

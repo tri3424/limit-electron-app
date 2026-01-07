@@ -332,6 +332,7 @@ export interface User {
 export interface AppSettings {
   id: string; // always '1' - single record
   theme: 'light' | 'dark' | 'auto';
+  questionPrompts?: { id: string; title: string; content: string }[];
   examIntegrity: {
     requireFullscreen: boolean;
     autoSubmitOnTabChange: boolean;
@@ -1137,6 +1138,7 @@ export async function initializeSettings() {
       const defaultSettings: AppSettings = {
       id: '1',
       theme: 'auto',
+      questionPrompts: [],
       examIntegrity: {
         requireFullscreen: true,
         autoSubmitOnTabChange: true,

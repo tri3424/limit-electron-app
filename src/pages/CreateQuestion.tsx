@@ -113,6 +113,11 @@ export default function CreateQuestion() {
   const { id } = useParams();
   const isEditing = !!id;
 
+  const [importConfigOpen, setImportConfigOpen] = useState(false);
+  const [importRangeText, setImportRangeText] = useState('');
+  const [importDpi, setImportDpi] = useState<number>(300);
+  const [isImportingPdf, setIsImportingPdf] = useState(false);
+
 	useEffect(() => {
 		// The semantic background queue can be CPU-heavy (offline analysis across many questions)
 		// and may cause scroll jank while editing. Pause it on this page.
@@ -640,46 +645,106 @@ export default function CreateQuestion() {
 				<Button
 					type="button"
 					variant="outline"
-					onClick={async () => {
-						try {
-							if (!window.ocr?.importExamPdf) {
-								toast.error('PDF import is only available in the desktop (Electron) app.');
-								return;
-							}
-							const rangeRaw = window.prompt('Import which pages? Examples: 1 or 1-3. Leave blank for all pages.', '');
-							let pageStart: number | undefined;
-							let pageEnd: number | undefined;
-							if (typeof rangeRaw === 'string' && rangeRaw.trim().length) {
-								const txt = rangeRaw.trim();
-								const m = txt.match(/^\s*(\d+)\s*(?:-\s*(\d+)\s*)?$/);
-								if (!m) {
-									toast.error('Invalid page range. Use 1 or 1-3');
-									return;
-								}
-								pageStart = Number(m[1]);
-								pageEnd = m[2] ? Number(m[2]) : Number(m[1]);
-							}
-							const res = await window.ocr.importExamPdf({ dpi: 300, pageStart, pageEnd });
-							const flattened = flattenOcrQuestions(res);
-							if (!flattened.length) {
-								toast.error('No questions detected');
-								return;
-							}
-							setImportedOcrQuestions(flattened);
-							setSelectedImportedIndexes(
-								Object.fromEntries(flattened.map((_, idx) => [idx, true])) as Record<number, boolean>
-							);
-							setImportPreviewOpen(true);
-						} catch (e) {
-							toast.error('Import failed');
-							console.error(e);
+					onClick={() => {
+						if (!window.ocr?.importExamPdf) {
+							toast.error('PDF import is only available in the desktop (Electron) app.');
+							return;
 						}
+						setImportConfigOpen(true);
 					}}
 				>
 					Import PDF
 				</Button>
 			</div>
       </div>
+
+			<Dialog open={importConfigOpen} onOpenChange={setImportConfigOpen}>
+				<DialogContent className="max-w-lg">
+					<DialogHeader>
+						<DialogTitle>Import PDF</DialogTitle>
+						<DialogDescription>
+							Choose a page range (optional) and import resolution. After you click Import, a file picker will open to select the PDF.
+						</DialogDescription>
+					</DialogHeader>
+					<div className="space-y-3">
+						<div className="space-y-1">
+							<Label>Page range (optional)</Label>
+							<Input
+								value={importRangeText}
+								onChange={(e) => setImportRangeText(e.target.value)}
+								placeholder="Examples: 1 or 1-3 (leave blank for all pages)"
+							/>
+						</div>
+						<div className="space-y-1">
+							<Label>DPI</Label>
+							<Input
+								type="number"
+								value={String(importDpi)}
+								onChange={(e) => {
+									const n = Number(e.target.value);
+									setImportDpi(Number.isFinite(n) ? n : 300);
+								}}
+								min={150}
+								max={600}
+							/>
+							<div className="text-xs text-muted-foreground">Higher DPI can improve OCR but will be slower.</div>
+						</div>
+					</div>
+					<DialogFooter>
+						<Button type="button" variant="outline" onClick={() => setImportConfigOpen(false)} disabled={isImportingPdf}>
+							Cancel
+						</Button>
+						<Button
+							type="button"
+							disabled={isImportingPdf}
+							onClick={async () => {
+							try {
+								if (!window.ocr?.importExamPdf) {
+									toast.error('PDF import is only available in the desktop (Electron) app.');
+									return;
+								}
+								let pageStart: number | undefined;
+								let pageEnd: number | undefined;
+								const raw = importRangeText.trim();
+								if (raw.length) {
+									const m = raw.match(/^\s*(\d+)\s*(?:-\s*(\d+)\s*)?$/);
+									if (!m) {
+										toast.error('Invalid page range. Use 1 or 1-3');
+										return;
+									}
+									pageStart = Number(m[1]);
+									pageEnd = m[2] ? Number(m[2]) : Number(m[1]);
+								}
+								setIsImportingPdf(true);
+								const res = await window.ocr.importExamPdf({
+									dpi: importDpi,
+									pageStart,
+									pageEnd,
+								});
+								const flattened = flattenOcrQuestions(res);
+								if (!flattened.length) {
+									toast.error('No questions detected');
+									return;
+								}
+								setImportedOcrQuestions(flattened);
+								setSelectedImportedIndexes(
+									Object.fromEntries(flattened.map((_, idx) => [idx, true])) as Record<number, boolean>
+								);
+								setImportConfigOpen(false);
+								setImportPreviewOpen(true);
+							} catch (e) {
+								toast.error('Import failed');
+								console.error(e);
+							} finally {
+								setIsImportingPdf(false);
+							}
+						}}
+						>
+							{isImportingPdf ? 'Importing…' : 'Choose PDF & Import'}
+						</Button>
+					</DialogFooter>
+				</DialogContent>
+			</Dialog>
 
 			<Dialog open={importPreviewOpen} onOpenChange={setImportPreviewOpen}>
 				<DialogContent className="max-w-4xl">
