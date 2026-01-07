@@ -45,6 +45,18 @@ function copyDirRecursive(srcDir, destDir) {
   }
 }
 
+function listMissingOcrFiles() {
+  const missing = [];
+  const pdftoppm = path.join(OFFLINE_DIR, 'pdftoppm.exe');
+  const tesseract = path.join(OFFLINE_DIR, 'tesseract.exe');
+  const tessdataEng = path.join(OFFLINE_DIR, 'tessdata', 'eng.traineddata');
+
+  if (!exists(pdftoppm)) missing.push(path.relative(ROOT, pdftoppm));
+  if (!exists(tesseract)) missing.push(path.relative(ROOT, tesseract));
+  if (!exists(tessdataEng)) missing.push(path.relative(ROOT, tessdataEng));
+  return missing;
+}
+
 function findFirstFile(rootDir, predicate) {
   const stack = [rootDir];
   while (stack.length) {
@@ -275,10 +287,20 @@ async function ensureTesseract(tempDir) {
 }
 
 function hasOcrBinaries() {
-  const pdftoppm = path.join(OFFLINE_DIR, 'pdftoppm.exe');
-  const tesseract = path.join(OFFLINE_DIR, 'tesseract.exe');
-  const tessdataEng = path.join(OFFLINE_DIR, 'tessdata', 'eng.traineddata');
-  return exists(pdftoppm) && exists(tesseract) && exists(tessdataEng);
+  return listMissingOcrFiles().length === 0;
+}
+
+async function ensureEnglishTessdata() {
+  const tessdataDir = path.join(OFFLINE_DIR, 'tessdata');
+  const eng = path.join(tessdataDir, 'eng.traineddata');
+  if (exists(eng)) return;
+
+  console.log('[ocr-bootstrap] Downloading tessdata: eng.traineddata ...');
+  mkdirp(tessdataDir);
+
+  // tessdata_fast is smaller and good enough for most OCR use cases.
+  const url = 'https://github.com/tesseract-ocr/tessdata_fast/raw/main/eng.traineddata';
+  await downloadToFile(url, eng);
 }
 
 async function main() {
@@ -303,13 +325,17 @@ async function main() {
   try {
     await ensurePoppler(tempDir);
     await ensureTesseract(tempDir);
+    await ensureEnglishTessdata();
   } finally {
     rimraf(tempDir);
   }
 
   if (!hasOcrBinaries()) {
+    const missing = listMissingOcrFiles();
     throw new Error(
-      '[ocr-bootstrap] OCR bootstrap completed but required files are still missing. Expected native/offline-ai/pdftoppm.exe, native/offline-ai/tesseract.exe, native/offline-ai/tessdata/eng.traineddata'
+      `[ocr-bootstrap] OCR bootstrap completed but required files are still missing:\n${missing
+        .map((m) => `- ${m}`)
+        .join('\n')}`
     );
   }
 
