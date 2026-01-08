@@ -892,6 +892,24 @@ export default function Settings() {
           </p>
         </div>
 
+        <Card className="p-6 space-y-4">
+          <div className="flex items-start justify-between gap-4">
+            <div className="min-w-0">
+              <h2 className="text-xl font-semibold text-foreground">Songs</h2>
+              <p className="text-sm text-muted-foreground mt-1">
+                Enable or disable song recognition features for students.
+              </p>
+            </div>
+            <div className="shrink-0 flex items-center gap-3">
+              <Label className="text-sm">Song recognition</Label>
+              <Switch
+                checked={localSettings.songRecognitionEnabled === true}
+                onCheckedChange={(v) => void handleUpdateSettings({ songRecognitionEnabled: v === true })}
+              />
+            </div>
+          </div>
+        </Card>
+
         {/* User Management */}
         <Card className="p-6 space-y-6">
           <div className="flex items-center justify-between">

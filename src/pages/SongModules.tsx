@@ -39,6 +39,11 @@ export default function SongModules() {
 				<h1 className="text-3xl font-bold text-foreground">Song Modules</h1>
 				<p className="text-muted-foreground mt-2">Open a module to view its songs.</p>
 				</div>
+				{!isAdmin ? (
+					<Button variant="default" onClick={() => navigate('/song-recognition')}>
+						Song Recognition Test
+					</Button>
+				) : null}
 			</div>
 
 			<div className="space-y-4">

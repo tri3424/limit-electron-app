@@ -333,6 +333,7 @@ export interface AppSettings {
   id: string; // always '1' - single record
   theme: 'light' | 'dark' | 'auto';
   questionPrompts?: { id: string; title: string; content: string }[];
+  songRecognitionEnabled?: boolean;
   examIntegrity: {
     requireFullscreen: boolean;
     autoSubmitOnTabChange: boolean;
@@ -503,6 +504,16 @@ export interface SongListeningEvent {
 	didScrollLyrics?: boolean;
 }
 
+export interface SongSrtCue {
+	id: string;
+	songId: string;
+	cueIndex: number;
+	startMs: number;
+	endMs: number;
+	text: string;
+	createdAt: number;
+}
+
 // Database class
 export class ExamDatabase extends Dexie {
   questions!: Table<Question, string>;
@@ -524,6 +535,7 @@ export class ExamDatabase extends Dexie {
 	songs!: Table<Song, string>;
 	songModules!: Table<SongModule, string>;
 	songListeningEvents!: Table<SongListeningEvent, string>;
+	songSrtCues!: Table<SongSrtCue, string>;
 	binaryAssets!: Table<BinaryAsset, string>;
 	lyricsSource!: Table<LyricsSourceEntry, string>;
 
@@ -1129,6 +1141,32 @@ export class ExamDatabase extends Dexie {
 			binaryAssets: 'id, kind, createdAt',
 			lyricsSource: 'id, normalizedEnglishTitle, createdAt, writer'
 		});
+
+		// v24: store parsed timestamped lyrics per song (SRT cues)
+		this.version(24).stores({
+			questions: 'id, type, *tags, *modules, metadata.createdAt',
+			modules: 'id, type, *tags, createdAt, visible, locked',
+			attempts: 'id, moduleId, type, startedAt, syncStatus',
+			integrityEvents: 'id, attemptId, type, timestamp',
+			tags: 'id, name',
+			semanticOntologyTags: 'id, kind, parentId, name, updatedAt',
+			semanticEmbeddings: 'id, [scope+scopeId], scope, scopeId, modelId, createdAt',
+			questionSemanticAnalyses: 'id, questionId, createdAt, [questionId+analysisVersion], [questionId+modelId], source',
+			questionSemanticOverrides: 'id, questionId, updatedAt, baseAnalysisId, [questionId+updatedAt]',
+			settings: 'id',
+			dailyStats: 'id, date, moduleId, [date+moduleId], [moduleId+date], moduleType, createdAt',
+			users: 'id, username',
+			globalGlossary: 'id, normalizedWord, word',
+			intelligenceSignals: 'id, type, questionId, moduleId, [type+moduleId], [questionId+type]',
+			reviewInteractions: 'id, attemptId, moduleId, userId, questionId, timestamp, [attemptId+questionId], [moduleId+userId]',
+			errorReports: 'id, status, createdAt, updatedAt, moduleId, questionId, questionCode, reporterUserId, [status+createdAt]',
+			songs: 'id, visible, createdAt, updatedAt',
+			songModules: 'id, visible, createdAt, updatedAt',
+			songListeningEvents: 'id, date, timestamp, songModuleId, userId, songId, [date+songModuleId], [songModuleId+date], [songModuleId+userId], [songModuleId+songId]',
+			binaryAssets: 'id, kind, createdAt',
+			lyricsSource: 'id, normalizedEnglishTitle, createdAt, writer',
+			songSrtCues: 'id, songId, cueIndex, [songId+cueIndex], startMs, endMs, text'
+		});
 	}
 }
 
@@ -1200,6 +1238,7 @@ export async function initializeSettings() {
       id: '1',
       theme: 'auto',
       questionPrompts: [],
+      songRecognitionEnabled: false,
       examIntegrity: {
         requireFullscreen: true,
         autoSubmitOnTabChange: true,
@@ -1277,6 +1316,10 @@ export async function initializeSettings() {
 				preserveExistingQuestionTags: true,
 				preserveExistingDifficulty: true,
 			},
+		});
+	} else if (typeof existingSettings.songRecognitionEnabled !== 'boolean') {
+		await db.settings.update('1', {
+			songRecognitionEnabled: false,
 		});
   }
 }

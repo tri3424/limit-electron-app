@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { useNavigate, useParams } from 'react-router-dom';
 import { v4 as uuidv4 } from 'uuid';
-import { db, Song, SongListeningEvent, SongModule } from '@/lib/db';
+import { AppSettings, db, Song, SongListeningEvent, SongModule, SongSrtCue } from '@/lib/db';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -12,6 +12,7 @@ import { cn } from '@/lib/utils';
 import AudioPlayer from '@/components/AudioPlayer';
 import { useAuth } from '@/contexts/AuthContext';
 import { toast } from 'sonner';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
 export default function SongModuleRunner() {
 	const navigate = useNavigate();
@@ -19,8 +20,29 @@ export default function SongModuleRunner() {
 	const { id } = useParams();
 	const moduleId = id || '';
 
-	const module = useLiveQuery(() => (moduleId ? db.songModules.get(moduleId) : undefined), [moduleId]);
-	const songs = useLiveQuery(() => db.songs.toArray(), [], [] as Song[]);
+	const module = useLiveQuery<SongModule | undefined>(() => (moduleId ? db.songModules.get(moduleId) : undefined), [moduleId]);
+	const songs = useLiveQuery<Song[]>(() => db.songs.toArray(), []);
+	const appSettings = useLiveQuery<AppSettings | undefined>(() => db.settings.get('1'), []);
+	const songRecognitionEnabled = appSettings?.songRecognitionEnabled === true;
+	const srtCues = useLiveQuery<SongSrtCue[]>(async () => {
+		try {
+			return await db.songSrtCues.toArray();
+		} catch {
+			return [] as SongSrtCue[];
+		}
+	}, []);
+	const songSrtBySongId = useMemo(() => {
+		const map = new Map<string, SongSrtCue[]>();
+		for (const cue of srtCues ?? []) {
+			if (!map.has(cue.songId)) map.set(cue.songId, []);
+			map.get(cue.songId)!.push(cue);
+		}
+		for (const [k, list] of map) {
+			list.sort((a, b) => (a.cueIndex ?? 0) - (b.cueIndex ?? 0));
+			map.set(k, list);
+		}
+		return map;
+	}, [srtCues]);
 
 	const [search, setSearch] = useState('');
 	const [selectedSongId, setSelectedSongId] = useState<string | null>(null);
@@ -55,6 +77,32 @@ export default function SongModuleRunner() {
 			.map((sid) => map.get(sid))
 			.filter((s): s is Song => !!s && s.visible !== false);
 	}, [module, songs]);
+
+	const moduleSongIds = useMemo(() => moduleSongs.map((s) => s.id), [moduleSongs]);
+	const listeningEvents = useLiveQuery(async () => {
+		try {
+			const all = await db.songListeningEvents.toArray();
+			const userId = user?.id;
+			const username = user?.username;
+			return all.filter((e) => {
+				if (!moduleId || e.songModuleId !== moduleId) return false;
+				if (!moduleSongIds.includes(e.songId)) return false;
+				if (userId && e.userId === userId) return true;
+				if (!userId && username && e.username === username) return true;
+				return false;
+			});
+		} catch {
+			return [] as SongListeningEvent[];
+		}
+	}, [moduleId, moduleSongIds.join('|'), user?.id, user?.username], [] as SongListeningEvent[]);
+	const listenedMsBySongId = useMemo(() => {
+		const map = new Map<string, number>();
+		for (const e of listeningEvents ?? []) {
+			if (typeof e.listenedMs !== 'number') continue;
+			map.set(e.songId, (map.get(e.songId) || 0) + Math.max(0, e.listenedMs));
+		}
+		return map;
+	}, [listeningEvents]);
 
 	const sortedModuleSongs = useMemo(() => {
 		return moduleSongs.slice().sort((a, b) => (a.title || '').localeCompare(b.title || ''));
@@ -315,6 +363,14 @@ export default function SongModuleRunner() {
 					{module.description ? <p className="text-muted-foreground mt-2">{module.description}</p> : null}
 				</div>
 				<div className="flex items-center gap-2">
+					{songRecognitionEnabled ? (
+						<Button
+							variant="outline"
+							onClick={() => navigate('/song-recognition')}
+						>
+							Song Recognition Test
+						</Button>
+					) : null}
 					<Button variant="outline" onClick={() => void openReportDialogWithCapture()}>
 						Report issue
 					</Button>
@@ -412,7 +468,9 @@ export default function SongModuleRunner() {
 				<DialogContent className="max-w-2xl">
 					<DialogHeader>
 						<DialogTitle>Report an issue</DialogTitle>
-						<DialogDescription>Describe the issue you faced with this song/module.</DialogDescription>
+						<DialogDescription>
+							Describe the issue you encountered.
+						</DialogDescription>
 					</DialogHeader>
 					<div className="space-y-3">
 						{reportScreenshotDataUrl ? (
@@ -444,6 +502,7 @@ export default function SongModuleRunner() {
 					</DialogFooter>
 				</DialogContent>
 			</Dialog>
+
 		</div>
 	);
 }

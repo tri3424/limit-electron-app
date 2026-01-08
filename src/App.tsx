@@ -26,6 +26,7 @@ import SongsAdmin from "./pages/SongsAdmin";
 import SongModules from "./pages/SongModules";
 import SongModulesAdmin from "./pages/SongModulesAdmin";
 import SongModuleRunner from "./pages/SongModuleRunner";
+import SongRecognition from "./pages/SongRecognition";
  
 
 const queryClient = new QueryClient();
@@ -145,6 +146,16 @@ const App = () => {
         <ProtectedRoute>
           <Layout>
             <SongModules />
+          </Layout>
+        </ProtectedRoute>
+      ),
+    },
+    {
+      path: "/song-recognition",
+      element: (
+        <ProtectedRoute>
+          <Layout>
+            <SongRecognition />
           </Layout>
         </ProtectedRoute>
       ),

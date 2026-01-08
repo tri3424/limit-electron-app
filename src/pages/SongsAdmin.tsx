@@ -1,7 +1,7 @@
 import { useMemo, useRef, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import { v4 as uuidv4 } from "uuid";
-import { db, LyricsSourceEntry, Song } from "@/lib/db";
+import { db, LyricsSourceEntry, Song, SongSrtCue } from "@/lib/db";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -46,6 +46,74 @@ async function readArtistFromAudioFile(file: File): Promise<string | null> {
 function fileNameToTitle(name: string) {
 	const base = name.replace(/\.[^/.]+$/, "");
 	return base.replace(/[_-]+/g, " ").trim();
+}
+
+function parseSrtTimeToMs(value: string): number {
+	const v = value.trim();
+	const m = v.match(/^(\d+):(\d+):(\d+)[,.](\d+)$/);
+	if (!m) return 0;
+	const hh = Number(m[1] || 0);
+	const mm = Number(m[2] || 0);
+	const ss = Number(m[3] || 0);
+	let ms = Number(m[4] || 0);
+	// normalize millis length ("7" => 7ms, "70" => 70ms, "700" => 700ms)
+	if (m[4] && m[4].length === 1) ms *= 1;
+	if (m[4] && m[4].length === 2) ms *= 1;
+	if (m[4] && m[4].length > 3) ms = Number(String(m[4]).slice(0, 3));
+	return (((hh * 60 + mm) * 60 + ss) * 1000 + ms) | 0;
+}
+
+function parseSrt(text: string): Array<{ cueIndex: number; startMs: number; endMs: number; text: string }> {
+	const normalized = text.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+	const blocks = normalized.split(/\n{2,}/g);
+	const cues: Array<{ cueIndex: number; startMs: number; endMs: number; text: string }> = [];
+	let fallbackIndex = 1;
+	for (const raw of blocks) {
+		const lines = raw.split("\n").map((l) => l.trimEnd());
+		const nonEmpty = lines.filter((l) => l.trim().length > 0);
+		if (nonEmpty.length < 2) continue;
+
+		let idx = 0;
+		let cueIndex = fallbackIndex;
+		if (/^[0-9]+$/.test(nonEmpty[0] || '')) {
+			cueIndex = Number(nonEmpty[0]);
+			idx = 1;
+		}
+		const timeLine = nonEmpty[idx] || '';
+		const tm = timeLine.match(/^(\d+:\d+:\d+[,.]\d+)\s*-->\s*(\d+:\d+:\d+[,.]\d+)/);
+		if (!tm) continue;
+		const startMs = parseSrtTimeToMs(tm[1] || '');
+		const endMs = parseSrtTimeToMs(tm[2] || '');
+		const textLines = nonEmpty.slice(idx + 1).map((l) => l.replace(/^\uFEFF/, '')).filter((l) => l.trim().length > 0);
+		const cueText = textLines.join("\n").trim();
+		if (!cueText) {
+			fallbackIndex += 1;
+			continue;
+		}
+		cues.push({ cueIndex, startMs: Math.max(0, startMs), endMs: Math.max(0, endMs), text: cueText });
+		fallbackIndex += 1;
+	}
+	return cues;
+}
+
+async function persistSongSrtCues(songId: string, srtText: string) {
+	const parsed = parseSrt(srtText);
+	const now = Date.now();
+	await db.transaction('rw', [db.songSrtCues], async () => {
+		await db.songSrtCues.where('songId').equals(songId).delete();
+		if (!parsed.length) return;
+		const rows: SongSrtCue[] = parsed
+			.map((c, i) => ({
+				id: `${songId}:${i}:${c.cueIndex}:${uuidv4()}`,
+				songId,
+				cueIndex: i,
+				startMs: c.startMs,
+				endMs: c.endMs,
+				text: c.text,
+				createdAt: now,
+			}));
+		await db.songSrtCues.bulkPut(rows);
+	});
 }
 
 function ComboBox({
@@ -144,6 +212,20 @@ export default function SongsAdmin() {
 		const all = await db.songs.toArray();
 		return all.slice().sort((a, b) => (a.title || '').localeCompare(b.title || ''));
 	}, [], [] as Song[]);
+	const srtCues = useLiveQuery(async () => {
+		try {
+			return await db.songSrtCues.toArray();
+		} catch {
+			return [] as SongSrtCue[];
+		}
+	}, [], [] as SongSrtCue[]);
+	const srtCountBySongId = useMemo(() => {
+		const map = new Map<string, number>();
+		for (const c of srtCues ?? []) {
+			map.set(c.songId, (map.get(c.songId) || 0) + 1);
+		}
+		return map;
+	}, [srtCues]);
 	const uploadAudioInputRef = useRef<HTMLInputElement | null>(null);
 	const bulkUploadAudioInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -152,6 +234,7 @@ export default function SongsAdmin() {
 	const [writer, setWriter] = useState("");
 	const [lyrics, setLyrics] = useState("");
 	const [audioFile, setAudioFile] = useState<File | null>(null);
+	const [srtFile, setSrtFile] = useState<File | null>(null);
 	const [saving, setSaving] = useState(false);
 
 	const [deleteTarget, setDeleteTarget] = useState<Song | null>(null);
@@ -163,6 +246,7 @@ export default function SongsAdmin() {
 	const [editWriter, setEditWriter] = useState("");
 	const [editLyrics, setEditLyrics] = useState("");
 	const [editAudioFile, setEditAudioFile] = useState<File | null>(null);
+	const [editSrtFile, setEditSrtFile] = useState<File | null>(null);
 	const [editing, setEditing] = useState(false);
 
 	const [duplicateDialogOpen, setDuplicateDialogOpen] = useState(false);
@@ -191,6 +275,36 @@ export default function SongsAdmin() {
 			return hay.includes(q);
 		});
 	}, [songs, songsSearchText]);
+
+	const songSrtBySongId = useMemo(() => {
+		const map = new Map<string, SongSrtCue[]>();
+		for (const cue of srtCues ?? []) {
+			if (!map.has(cue.songId)) map.set(cue.songId, []);
+			map.get(cue.songId)!.push(cue);
+		}
+		for (const [k, list] of map) {
+			list.sort((a, b) => (a.cueIndex ?? 0) - (b.cueIndex ?? 0));
+			map.set(k, list);
+		}
+		return map;
+	}, [srtCues]);
+
+	const [adminSearchSongId, setAdminSearchSongId] = useState<string>('');
+	const [adminSearchText, setAdminSearchText] = useState<string>('');
+	const [adminCueId, setAdminCueId] = useState<string>('');
+	const [adminSongPickerOpen, setAdminSongPickerOpen] = useState(false);
+	const adminSearchMatches = useMemo(() => {
+		const q = adminSearchText.trim().toLowerCase();
+		if (!q) return [] as SongSrtCue[];
+		if (adminSearchSongId) {
+			return (songSrtBySongId.get(adminSearchSongId) || []).filter((c) => (c.text || '').toLowerCase().includes(q));
+		}
+		return (srtCues ?? []).filter((c) => (c.text || '').toLowerCase().includes(q));
+	}, [adminSearchSongId, adminSearchText, songSrtBySongId, srtCues]);
+	const adminActiveCue = useMemo(() => {
+		if (!adminSearchMatches.length) return null;
+		return adminSearchMatches.find((c) => c.id === adminCueId) || adminSearchMatches[0] || null;
+	}, [adminSearchMatches, adminCueId]);
 
 	const [refetchTarget, setRefetchTarget] = useState<Song | null>(null);
 	const [refetchQuery, setRefetchQuery] = useState('');
@@ -489,6 +603,17 @@ export default function SongsAdmin() {
 								}
 							}}
 						/>
+						<div className="space-y-2">
+							<Label>Timestamped lyrics (.srt) (optional)</Label>
+							<Input
+								type="file"
+								accept=".srt,text/plain"
+								onChange={(e) => setSrtFile(e.target.files?.[0] ?? null)}
+							/>
+							<div className="text-xs text-muted-foreground">
+								If provided, this will be parsed and used for song recognition + timestamp playback.
+							</div>
+						</div>
 						<Input
 							ref={bulkUploadAudioInputRef}
 							type="file"
@@ -546,8 +671,10 @@ export default function SongsAdmin() {
 								const { audioFilePath, audioFileUrl } = await persistAudioFile(audioFile);
 
 								const now = Date.now();
+								let songIdForSrt: string | null = null;
 								if (decision.action === 'replaceExisting') {
 									const targetId = decision.dupeId;
+									songIdForSrt = targetId;
 									const existing = await db.songs.get(targetId);
 									await db.songs.update(targetId, {
 										title: title.trim(),
@@ -559,8 +686,10 @@ export default function SongsAdmin() {
 										updatedAt: now,
 									});
 								} else {
+									const createdId = uuidv4();
+									songIdForSrt = createdId;
 									await db.songs.add({
-										id: uuidv4(),
+										id: createdId,
 										title: decision.title,
 										singer: singer.trim(),
 										writer: writer.trim(),
@@ -572,11 +701,16 @@ export default function SongsAdmin() {
 										visible: true,
 									});
 								}
+								if (srtFile && songIdForSrt) {
+									const srtText = await srtFile.text();
+									await persistSongSrtCues(songIdForSrt, srtText);
+								}
 								setTitle("");
 								setSinger("");
 								setWriter("");
 								setLyrics("");
 								setAudioFile(null);
+								setSrtFile(null);
 								if (uploadAudioInputRef.current) uploadAudioInputRef.current.value = "";
 								toast.success(window.songs?.saveAudioFile ? 'Song uploaded' : 'Song uploaded (stored locally)');
 							} catch (err) {
@@ -590,6 +724,121 @@ export default function SongsAdmin() {
 						{saving ? "Uploading..." : "Upload"}
 					</Button>
 				</div>
+			</Card>
+
+			<Card className="p-4">
+				<div className="text-sm font-semibold">Timestamped lyric search</div>
+				<div className="text-xs text-muted-foreground mt-1">Search SRT cues and play the exact timestamp snippet.</div>
+				<div className="mt-3 grid grid-cols-1 md:grid-cols-3 gap-3">
+					<div className="md:col-span-1">
+						<Label>Song</Label>
+						<Popover open={adminSongPickerOpen} onOpenChange={setAdminSongPickerOpen}>
+							<PopoverTrigger asChild>
+								<Button variant="outline" role="combobox" aria-expanded={adminSongPickerOpen} className="mt-1 w-full justify-between">
+									<span className={adminSearchSongId ? "truncate" : "truncate text-muted-foreground"}>
+										{adminSearchSongId
+											? ((songs ?? []).find((s) => s.id === adminSearchSongId)?.title || 'Selected song')
+											: 'All songs'}
+									</span>
+									<ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+								</Button>
+							</PopoverTrigger>
+							<PopoverContent className="w-[--radix-popover-trigger-width] p-0" align="start">
+								<Command>
+									<CommandInput placeholder="Search songs..." />
+									<CommandList>
+										<CommandEmpty>No matches.</CommandEmpty>
+										<CommandItem
+											value="__all__"
+											onSelect={() => {
+												setAdminSearchSongId('');
+												setAdminCueId('');
+												setAdminSongPickerOpen(false);
+											}}
+										>
+											<Check className={adminSearchSongId ? "h-4 w-4 opacity-0" : "h-4 w-4"} />
+											<span className="truncate">All songs</span>
+										</CommandItem>
+										{(songs ?? []).map((s) => (
+											<CommandItem
+												key={s.id}
+												value={s.title}
+												onSelect={() => {
+													setAdminSearchSongId(s.id);
+													setAdminCueId('');
+													setAdminSongPickerOpen(false);
+												}}
+											>
+												<Check className={adminSearchSongId === s.id ? "h-4 w-4" : "h-4 w-4 opacity-0"} />
+												<span className="truncate">{s.title}</span>
+											</CommandItem>
+										))}
+									</CommandList>
+								</Command>
+							</PopoverContent>
+						</Popover>
+					</div>
+					<div className="md:col-span-2">
+						<Label>Lyric contains</Label>
+						<Input
+							value={adminSearchText}
+							onChange={(e) => {
+								setAdminSearchText(e.target.value);
+								setAdminCueId('');
+							}}
+							placeholder="Search lyric line..."
+							className="mt-1"
+						/>
+					</div>
+				</div>
+				{adminSearchText.trim() ? (
+					adminSearchMatches.length ? (
+						<div className="mt-3 grid grid-cols-1 lg:grid-cols-3 gap-3">
+							<div className="lg:col-span-2 rounded-md border p-2 max-h-[260px] overflow-y-auto space-y-2">
+								{adminSearchMatches.slice(0, 50).map((c) => (
+									<Button
+										key={c.id}
+										variant={c.id === adminActiveCue?.id ? 'default' : 'outline'}
+										className="w-full justify-start h-auto text-left whitespace-pre-wrap"
+										onClick={() => setAdminCueId(c.id)}
+									>
+										<div className="w-full">
+											{adminSearchSongId ? null : (
+												<div className="text-xs text-muted-foreground truncate">
+													{(songs ?? []).find((s) => s.id === c.songId)?.title || 'Unknown song'}
+												</div>
+											)}
+											<div className="text-xs text-muted-foreground">
+												{Math.max(0, c.startMs)}–{Math.max(0, c.endMs)} ms
+											</div>
+											<div className="mt-1">{c.text}</div>
+										</div>
+									</Button>
+								))}
+							</div>
+							<div className="lg:col-span-1 space-y-2">
+								{(() => {
+									const songId = adminActiveCue?.songId;
+									const song = songId ? (songs ?? []).find((s) => s.id === songId) : undefined;
+									if (!song || !adminActiveCue) return null;
+									return (
+										<AudioPlayer
+											src={song.audioFileUrl}
+											title={song.title}
+											showVolumeControls={false}
+											clipStartMs={adminActiveCue.startMs}
+											clipEndMs={adminActiveCue.endMs}
+											hideSeekBar
+										/>
+									);
+								})()}
+								<div className="text-xs text-muted-foreground">Plays only within the cue timestamps.</div>
+							</div>
+						</div>
+					) : (
+						<div className="mt-3 text-sm text-muted-foreground">No matches.</div>
+					)
+				) : null}
 			</Card>
 
 			<Card className="p-3">
@@ -607,6 +856,15 @@ export default function SongsAdmin() {
 								<div className="text-xs text-muted-foreground truncate">{s.singer}</div>
 							</div>
 							<div className="flex items-center gap-2 shrink-0">
+								{srtCountBySongId.get(s.id) ? (
+									<div className="text-[11px] px-2 py-1 rounded-md border bg-muted/30 text-muted-foreground">
+										SRT: {srtCountBySongId.get(s.id)}
+									</div>
+								) : (
+									<div className="text-[11px] px-2 py-1 rounded-md border bg-muted/20 text-muted-foreground">
+										SRT: none
+									</div>
+								)}
 								<Button
 									variant="outline"
 									size="icon"
@@ -642,6 +900,7 @@ export default function SongsAdmin() {
 										setEditWriter(s.writer);
 										setEditLyrics(s.lyrics);
 										setEditAudioFile(null);
+										setEditSrtFile(null);
 									}}
 									aria-label="Edit"
 								>
@@ -923,6 +1182,7 @@ export default function SongsAdmin() {
 					if (!open) {
 						setEditTarget(null);
 						setEditAudioFile(null);
+						setEditSrtFile(null);
 					}
 				}}
 			>
@@ -947,6 +1207,10 @@ export default function SongsAdmin() {
 						<div className="space-y-2">
 							<Label>Replace audio (optional)</Label>
 							<Input type="file" accept="audio/*" onChange={(e) => setEditAudioFile(e.target.files?.[0] ?? null)} />
+						</div>
+						<div className="space-y-2">
+							<Label>Upload timestamped lyrics (.srt) (optional)</Label>
+							<Input type="file" accept=".srt,text/plain" onChange={(e) => setEditSrtFile(e.target.files?.[0] ?? null)} />
 						</div>
 					</div>
 					<div className="space-y-2">
@@ -1005,9 +1269,14 @@ export default function SongsAdmin() {
 										audioFileUrl: nextAudioFileUrl,
 										updatedAt: Date.now(),
 									});
+									if (editSrtFile) {
+										const srtText = await editSrtFile.text();
+										await persistSongSrtCues(editTarget.id, srtText);
+									}
 									toast.success('Song updated');
 									setEditTarget(null);
 									setEditAudioFile(null);
+									setEditSrtFile(null);
 								} catch (e) {
 									console.error(e);
 									toast.error('Failed to update song');
