@@ -48,6 +48,11 @@ function resolveBundledFile(...segments) {
     // Prefer unpacked location for native assets/binaries.
     // Executables cannot be spawned from inside app.asar.
     candidates.push(path.join(process.resourcesPath, 'app.asar.unpacked', ...segments));
+
+		// If we ship binaries via electron-builder "extraResources", they will live under:
+		// <resources>/native/**
+		// This path is outside app.asar and is safe to spawn from.
+		candidates.push(path.join(process.resourcesPath, ...segments));
   }
 
   candidates.push(path.join(appPath, ...segments));
@@ -56,9 +61,9 @@ function resolveBundledFile(...segments) {
     // When packaged, files under asarUnpack live at:
     // <resources>/app.asar.unpacked/<path>
     // while app.getAppPath() points at <resources>/app.asar
-    if (!isNativeAsset) {
-      candidates.push(path.join(process.resourcesPath, 'app.asar.unpacked', ...segments));
-    }
+    		if (!isNativeAsset) {
+			candidates.push(path.join(process.resourcesPath, 'app.asar.unpacked', ...segments));
+		}
   }
   const hit = candidates.find((p) => fs.existsSync(p));
   return hit || null;
@@ -69,19 +74,34 @@ function sha1(input) {
 }
 
 function runBinaryOrThrow(exePath, args, opts) {
+	const exeDir = path.dirname(exePath);
+	const baseEnv = (opts && opts.env) ? opts.env : process.env;
+	const nextEnv = {
+		...baseEnv,
+		PATH: [exeDir, baseEnv.PATH || ''].filter(Boolean).join(path.delimiter),
+	};
+
 	const res = spawnSync(exePath, args, {
 		encoding: 'utf8',
 		maxBuffer: 1024 * 1024 * 200,
+		windowsHide: true,
 		...opts,
+		env: nextEnv,
 	});
 	if (res.error) throw res.error;
 	if (res.status !== 0) {
 		const details = [
 			`Command failed: ${path.basename(exePath)} ${args.join(' ')}`,
-			`exitCode=${res.status}`, 
+			`exitCode=${res.status}`,
+			`exePath=${exePath}`,
+			`exeDir=${exeDir}`,
+			`cwd=${(opts && opts.cwd) ? opts.cwd : process.cwd()}`,
 			res.stderr ? `\n--- stderr ---\n${res.stderr}` : '',
 			!res.stderr && res.stdout ? `\n--- stdout ---\n${res.stdout}` : '',
 			!res.stderr && !res.stdout ? '\n(no output)' : '',
+			process.platform === 'win32' && res.status === 3221225781
+				? '\nHint (Windows): this exit code often indicates a native crash due to missing DLLs or blocked execution. Ensure all Poppler DLLs shipped next to pdftoppm.exe, and that antivirus/quarantine is not blocking the binaries.'
+				: '',
 		].filter(Boolean);
 		throw new Error(details.join('\n'));
 	}

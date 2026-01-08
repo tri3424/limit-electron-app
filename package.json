@@ -137,6 +137,10 @@
       {
         "from": "build/icon.ico",
         "to": "icon.ico"
+      },
+      {
+        "from": "native/offline-ai",
+        "to": "native/offline-ai"
       }
     ],
     "win": {
