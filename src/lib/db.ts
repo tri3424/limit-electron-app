@@ -13,10 +13,14 @@ export interface Question {
   code?: string;
   text: string;
   type: 'mcq' | 'text' | 'fill_blanks' | 'matching';
+  questionImages?: string[];
+  questionImageAssetIds?: string[];
   options?: Array<{
     id: string;
     text: string;
     image?: string;
+    images?: string[];
+    imageAssetIds?: string[];
   }>;
   correctAnswers?: string[]; // option IDs for MCQ or text answers
   // For fill-in-the-blanks questions, blanks are represented inside the HTML text
@@ -328,6 +332,8 @@ export interface User {
 export interface AppSettings {
   id: string; // always '1' - single record
   theme: 'light' | 'dark' | 'auto';
+  questionPrompts?: { id: string; title: string; content: string }[];
+  songRecognitionEnabled?: boolean;
   examIntegrity: {
     requireFullscreen: boolean;
     autoSubmitOnTabChange: boolean;
@@ -437,6 +443,77 @@ export interface ErrorReport {
   reporterUsername?: string;
 }
 
+export interface Song {
+  id: string;
+  title: string;
+  singer: string;
+  writer: string;
+  lyrics: string;
+  audioFilePath: string;
+  audioFileUrl: string;
+  audioAssetId?: string;
+  createdAt: number;
+  updatedAt: number;
+  visible?: boolean;
+}
+
+export interface LyricsSourceEntry {
+	id: string;
+	normalizedEnglishTitle: string;
+	englishTitle: string;
+	lyrics: string;
+	writer?: string;
+	createdAt: number;
+}
+
+export interface BinaryAsset {
+	id: string;
+	kind: 'question_image' | 'option_image' | 'song_audio' | 'unknown';
+	mimeType: string;
+	data: Blob;
+	sourceUrl?: string;
+	createdAt: number;
+}
+
+export interface SongModule {
+	id: string;
+	title: string;
+	description?: string;
+	songIds: string[];
+	assignedUserIds: string[];
+	createdAt: number;
+	updatedAt: number;
+	visible?: boolean;
+}
+
+export interface SongListeningEvent {
+	id: string;
+	date: string; // YYYY-MM-DD
+	timestamp: number;
+	userId?: string;
+	username?: string;
+	songModuleId: string;
+	songId: string;
+	songTitle?: string;
+	eventType: 'play' | 'pause' | 'ended' | 'switch' | 'view_start' | 'view_end';
+	positionSec?: number;
+	songDurationSec?: number;
+	listenedMs?: number;
+	timeInSongMs?: number;
+	lyricsScrollable?: boolean;
+	didScrollLyrics?: boolean;
+}
+
+export interface SongSrtCue {
+	id: string;
+	songId: string;
+	cueIndex: number;
+	startMs: number;
+	endMs: number;
+	text: string;
+	createdAt: number;
+}
+
 // Database class
 export class ExamDatabase extends Dexie {
   questions!: Table<Question, string>;
@@ -455,6 +532,12 @@ export class ExamDatabase extends Dexie {
   intelligenceSignals!: Table<IntelligenceSignal, string>;
   reviewInteractions!: Table<ReviewInteraction, string>;
   errorReports!: Table<ErrorReport, string>;
+	songs!: Table<Song, string>;
+	songModules!: Table<SongModule, string>;
+	songListeningEvents!: Table<SongListeningEvent, string>;
+	songSrtCues!: Table<SongSrtCue, string>;
+	binaryAssets!: Table<BinaryAsset, string>;
+	lyricsSource!: Table<LyricsSourceEntry, string>;
 
   constructor() {
     super('ExamDatabase');
@@ -615,7 +698,7 @@ export class ExamDatabase extends Dexie {
       integrityEvents: 'id, attemptId, type, timestamp',
       tags: 'id, name',
       settings: 'id',
-      dailyStats: 'id, date, moduleId, moduleType, createdAt',
+      dailyStats: 'id, date, moduleId, [date+moduleId], [moduleId+date], moduleType, createdAt',
     }).upgrade(async (tx) => {
       const questionsTable = tx.table('questions');
       const all = await questionsTable.toArray();
@@ -897,7 +980,194 @@ export class ExamDatabase extends Dexie {
     }).upgrade(async () => {
       // No-op: index addition only
     });
-  }
+
+		// v17: add songs table
+		this.version(17).stores({
+			questions: 'id, type, *tags, *modules, metadata.createdAt',
+			modules: 'id, type, *tags, createdAt, visible, locked',
+			attempts: 'id, moduleId, type, startedAt, syncStatus',
+			integrityEvents: 'id, attemptId, type, timestamp',
+			tags: 'id, name',
+			semanticOntologyTags: 'id, kind, parentId, name, updatedAt',
+			semanticEmbeddings: 'id, [scope+scopeId], scope, scopeId, modelId, createdAt',
+			questionSemanticAnalyses: 'id, questionId, createdAt, [questionId+analysisVersion], [questionId+modelId], source',
+			questionSemanticOverrides: 'id, questionId, updatedAt, baseAnalysisId, [questionId+updatedAt]',
+			settings: 'id',
+			dailyStats: 'id, date, moduleId, [date+moduleId], [moduleId+date], moduleType, createdAt',
+			users: 'id, username',
+			globalGlossary: 'id, normalizedWord, word',
+			intelligenceSignals: 'id, type, questionId, moduleId, [type+moduleId], [questionId+type]',
+			reviewInteractions: 'id, attemptId, moduleId, userId, questionId, timestamp, [attemptId+questionId], [moduleId+userId]',
+			errorReports: 'id, status, createdAt, updatedAt, moduleId, questionId, questionCode, reporterUserId, [status+createdAt]',
+			songs: 'id, visible, createdAt, updatedAt'
+		});
+
+		// v18: add song modules table
+		this.version(18).stores({
+			questions: 'id, type, *tags, *modules, metadata.createdAt',
+			modules: 'id, type, *tags, createdAt, visible, locked',
+			attempts: 'id, moduleId, type, startedAt, syncStatus',
+			integrityEvents: 'id, attemptId, type, timestamp',
+			tags: 'id, name',
+			semanticOntologyTags: 'id, kind, parentId, name, updatedAt',
+			semanticEmbeddings: 'id, [scope+scopeId], scope, scopeId, modelId, createdAt',
+			questionSemanticAnalyses: 'id, questionId, createdAt, [questionId+analysisVersion], [questionId+modelId], source',
+			questionSemanticOverrides: 'id, questionId, updatedAt, baseAnalysisId, [questionId+updatedAt]',
+			settings: 'id',
+			dailyStats: 'id, date, moduleId, [date+moduleId], [moduleId+date], moduleType, createdAt',
+			users: 'id, username',
+			globalGlossary: 'id, normalizedWord, word',
+			intelligenceSignals: 'id, type, questionId, moduleId, [type+moduleId], [questionId+type]',
+			reviewInteractions: 'id, attemptId, moduleId, userId, questionId, timestamp, [attemptId+questionId], [moduleId+userId]',
+			errorReports: 'id, status, createdAt, updatedAt, moduleId, questionId, questionCode, reporterUserId, [status+createdAt]',
+			songs: 'id, visible, createdAt, updatedAt',
+			songModules: 'id, visible, createdAt, updatedAt'
+		});
+
+		// v19: add song listening analytics table
+		this.version(19).stores({
+			questions: 'id, type, *tags, *modules, metadata.createdAt',
+			modules: 'id, type, *tags, createdAt, visible, locked',
+			attempts: 'id, moduleId, type, startedAt, syncStatus',
+			integrityEvents: 'id, attemptId, type, timestamp',
+			tags: 'id, name',
+			semanticOntologyTags: 'id, kind, parentId, name, updatedAt',
+			semanticEmbeddings: 'id, [scope+scopeId], scope, scopeId, modelId, createdAt',
+			questionSemanticAnalyses: 'id, questionId, createdAt, [questionId+analysisVersion], [questionId+modelId], source',
+			questionSemanticOverrides: 'id, questionId, updatedAt, baseAnalysisId, [questionId+updatedAt]',
+			settings: 'id',
+			dailyStats: 'id, date, moduleId, [date+moduleId], [moduleId+date], moduleType, createdAt',
+			users: 'id, username',
+			globalGlossary: 'id, normalizedWord, word',
+			intelligenceSignals: 'id, type, questionId, moduleId, [type+moduleId], [questionId+type]',
+			reviewInteractions: 'id, attemptId, moduleId, userId, questionId, timestamp, [attemptId+questionId], [moduleId+userId]',
+			errorReports: 'id, status, createdAt, updatedAt, moduleId, questionId, questionCode, reporterUserId, [status+createdAt]',
+			songs: 'id, visible, createdAt, updatedAt',
+			songModules: 'id, visible, createdAt, updatedAt',
+			songListeningEvents: 'id, date, timestamp, songModuleId, userId, songId, [date+songModuleId], [songModuleId+date], [songModuleId+userId], [songModuleId+songId]'
+		});
+
+		// v20: add file-based question/option image references on questions
+		this.version(20).stores({
+			questions: 'id, type, *tags, *modules, metadata.createdAt',
+			modules: 'id, type, *tags, createdAt, visible, locked',
+			attempts: 'id, moduleId, type, startedAt, syncStatus',
+			integrityEvents: 'id, attemptId, type, timestamp',
+			tags: 'id, name',
+			semanticOntologyTags: 'id, kind, parentId, name, updatedAt',
+			semanticEmbeddings: 'id, [scope+scopeId], scope, scopeId, modelId, createdAt',
+			questionSemanticAnalyses: 'id, questionId, createdAt, [questionId+analysisVersion], [questionId+modelId], source',
+			questionSemanticOverrides: 'id, questionId, updatedAt, baseAnalysisId, [questionId+updatedAt]',
+			settings: 'id',
+			dailyStats: 'id, date, moduleId, [date+moduleId], [moduleId+date], moduleType, createdAt',
+			users: 'id, username',
+			globalGlossary: 'id, normalizedWord, word',
+			intelligenceSignals: 'id, type, questionId, moduleId, [type+moduleId], [questionId+type]',
+			reviewInteractions: 'id, attemptId, moduleId, userId, questionId, timestamp, [attemptId+questionId], [moduleId+userId]',
+			errorReports: 'id, status, createdAt, updatedAt, moduleId, questionId, questionCode, reporterUserId, [status+createdAt]',
+			songs: 'id, visible, createdAt, updatedAt',
+			songModules: 'id, visible, createdAt, updatedAt',
+			songListeningEvents: 'id, date, timestamp, songModuleId, userId, songId, [date+songModuleId], [songModuleId+date], [songModuleId+userId], [songModuleId+songId]'
+		});
+
+		// v21: store binary blobs (images/audio) directly in IndexedDB
+		this.version(21).stores({
+			questions: 'id, type, *tags, *modules, metadata.createdAt',
+			modules: 'id, type, *tags, createdAt, visible, locked',
+			attempts: 'id, moduleId, type, startedAt, syncStatus',
+			integrityEvents: 'id, attemptId, type, timestamp',
+			tags: 'id, name',
+			semanticOntologyTags: 'id, kind, parentId, name, updatedAt',
+			semanticEmbeddings: 'id, [scope+scopeId], scope, scopeId, modelId, createdAt',
+			questionSemanticAnalyses: 'id, questionId, createdAt, [questionId+analysisVersion], [questionId+modelId], source',
+			questionSemanticOverrides: 'id, questionId, updatedAt, baseAnalysisId, [questionId+updatedAt]',
+			settings: 'id',
+			dailyStats: 'id, date, moduleId, [date+moduleId], [moduleId+date], moduleType, createdAt',
+			users: 'id, username',
+			globalGlossary: 'id, normalizedWord, word',
+			intelligenceSignals: 'id, type, questionId, moduleId, [type+moduleId], [questionId+type]',
+			reviewInteractions: 'id, attemptId, moduleId, userId, questionId, timestamp, [attemptId+questionId], [moduleId+userId]',
+			errorReports: 'id, status, createdAt, updatedAt, moduleId, questionId, questionCode, reporterUserId, [status+createdAt]',
+			songs: 'id, visible, createdAt, updatedAt',
+			songModules: 'id, visible, createdAt, updatedAt',
+			songListeningEvents: 'id, date, timestamp, songModuleId, userId, songId, [date+songModuleId], [songModuleId+date], [songModuleId+userId], [songModuleId+songId]',
+			binaryAssets: 'id, kind, createdAt'
+		});
+
+		this.version(22).stores({
+			questions: 'id, type, *tags, *modules, metadata.createdAt',
+			modules: 'id, type, *tags, createdAt, visible, locked',
+			attempts: 'id, moduleId, type, startedAt, syncStatus',
+			integrityEvents: 'id, attemptId, type, timestamp',
+			tags: 'id, name',
+			semanticOntologyTags: 'id, kind, parentId, name, updatedAt',
+			semanticEmbeddings: 'id, [scope+scopeId], scope, scopeId, modelId, createdAt',
+			questionSemanticAnalyses: 'id, questionId, createdAt, [questionId+analysisVersion], [questionId+modelId], source',
+			questionSemanticOverrides: 'id, questionId, updatedAt, baseAnalysisId, [questionId+updatedAt]',
+			settings: 'id',
+			dailyStats: 'id, date, moduleId, [date+moduleId], [moduleId+date], moduleType, createdAt',
+			users: 'id, username',
+			globalGlossary: 'id, normalizedWord, word',
+			intelligenceSignals: 'id, type, questionId, moduleId, [type+moduleId], [questionId+type]',
+			reviewInteractions: 'id, attemptId, moduleId, userId, questionId, timestamp, [attemptId+questionId], [moduleId+userId]',
+			errorReports: 'id, status, createdAt, updatedAt, moduleId, questionId, questionCode, reporterUserId, [status+createdAt]',
+			songs: 'id, visible, createdAt, updatedAt',
+			songModules: 'id, visible, createdAt, updatedAt',
+			songListeningEvents: 'id, date, timestamp, songModuleId, userId, songId, [date+songModuleId], [songModuleId+date], [songModuleId+userId], [songModuleId+songId]',
+			binaryAssets: 'id, kind, createdAt',
+			lyricsSource: 'id, normalizedEnglishTitle, createdAt'
+		});
+
+		this.version(23).stores({
+			questions: 'id, type, *tags, *modules, metadata.createdAt',
+			modules: 'id, type, *tags, createdAt, visible, locked',
+			attempts: 'id, moduleId, type, startedAt, syncStatus',
+			integrityEvents: 'id, attemptId, type, timestamp',
+			tags: 'id, name',
+			semanticOntologyTags: 'id, kind, parentId, name, updatedAt',
+			semanticEmbeddings: 'id, [scope+scopeId], scope, scopeId, modelId, createdAt',
+			questionSemanticAnalyses: 'id, questionId, createdAt, [questionId+analysisVersion], [questionId+modelId], source',
+			questionSemanticOverrides: 'id, questionId, updatedAt, baseAnalysisId, [questionId+updatedAt]',
+			settings: 'id',
+			dailyStats: 'id, date, moduleId, [date+moduleId], [moduleId+date], moduleType, createdAt',
+			users: 'id, username',
+			globalGlossary: 'id, normalizedWord, word',
+			intelligenceSignals: 'id, type, questionId, moduleId, [type+moduleId], [questionId+type]',
+			reviewInteractions: 'id, attemptId, moduleId, userId, questionId, timestamp, [attemptId+questionId], [moduleId+userId]',
+			errorReports: 'id, status, createdAt, updatedAt, moduleId, questionId, questionCode, reporterUserId, [status+createdAt]',
+			songs: 'id, visible, createdAt, updatedAt',
+			songModules: 'id, visible, createdAt, updatedAt',
+			songListeningEvents: 'id, date, timestamp, songModuleId, userId, songId, [date+songModuleId], [songModuleId+date], [songModuleId+userId], [songModuleId+songId]',
+			binaryAssets: 'id, kind, createdAt',
+			lyricsSource: 'id, normalizedEnglishTitle, createdAt, writer'
+		});
+
+		// v24: store parsed timestamped lyrics per song (SRT cues)
+		this.version(24).stores({
+			questions: 'id, type, *tags, *modules, metadata.createdAt',
+			modules: 'id, type, *tags, createdAt, visible, locked',
+			attempts: 'id, moduleId, type, startedAt, syncStatus',
+			integrityEvents: 'id, attemptId, type, timestamp',
+			tags: 'id, name',
+			semanticOntologyTags: 'id, kind, parentId, name, updatedAt',
+			semanticEmbeddings: 'id, [scope+scopeId], scope, scopeId, modelId, createdAt',
+			questionSemanticAnalyses: 'id, questionId, createdAt, [questionId+analysisVersion], [questionId+modelId], source',
+			questionSemanticOverrides: 'id, questionId, updatedAt, baseAnalysisId, [questionId+updatedAt]',
+			settings: 'id',
+			dailyStats: 'id, date, moduleId, [date+moduleId], [moduleId+date], moduleType, createdAt',
+			users: 'id, username',
+			globalGlossary: 'id, normalizedWord, word',
+			intelligenceSignals: 'id, type, questionId, moduleId, [type+moduleId], [questionId+type]',
+			reviewInteractions: 'id, attemptId, moduleId, userId, questionId, timestamp, [attemptId+questionId], [moduleId+userId]',
+			errorReports: 'id, status, createdAt, updatedAt, moduleId, questionId, questionCode, reporterUserId, [status+createdAt]',
+			songs: 'id, visible, createdAt, updatedAt',
+			songModules: 'id, visible, createdAt, updatedAt',
+			songListeningEvents: 'id, date, timestamp, songModuleId, userId, songId, [date+songModuleId], [songModuleId+date], [songModuleId+userId], [songModuleId+songId]',
+			binaryAssets: 'id, kind, createdAt',
+			lyricsSource: 'id, normalizedEnglishTitle, createdAt, writer',
+			songSrtCues: 'id, songId, cueIndex, [songId+cueIndex], startMs, endMs, text'
+		});
+	}
 }
 
 function stemWord(word: string): string {
@@ -955,12 +1225,20 @@ export const db = new ExamDatabase();
 
 // Initialize default settings
 export async function initializeSettings() {
-  const existingSettings = await db.settings.get('1');
+  let existingSettings: AppSettings | undefined;
+  try {
+    existingSettings = await db.settings.get('1');
+  } catch (e) {
+    console.error(e);
+    throw e;
+  }
   
   if (!existingSettings) {
       const defaultSettings: AppSettings = {
       id: '1',
       theme: 'auto',
+      questionPrompts: [],
+      songRecognitionEnabled: false,
       examIntegrity: {
         requireFullscreen: true,
         autoSubmitOnTabChange: true,
@@ -1038,6 +1316,10 @@ export async function initializeSettings() {
 				preserveExistingQuestionTags: true,
 				preserveExistingDifficulty: true,
 			},
+		});
+	} else if (typeof existingSettings.songRecognitionEnabled !== 'boolean') {
+		await db.settings.update('1', {
+			songRecognitionEnabled: false,
 		});
   }
 }

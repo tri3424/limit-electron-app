@@ -18,7 +18,7 @@ import RichTextEditor from '@/components/RichTextEditor';
 import TypingAnswerMathInput from '@/components/TypingAnswerMathInput';
 import { invalidateTagModelCache, suggestTagsAdvanced } from '@/lib/tagLearning';
 import { syncQuestionGlossary } from '@/lib/glossary';
-import { enqueueSemanticAnalysis } from '@/lib/semanticQueue';
+import { enqueueSemanticAnalysis, startSemanticBackgroundQueue, stopSemanticBackgroundQueue } from '@/lib/semanticQueue';
 import {
   analyzeQuestionDraft,
   ANALYSIS_VERSION,
@@ -40,6 +40,35 @@ const TYPE_LABELS: Record<Question['type'], string> = {
   matching: 'Matching',
 };
 
+async function blobToBase64(blob: Blob): Promise<string> {
+	return await new Promise((resolve, reject) => {
+		const reader = new FileReader();
+		reader.onerror = () => reject(new Error('Failed to read blob'));
+		reader.onload = () => {
+			const res = reader.result;
+			if (typeof res !== 'string') {
+				reject(new Error('Unexpected FileReader result'));
+				return;
+			}
+			const commaIdx = res.indexOf(',');
+			resolve(commaIdx >= 0 ? res.slice(commaIdx + 1) : res);
+		};
+		reader.readAsDataURL(blob);
+	});
+}
+
+async function tryFetchAsBlob(url: string): Promise<{ blob: Blob; mimeType: string } | null> {
+	try {
+		const res = await fetch(url);
+		if (!res.ok) return null;
+		const blob = await res.blob();
+		const mimeType = blob.type || res.headers.get('content-type') || 'application/octet-stream';
+		return { blob, mimeType };
+	} catch {
+		return null;
+	}
+}
+
 function classicDifficultyToLevel(value?: 'easy' | 'medium' | 'hard'): number {
   if (value === 'easy') return 3;
   if (value === 'hard') return 10;
@@ -50,6 +79,15 @@ export default function CreateQuestion() {
   const navigate = useNavigate();
   const { id } = useParams();
   const isEditing = !!id;
+
+	useEffect(() => {
+		// The semantic background queue can be CPU-heavy (offline analysis across many questions)
+		// and may cause scroll jank while editing. Pause it on this page.
+		stopSemanticBackgroundQueue();
+		return () => {
+			startSemanticBackgroundQueue();
+		};
+	}, []);
 
   // Load existing question if editing
   const existingQuestion = useLiveQuery(
@@ -62,6 +100,7 @@ export default function CreateQuestion() {
   // Form state
   const [questionType, setQuestionType] = useState<'mcq' | 'text' | 'fill_blanks' | 'matching'>('mcq');
   const [questionText, setQuestionText] = useState('');
+  const [questionImages, setQuestionImages] = useState<string[]>([]);
   const [options, setOptions] = useState([
     { id: uuidv4(), text: '' },
     { id: uuidv4(), text: '' },
@@ -89,7 +128,7 @@ export default function CreateQuestion() {
   const [difficultySpectrum, setDifficultySpectrum] = useState<
     { minLevel: number; maxLevel: number; recommendedLevel: number; sampleCount: number; source: 'corpus' | 'heuristic' } | null
   >(null);
-  const settings = useLiveQuery(() => db.settings.get('1'));
+  const settings = useLiveQuery(() => db.settings.get('1'), [], null as any);
   const aiOrchestrator = settings?.aiOrchestrator;
   const levelOptions = useMemo(() => mapLevelToSelectOptions(), []);
   const difficultyBand = useMemo(() => {
@@ -257,6 +296,7 @@ export default function CreateQuestion() {
 
     setQuestionType(existingQuestion.type);
     setQuestionText(existingQuestion.text || '');
+    setQuestionImages((existingQuestion as any).questionImages || []);
     setOptions(
       existingQuestion.type === 'mcq'
         ? existingQuestion.options || [
@@ -301,7 +341,7 @@ export default function CreateQuestion() {
   }
 
   const handleAddOption = () => {
-    setOptions([...options, { id: uuidv4(), text: '' }]);
+    setOptions((prev) => [...prev, { id: uuidv4(), text: '' }]);
   };
 
   const handleRemoveOption = (id: string) => {
@@ -309,20 +349,16 @@ export default function CreateQuestion() {
       toast.error('A question must have at least 2 options');
       return;
     }
-    setOptions(options.filter(opt => opt.id !== id));
-    setCorrectAnswers(correctAnswers.filter(ans => ans !== id));
+    setOptions((prev) => prev.filter((opt) => opt.id !== id));
+    setCorrectAnswers((prev) => prev.filter((ans) => ans !== id));
   };
 
   const handleOptionChange = (id: string, text: string) => {
-    setOptions(options.map(opt => opt.id === id ? { ...opt, text } : opt));
+    setOptions((prev) => prev.map((opt) => (opt.id === id ? { ...opt, text } : opt)));
   };
 
   const handleCorrectAnswerToggle = (optionId: string) => {
-    if (correctAnswers.includes(optionId)) {
-      setCorrectAnswers(correctAnswers.filter(id => id !== optionId));
-    } else {
-      setCorrectAnswers([...correctAnswers, optionId]);
-    }
+    setCorrectAnswers((prev) => (prev.includes(optionId) ? prev.filter((id) => id !== optionId) : [...prev, optionId]));
   };
 
   const handleAddTag = () => {
@@ -482,6 +518,7 @@ export default function CreateQuestion() {
       code: questionCode,
       text: questionText.trim(),
       type: questionType,
+      questionImages,
       options: questionType === 'mcq' ? options : undefined,
       correctAnswers: questionType === 'mcq' || questionType === 'text' ? correctAnswers : undefined,
       fillBlanks: questionType === 'fill_blanks' ? { blanks: nextFillBlanksMeta } : undefined,
@@ -500,6 +537,7 @@ export default function CreateQuestion() {
         await db.questions.update(id!, {
           text: questionData.text,
           type: questionData.type,
+          questionImages: (questionData as any).questionImages,
           options: questionData.options,
           correctAnswers: questionData.correctAnswers,
           fillBlanks: questionData.fillBlanks,
@@ -609,6 +647,23 @@ export default function CreateQuestion() {
                 className="tk-question-editor"
               />
             </div>
+				{questionImages.length > 0 && (
+					<div className="mt-4 space-y-3">
+						{questionImages.map((src, idx) => (
+							<div key={`${src}-${idx}`} className="space-y-2">
+								<img src={src} alt={`question-figure-${idx + 1}`} className="max-w-full rounded-md border" loading="lazy" />
+								<Button
+									type="button"
+									variant="outline"
+									size="sm"
+									onClick={() => setQuestionImages((prev) => prev.filter((_, i) => i !== idx))}
+								>
+									Remove image
+								</Button>
+							</div>
+						))}
+					</div>
+				)}
           </Card>
 
         {/* Matching settings */}
@@ -733,6 +788,31 @@ export default function CreateQuestion() {
                     enableBlanksButton={false}
                     className="tk-option-editor"
                   />
+						{Array.isArray((option as any).images) && (option as any).images.length > 0 && (
+							<div className="space-y-2">
+								{(option as any).images.map((src: string, idx: number) => (
+									<div key={`${src}-${idx}`} className="space-y-2">
+										<img src={src} alt={`option-figure-${idx + 1}`} className="max-w-full rounded-md border" loading="lazy" />
+										<Button
+											type="button"
+											variant="outline"
+											size="sm"
+											onClick={() =>
+												setOptions((prev) =>
+													prev.map((o) =>
+														o.id === option.id
+															? { ...(o as any), images: (o as any).images.filter((_: any, i: number) => i !== idx) }
+															: o
+													)
+												)
+											}
+										>
+											Remove image
+										</Button>
+									</div>
+								))}
+							</div>
+						)}
                 </div>
               ))}
             </div>

@@ -6,28 +6,28 @@ contextBridge.exposeInMainWorld('examProctor', {
   captureAppScreenshot: async (payload) => {
     return ipcRenderer.invoke('exam:captureAppScreenshot', payload);
   },
-	  captureFullPageScreenshot: async () => {
-	    return ipcRenderer.invoke('exam:captureFullPageScreenshot');
-	  },
-	  captureViewportScreenshot: async () => {
-	    return ipcRenderer.invoke('exam:captureViewportScreenshot');
-	  },
+  captureFullPageScreenshot: async () => {
+    return ipcRenderer.invoke('exam:captureFullPageScreenshot');
+  },
+  captureViewportScreenshot: async () => {
+    return ipcRenderer.invoke('exam:captureViewportScreenshot');
+  },
 });
 
-contextBridge.exposeInMainWorld('offlineAi', {
-  status: async () => {
-    return ipcRenderer.invoke('offlineAi:status');
+contextBridge.exposeInMainWorld('songs', {
+  saveAudioFile: async (payload) => {
+    return ipcRenderer.invoke('songs:saveAudioFile', payload);
   },
-  embedText: async (payload) => {
-    return ipcRenderer.invoke('offlineAi:embed', payload);
+  readAudioFile: async (payload) => {
+    return ipcRenderer.invoke('songs:readAudioFile', payload);
   },
-	reasoningStatus: async () => {
-		return ipcRenderer.invoke('offlineAi:reasoningStatus');
-	},
-	explain: async (payload) => {
-		return ipcRenderer.invoke('offlineAi:explain', payload);
-	},
-	chat: async (payload) => {
-		return ipcRenderer.invoke('offlineAi:chat', payload);
-	},
+  deleteAudioFile: async (payload) => {
+    return ipcRenderer.invoke('songs:deleteAudioFile', payload);
+  },
+});
+
+contextBridge.exposeInMainWorld('data', {
+  exportJsonToFile: async (payload) => {
+    return ipcRenderer.invoke('data:exportJsonToFile', payload);
+  },
 });

@@ -23,6 +23,12 @@ const buttonVariants = cva(
         icon: "h-10 w-10",
       },
     },
+    compoundVariants: [
+      {
+        size: "icon",
+        className: "bg-transparent border-0 shadow-none text-foreground hover:bg-transparent hover:text-foreground",
+      },
+    ],
     defaultVariants: {
       variant: "default",
       size: "default",

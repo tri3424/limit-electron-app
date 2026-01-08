@@ -1,8 +1,27 @@
 import { v4 as uuidv4 } from 'uuid';
 import { db, type Question, type QuestionSemanticAnalysis, type QuestionSemanticDifficultyFactors, type QuestionSemanticTagAssignment } from './db';
 import { DEFAULT_EMBED_MODEL_ID, SEMANTIC_ANALYSIS_VERSION, getOntologySeedWithTimestamps } from './semanticOntology';
-import { embedTextLocal } from './offlineAiClient';
 import { clamp01, cosineSimilarity, extractPlainText, softClamp, stableHashString } from './semanticUtils';
+
+function deterministicEmbedding(params: { text: string; modelId: string; dims?: number }): { modelId: string; dims: number; vector: number[] } {
+	const dims = params.dims ?? 64;
+	const input = `${params.modelId}::${params.text}`;
+	// Simple, fully deterministic pseudo-embedding derived from the UTF-16 code units.
+	// This keeps the semantic pipeline functional without any external AI/runtime.
+	const vec = new Array(dims).fill(0);
+	for (let i = 0; i < input.length; i++) {
+		const code = input.charCodeAt(i);
+		const idx = i % dims;
+		// Mix with a tiny LCG-style transform for spread
+		vec[idx] = (vec[idx] * 1664525 + code + 1013904223) % 4294967296;
+	}
+	// Map to [-1, 1] floats
+	const out = vec.map((x) => {
+		const n = Number(x) / 4294967296;
+		return n * 2 - 1;
+	});
+	return { modelId: params.modelId, dims, vector: out };
+}
 
 function deterministicSort<T>(items: T[], key: (t: T) => string): T[] {
   return items.slice().sort((a, b) => {
@@ -337,7 +356,7 @@ async function getOrCreateOntologyEmbeddings(modelId: string): Promise<Array<{ t
     if (existing && existing.textHash === tagHash && existing.vector?.length) {
       tagVector = existing.vector;
     } else {
-      const embed = await embedTextLocal({ text: descriptor, modelId });
+      const embed = deterministicEmbedding({ text: descriptor, modelId });
       await db.semanticEmbeddings.put({
         id: uuidv4(),
         scope: 'ontology_tag',
@@ -362,7 +381,7 @@ async function getOrCreateOntologyEmbeddings(modelId: string): Promise<Array<{ t
         aliasVectors.push(aliasExisting.vector);
         continue;
       }
-      const embedAlias = await embedTextLocal({ text: aliasText, modelId });
+      const embedAlias = deterministicEmbedding({ text: aliasText, modelId });
       await db.semanticEmbeddings.put({
         id: uuidv4(),
         scope: 'ontology_alias',
@@ -389,7 +408,7 @@ async function getOrCreateQuestionEmbedding(params: { questionId: string; text: 
   if (existing && existing.textHash === textHash && existing.vector?.length) {
     return { vector: existing.vector, textHash, dims: existing.dims };
   }
-  const embed = await embedTextLocal({ text: params.text, modelId: params.modelId });
+  const embed = deterministicEmbedding({ text: params.text, modelId: params.modelId });
   await db.semanticEmbeddings.put({
     id: uuidv4(),
     scope: 'question',
