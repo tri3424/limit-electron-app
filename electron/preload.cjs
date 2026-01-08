@@ -26,15 +26,6 @@ contextBridge.exposeInMainWorld('songs', {
   },
 });
 
-contextBridge.exposeInMainWorld('ocr', {
-  pickPdf: async () => {
-    return ipcRenderer.invoke('ocr:pickPdf');
-  },
-  importExamPdf: async (payload) => {
-    return ipcRenderer.invoke('ocr:importExamPdf', payload);
-  },
-});
-
 contextBridge.exposeInMainWorld('data', {
   exportJsonToFile: async (payload) => {
     return ipcRenderer.invoke('data:exportJsonToFile', payload);

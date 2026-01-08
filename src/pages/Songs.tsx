@@ -3,6 +3,7 @@ import { useLiveQuery } from "dexie-react-hooks";
 import { db, Song } from "@/lib/db";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import AudioPlayer from "@/components/AudioPlayer";
 
@@ -23,13 +24,24 @@ export default function Songs() {
 	);
 
 	const [selectedId, setSelectedId] = useState<string | null>(null);
+	const [searchText, setSearchText] = useState("");
+
+	const filteredSongs = useMemo(() => {
+		const list = songs ?? [];
+		const q = searchText.trim().toLowerCase();
+		if (!q) return list;
+		return list.filter((s) => {
+			const hay = `${s.title || ''} ${s.singer || ''} ${s.writer || ''} ${s.lyrics || ''}`.toLowerCase();
+			return hay.includes(q);
+		});
+	}, [songs, searchText]);
 
 	const selected = useMemo(() => {
-		const list = songs ?? [];
+		const list = filteredSongs ?? [];
 		if (!list.length) return null;
 		const found = selectedId ? list.find((s) => s.id === selectedId) : null;
 		return found ?? list[list.length - 1];
-	}, [songs, selectedId]);
+	}, [filteredSongs, selectedId]);
 
 	return (
 		<div className="max-w-7xl mx-auto space-y-6">
@@ -41,8 +53,14 @@ export default function Songs() {
 			<div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
 				<Card className="p-4 lg:col-span-1">
 					<div className="text-sm font-semibold mb-3">Song list</div>
+					<Input
+						value={searchText}
+						onChange={(e) => setSearchText(e.target.value)}
+						placeholder="Search songs..."
+						className="mb-3"
+					/>
 					<div className="space-y-2">
-						{(songs ?? []).map((s) => (
+						{filteredSongs.map((s) => (
 							<Button
 								key={s.id}
 								variant="ghost"
@@ -58,7 +76,7 @@ export default function Songs() {
 								</div>
 							</Button>
 						))}
-						{(songs ?? []).length === 0 && (
+						{filteredSongs.length === 0 && (
 							<div className="text-sm text-muted-foreground">No songs available.</div>
 						)}
 					</div>

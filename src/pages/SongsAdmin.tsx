@@ -1,7 +1,7 @@
 import { useMemo, useRef, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import { v4 as uuidv4 } from "uuid";
-import { db, Song } from "@/lib/db";
+import { db, LyricsSourceEntry, Song } from "@/lib/db";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -11,7 +11,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Command, CommandEmpty, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
-import { Check, ChevronsUpDown, Eye, Pencil, Play, Pause, Trash2 } from "lucide-react";
+import { Check, ChevronsUpDown, Eye, Pencil, Play, Pause, RefreshCcw, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import AudioPlayer from "@/components/AudioPlayer";
 
@@ -181,9 +181,78 @@ export default function SongsAdmin() {
 	const [playingSongId, setPlayingSongId] = useState<string | null>(null);
 	const audioRef = useRef<HTMLAudioElement | null>(null);
 
+	const [songsSearchText, setSongsSearchText] = useState('');
+	const filteredSongs = useMemo(() => {
+		const list = songs ?? [];
+		const q = songsSearchText.trim().toLowerCase();
+		if (!q) return list;
+		return list.filter((s) => {
+			const hay = `${s.title || ''} ${s.singer || ''} ${s.writer || ''} ${s.lyrics || ''}`.toLowerCase();
+			return hay.includes(q);
+		});
+	}, [songs, songsSearchText]);
+
+	const [refetchTarget, setRefetchTarget] = useState<Song | null>(null);
+	const [refetchQuery, setRefetchQuery] = useState('');
+	const [refetching, setRefetching] = useState(false);
+	const [refetchResults, setRefetchResults] = useState<Array<{ entry: LyricsSourceEntry; score: number }> | null>(null);
+	const [selectedRefetchId, setSelectedRefetchId] = useState<string>('');
+
 	const canSave = useMemo(() => {
 		return title.trim().length > 0 && audioFile != null;
 	}, [title, audioFile]);
+
+	const normalizeEnglishTitle = (value: string) =>
+		value
+			.toLowerCase()
+			.replace(/[^a-z0-9\s]/g, ' ')
+			.replace(/\s+/g, ' ')
+			.trim();
+
+	const scoreMatch = (query: string, candidate: string) => {
+		const q = normalizeEnglishTitle(query);
+		const c = normalizeEnglishTitle(candidate);
+		if (!q || !c) return 0;
+		if (q === c) return 100;
+		if (c.includes(q) || q.includes(c)) return 75;
+		const qTokens = q.split(' ').filter(Boolean);
+		if (!qTokens.length) return 0;
+		let hits = 0;
+		for (const t of qTokens) {
+			if (c.includes(t)) hits += 1;
+		}
+		return Math.round((hits / qTokens.length) * 60);
+	};
+
+	const runLyricsRefetch = async (song: Song, queryOverride?: string) => {
+		const baseQuery = typeof queryOverride === 'string' ? queryOverride : (song.title || '');
+		const q = normalizeEnglishTitle(baseQuery);
+		setRefetchQuery(baseQuery);
+		setRefetching(true);
+		setRefetchResults(null);
+		setSelectedRefetchId('');
+		try {
+			if (!q) {
+				toast.error('No English title to search');
+				return;
+			}
+			const candidates = await db.lyricsSource.toArray();
+			const scored = candidates
+				.map((entry) => ({ entry, score: scoreMatch(q, entry.normalizedEnglishTitle || entry.englishTitle || '') }))
+				.filter((x) => x.score > 0)
+				.sort((a, b) => b.score - a.score)
+				.slice(0, 10);
+
+			setRefetchResults(scored);
+			if (scored[0]) setSelectedRefetchId(scored[0].entry.id);
+			if (!scored.length) toast.error('No matching lyrics found in lyrics source');
+		} catch (e) {
+			console.error(e);
+			toast.error('Failed to search lyrics source');
+		} finally {
+			setRefetching(false);
+		}
+	};
 
 	const normalizeSongTitle = (value: string) => value.trim().replace(/\s+/g, ' ').toLowerCase();
 
@@ -524,8 +593,14 @@ export default function SongsAdmin() {
 			</Card>
 
 			<Card className="p-3">
+				<Input
+					value={songsSearchText}
+					onChange={(e) => setSongsSearchText(e.target.value)}
+					placeholder="Search songs..."
+					className="mb-3"
+				/>
 				<div className="max-h-[68vh] overflow-y-auto space-y-1 pr-1">
-					{songs.map((s) => (
+					{filteredSongs.map((s) => (
 						<div key={s.id} className="flex items-center justify-between gap-2 rounded-md border px-2 py-1.5 text-sm">
 							<div className="min-w-0 flex-1">
 								<div className="font-medium truncate">{s.title}</div>
@@ -543,6 +618,18 @@ export default function SongsAdmin() {
 								</Button>
 								<Button variant="outline" size="icon" className="h-8 w-8" onClick={() => setViewTarget(s)} aria-label="View">
 									<Eye className="h-4 w-4" />
+								</Button>
+								<Button
+									variant="outline"
+									size="icon"
+									className="h-8 w-8"
+									aria-label="Re-fetch lyrics"
+									onClick={() => {
+										setRefetchTarget(s);
+										void runLyricsRefetch(s);
+									}}
+								>
+									<RefreshCcw className="h-4 w-4" />
 								</Button>
 								<Button
 									variant="outline"
@@ -582,9 +669,125 @@ export default function SongsAdmin() {
 							</div>
 						</div>
 					))}
-					{songs.length === 0 && <div className="p-8 text-center text-muted-foreground">No songs yet.</div>}
+					{filteredSongs.length === 0 && <div className="p-8 text-center text-muted-foreground">No songs yet.</div>}
 				</div>
 			</Card>
+
+			<Dialog
+				open={!!refetchTarget}
+				onOpenChange={(open) => {
+					if (!open) {
+						setRefetchTarget(null);
+						setRefetchResults(null);
+						setSelectedRefetchId('');
+						setRefetchQuery('');
+					}
+				}}
+			>
+				<DialogContent className="max-w-3xl">
+					<DialogHeader>
+						<DialogTitle>Re-fetch lyrics</DialogTitle>
+						<DialogDescription>
+							Search imported lyrics source by English name, preview, then verify to apply.
+						</DialogDescription>
+					</DialogHeader>
+					<div className="space-y-4">
+						<div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+							<div className="space-y-2">
+								<Label>Search (English)</Label>
+								<Input
+									value={refetchQuery}
+									onChange={(e) => setRefetchQuery(e.target.value)}
+									placeholder="e.g. amader bhoy kahare"
+									disabled={refetching}
+								/>
+								<div className="flex gap-2">
+									<Button
+										variant="outline"
+										disabled={!refetchTarget || refetching}
+										onClick={() => {
+											if (!refetchTarget) return;
+											void runLyricsRefetch(refetchTarget, refetchQuery);
+										}}
+									>
+										{refetching ? 'Searching...' : 'Search'}
+									</Button>
+									<Button
+										variant="outline"
+										disabled={refetching}
+										onClick={() => {
+											setRefetchQuery(refetchTarget?.title || '');
+											if (!refetchTarget) return;
+											void runLyricsRefetch(refetchTarget, refetchTarget.title || '');
+										}}
+									>
+										Reset
+									</Button>
+								</div>
+							</div>
+							<div className="space-y-2">
+								<Label>Matches</Label>
+								<div className="rounded-md border p-2 max-h-[240px] overflow-y-auto space-y-2">
+									{(refetchResults ?? []).map((r) => (
+										<label key={r.entry.id} className="flex items-start gap-2 text-sm">
+											<input
+												type="radio"
+												name="lyricsMatch"
+												checked={selectedRefetchId === r.entry.id}
+												onChange={() => setSelectedRefetchId(r.entry.id)}
+											/>
+											<span className="min-w-0">
+												<span className="font-medium">{r.entry.englishTitle}</span>
+												<span className="text-xs text-muted-foreground"> (score {r.score})</span>
+											</span>
+										</label>
+									))}
+									{(!refetchResults || refetchResults.length === 0) && (
+										<div className="text-xs text-muted-foreground">No matches.</div>
+									)}
+								</div>
+							</div>
+						</div>
+
+						<div className="space-y-2">
+							<Label>Preview (Bengali lyrics only)</Label>
+							<div className="whitespace-pre-wrap border rounded-md bg-muted/30 p-4 text-sm max-h-[320px] overflow-y-auto overflow-x-hidden">
+								{(() => {
+									const selected = (refetchResults ?? []).find((r) => r.entry.id === selectedRefetchId)?.entry;
+									return selected?.lyrics ?? '';
+								})()}
+							</div>
+						</div>
+					</div>
+					<DialogFooter>
+						<Button variant="outline" onClick={() => setRefetchTarget(null)}>
+							Close
+						</Button>
+						<Button
+							disabled={!refetchTarget || !selectedRefetchId}
+							onClick={async () => {
+							if (!refetchTarget) return;
+							const selected = (refetchResults ?? []).find((r) => r.entry.id === selectedRefetchId)?.entry;
+							if (!selected) return;
+							try {
+								await db.songs.update(refetchTarget.id, {
+									lyrics: selected.lyrics,
+									writer: (refetchTarget.writer || '').trim().length ? refetchTarget.writer : (selected.writer || refetchTarget.writer),
+									updatedAt: Date.now(),
+								});
+								toast.success('Lyrics updated');
+								setRefetchTarget(null);
+							} catch (e) {
+								console.error(e);
+								toast.error('Failed to update lyrics');
+							}
+						}}
+						>
+							Verify &amp; Save
+						</Button>
+					</DialogFooter>
+				</DialogContent>
+			</Dialog>
 
 			<Dialog
 				open={duplicateDialogOpen}
@@ -685,7 +888,7 @@ export default function SongsAdmin() {
 					if (!open) setViewTarget(null);
 				}}
 			>
-				<DialogContent className="max-w-2xl">
+				<DialogContent className="max-w-5xl max-h-[86vh] overflow-y-auto">
 					<DialogHeader>
 						<DialogTitle>Song details</DialogTitle>
 						<DialogDescription>View song metadata and lyrics.</DialogDescription>

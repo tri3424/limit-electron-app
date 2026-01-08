@@ -24,27 +24,6 @@ declare global {
 		data?: {
 			exportJsonToFile: (payload: { defaultFileName: string; dataText: string }) => Promise<{ canceled: boolean; filePath?: string }>;
 		};
-		ocr?: {
-			pickPdf?: () => Promise<{ canceled: boolean; pdfFilePath: string }>;
-			importExamPdf: (payload?: {
-				dpi?: number;
-				pageStart?: number;
-				pageEnd?: number;
-				pdfFilePath?: string;
-			}) => Promise<{
-				documentId: string;
-				pdfFilePath: string;
-				pages: Array<{
-					pageIndex: number;
-					questions: Array<{
-						number?: number;
-						text: string;
-						questionImages: string[];
-						options: Record<string, { text: string; images: string[] }>;
-					}>;
-				}>;
-			}>;
-		};
 	}
 }
 

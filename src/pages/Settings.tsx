@@ -1,7 +1,28 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
-import { Download, Upload, Trash2, Database, FileText, UserPlus, Users, Bug } from 'lucide-react';
-import { db, AppSettings, ErrorReport, initializeSettings, User } from '@/lib/db';
+import {
+	Download,
+	Upload,
+	Trash2,
+	Database,
+	FileText,
+	UserPlus,
+	Users,
+	Bug,
+	HelpCircle,
+	LayoutGrid,
+	ClipboardList,
+	Shield,
+	Tag,
+	CalendarDays,
+	Music,
+	Layers,
+	Activity,
+	Package,
+	ScrollText,
+	Settings as SettingsIcon,
+} from 'lucide-react';
+import { db, AppSettings, ErrorReport, initializeSettings, LyricsSourceEntry, User } from '@/lib/db';
 import { v4 as uuidv4 } from 'uuid';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -43,6 +64,7 @@ import {
 export default function Settings() {
   const settings = useLiveQuery(() => db.settings.get('1'), [], null as any);
   const users = useLiveQuery(() => db.users.toArray());
+  const lyricsSourceCount = useLiveQuery(() => db.lyricsSource.count(), [], 0);
   const errorReports = useLiveQuery(
     () => db.errorReports.orderBy('createdAt').reverse().toArray(),
     [],
@@ -64,6 +86,132 @@ export default function Settings() {
     existingQuestionsSnapshot: any[];
   } | null>(null);
   const [importDialogOpen, setImportDialogOpen] = useState(false);
+
+  const [lyricsImporting, setLyricsImporting] = useState(false);
+  const [lyricsSourceWriterName, setLyricsSourceWriterName] = useState('');
+  const [lyricsSourceReplaceExisting, setLyricsSourceReplaceExisting] = useState(false);
+  const [lyricsSourceManageOpen, setLyricsSourceManageOpen] = useState(false);
+  const [lyricsSourceManageSearch, setLyricsSourceManageSearch] = useState('');
+  const [lyricsSourceWriterEdits, setLyricsSourceWriterEdits] = useState<Record<string, string>>({});
+
+  const lyricsSourceEntries = useLiveQuery(async () => {
+    try {
+      return await db.lyricsSource.orderBy('normalizedEnglishTitle').toArray();
+    } catch {
+      return [] as LyricsSourceEntry[];
+    }
+  }, [], [] as LyricsSourceEntry[]);
+
+  const filteredLyricsSourceEntries = useMemo(() => {
+    const list = lyricsSourceEntries ?? [];
+    const q = lyricsSourceManageSearch.trim().toLowerCase();
+    if (!q) return list;
+    return list.filter((e) => {
+      const hay = `${e.englishTitle || ''} ${e.normalizedEnglishTitle || ''} ${e.writer || ''}`.toLowerCase();
+      return hay.includes(q);
+    });
+  }, [lyricsSourceEntries, lyricsSourceManageSearch]);
+
+  const normalizeEnglishTitle = (value: string) =>
+    value
+      .toLowerCase()
+      .replace(/[^a-z0-9\s]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+
+  const isNumericOnlyLine = (line: string) => {
+    const trimmed = line.trim();
+    if (!trimmed) return false;
+    return /^[0-9০-৯]+$/.test(trimmed);
+  };
+
+  const handleImportLyricsSourceTxt = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(event.target.files ?? []);
+    if (!files.length) return;
+    try {
+      setLyricsImporting(true);
+      const entries: LyricsSourceEntry[] = [];
+      const now = Date.now();
+      const writer = lyricsSourceWriterName.trim() || undefined;
+
+      for (const file of files) {
+        const text = await file.text();
+        const blocks = text.split('* -');
+        for (const rawBlock of blocks) {
+          const block = rawBlock.replace(/^\s+|\s+$/g, '');
+          if (!block) continue;
+
+          const lines = block.split(/\r?\n/);
+          let englishTitle = '';
+          let normalizedEnglishTitle = '';
+          const lyricsLines: string[] = [];
+
+          for (const line of lines) {
+            if (!englishTitle) {
+              const parenMatch = line.match(/\(([^)]+)\)/);
+              if (parenMatch && /[a-zA-Z]/.test(parenMatch[1] || '')) {
+                englishTitle = String(parenMatch[1] || '').trim();
+                normalizedEnglishTitle = normalizeEnglishTitle(englishTitle);
+                continue;
+              }
+            }
+
+            if (isNumericOnlyLine(line)) continue;
+            if (!englishTitle && /[a-zA-Z]/.test(line) && /\(/.test(line) && /\)/.test(line)) continue;
+            if (line.trim().length === 0) {
+              lyricsLines.push('');
+              continue;
+            }
+            if (!/[\u0980-\u09FF]/.test(line)) continue;
+
+            lyricsLines.push(line.replace(/\r$/, ''));
+          }
+
+          if (!normalizedEnglishTitle) continue;
+          const lyrics = lyricsLines.join('\n').replace(/\n+$/g, '');
+          if (!lyrics.trim()) continue;
+
+          entries.push({
+            id: uuidv4(),
+            englishTitle,
+            normalizedEnglishTitle,
+            lyrics,
+            writer,
+            createdAt: now,
+          });
+        }
+      }
+
+      const normalizedKeys = Array.from(new Set(entries.map((e) => e.normalizedEnglishTitle).filter(Boolean)));
+      await db.transaction('rw', [db.lyricsSource], async () => {
+        if (lyricsSourceReplaceExisting) {
+          await db.lyricsSource.clear();
+          if (entries.length) await db.lyricsSource.bulkPut(entries);
+          return;
+        }
+        if (!entries.length) return;
+        const existing = normalizedKeys.length
+          ? await db.lyricsSource.where('normalizedEnglishTitle').anyOf(normalizedKeys).toArray()
+          : ([] as LyricsSourceEntry[]);
+        const existingByNorm = new Map(existing.map((e) => [e.normalizedEnglishTitle, e]));
+        const merged = entries.map((e) => {
+          const prev = existingByNorm.get(e.normalizedEnglishTitle);
+          return prev ? { ...e, id: prev.id, createdAt: prev.createdAt } : e;
+        });
+        await db.lyricsSource.bulkPut(merged);
+      });
+
+      toast.success(
+        `Imported lyrics source (${entries.length} songs from ${files.length} file${files.length === 1 ? '' : 's'})`,
+      );
+    } catch (e) {
+      console.error(e);
+      toast.error('Failed to import lyrics source');
+    } finally {
+      setLyricsImporting(false);
+      event.target.value = '';
+    }
+  };
 
   // User management state
   const [showUserDialog, setShowUserDialog] = useState(false);
@@ -167,57 +315,58 @@ export default function Settings() {
       const errorReports = await db.errorReports.toArray();
       const songsRaw = await db.songs.toArray();
       const songModules = await db.songModules.toArray();
-			const binaryAssetsRaw = await db.binaryAssets.toArray();
+      const lyricsSource = await db.lyricsSource.toArray();
+      const binaryAssetsRaw = await db.binaryAssets.toArray();
 
-			const songs = await Promise.all(
-				songsRaw.map(async (s) => {
-					const audioFilePath = (s as any).audioFilePath as string;
-					const audioFileUrl = (s as any).audioFileUrl as string;
-					// If the song is stored as a local file, include bytes for offline backup.
-					if (window.songs?.readAudioFile && audioFilePath && audioFileUrl && audioFileUrl.startsWith('file:')) {
-						try {
-							const res = await window.songs.readAudioFile({ filePath: audioFilePath });
-							return { ...s, audioDataBase64: res.dataBase64 } as any;
-						} catch {
-							return s as any;
-						}
-					}
-					// If already a data URL, it can be restored as-is.
-					if (typeof audioFileUrl === 'string' && audioFileUrl.startsWith('data:')) {
-						return { ...s, audioDataUrl: audioFileUrl } as any;
-					}
-					return s as any;
-				}),
-			);
+      const songs = await Promise.all(
+        songsRaw.map(async (s) => {
+          const audioFilePath = (s as any).audioFilePath as string;
+          const audioFileUrl = (s as any).audioFileUrl as string;
+          // If the song is stored as a local file, include bytes for offline backup.
+          if (window.songs?.readAudioFile && audioFilePath && audioFileUrl && audioFileUrl.startsWith('file:')) {
+            try {
+              const res = await window.songs.readAudioFile({ filePath: audioFilePath });
+              return { ...s, audioDataBase64: res.dataBase64 } as any;
+            } catch {
+              return s as any;
+            }
+          }
+          // If already a data URL, it can be restored as-is.
+          if (typeof audioFileUrl === 'string' && audioFileUrl.startsWith('data:')) {
+            return { ...s, audioDataUrl: audioFileUrl } as any;
+          }
+          return s as any;
+        }),
+      );
 
-			const binaryAssets = await Promise.all(
-				binaryAssetsRaw.map(async (a) => {
-					try {
-						const blob = (a as any).data as Blob;
-						const readerRes = await new Promise<string>((resolve, reject) => {
-							const reader = new FileReader();
-							reader.onerror = () => reject(new Error('Failed to read asset blob'));
-							reader.onload = () => {
-								const res = reader.result;
-								if (typeof res !== 'string') {
-									reject(new Error('Unexpected FileReader result'));
-									return;
-								}
-								const commaIdx = res.indexOf(',');
-								resolve(commaIdx >= 0 ? res.slice(commaIdx + 1) : res);
-							};
-							reader.readAsDataURL(blob);
-						});
-						return {
-							...a,
-							dataBase64: readerRes,
-							data: undefined,
-						} as any;
-					} catch {
-						return { ...a, data: undefined } as any;
-					}
-				}),
-			);
+      const binaryAssets = await Promise.all(
+        binaryAssetsRaw.map(async (a) => {
+          try {
+            const blob = (a as any).data as Blob;
+            const readerRes = await new Promise<string>((resolve, reject) => {
+              const reader = new FileReader();
+              reader.onerror = () => reject(new Error('Failed to read asset blob'));
+              reader.onload = () => {
+                const res = reader.result;
+                if (typeof res !== 'string') {
+                  reject(new Error('Unexpected FileReader result'));
+                  return;
+                }
+                const commaIdx = res.indexOf(',');
+                resolve(commaIdx >= 0 ? res.slice(commaIdx + 1) : res);
+              };
+              reader.readAsDataURL(blob);
+            });
+            return {
+              ...a,
+              dataBase64: readerRes,
+              data: undefined,
+            } as any;
+          } catch {
+            return { ...a, data: undefined } as any;
+          }
+        }),
+      );
 
       const data = {
         questions,
@@ -233,9 +382,10 @@ export default function Settings() {
         errorReports,
         songs,
         songModules,
-				binaryAssets,
+        lyricsSource,
+        binaryAssets,
         exportedAt: new Date().toISOString(),
-        schemaVersion: 21,
+        schemaVersion: 23,
       };
 
       // Derive top tags from question usage to include in filename
@@ -275,22 +425,22 @@ export default function Settings() {
 
       const fileName = `Limit-backup-${tagsPart}-${timestampPart}.json`;
 
-			const dataText = JSON.stringify(data, null, 2);
-			if (window.data?.exportJsonToFile) {
-				const res = await window.data.exportJsonToFile({ defaultFileName: fileName, dataText });
-				if (res?.canceled) {
-					return;
-				}
-			} else {
-				const blob = new Blob([dataText], { type: 'application/json' });
-				const url = URL.createObjectURL(blob);
-				const a = document.createElement('a');
-				a.href = url;
-				a.download = fileName;
-				a.click();
-				URL.revokeObjectURL(url);
-			}
-      
+      const dataText = JSON.stringify(data, null, 2);
+      if (window.data?.exportJsonToFile) {
+        const res = await window.data.exportJsonToFile({ defaultFileName: fileName, dataText });
+        if (res?.canceled) {
+          return;
+        }
+      } else {
+        const blob = new Blob([dataText], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = fileName;
+        a.click();
+        URL.revokeObjectURL(url);
+      }
+
       toast.success('Data exported successfully');
     } catch (error) {
       toast.error('Failed to export data');
@@ -298,42 +448,42 @@ export default function Settings() {
     }
   };
 
-	const handleExportQuestionsOnly = async () => {
-		try {
-			const questions = await db.questions.toArray();
-			const data = {
-				questions,
-				exportedAt: new Date().toISOString(),
-				kind: 'questions_only',
-				schemaVersion: 21,
-			};
-			const now = new Date();
-			const yyyy = now.getFullYear();
-			const mm = String(now.getMonth() + 1).padStart(2, '0');
-			const dd = String(now.getDate()).padStart(2, '0');
-			const hh = String(now.getHours()).padStart(2, '0');
-			const min = String(now.getMinutes()).padStart(2, '0');
-			const timestampPart = `${yyyy}${mm}${dd}-${hh}${min}`;
-			const fileName = `Limit-questions-${timestampPart}.json`;
-			const dataText = JSON.stringify(data, null, 2);
-			if (window.data?.exportJsonToFile) {
-				const res = await window.data.exportJsonToFile({ defaultFileName: fileName, dataText });
-				if (res?.canceled) return;
-			} else {
-				const blob = new Blob([dataText], { type: 'application/json' });
-				const url = URL.createObjectURL(blob);
-				const a = document.createElement('a');
-				a.href = url;
-				a.download = fileName;
-				a.click();
-				URL.revokeObjectURL(url);
-			}
-			toast.success('Questions exported successfully');
-		} catch (error) {
-			toast.error('Failed to export questions');
-			console.error(error);
-		}
-	};
+  const handleExportQuestionsOnly = async () => {
+    try {
+      const questions = await db.questions.toArray();
+      const data = {
+        questions,
+        exportedAt: new Date().toISOString(),
+        kind: 'questions_only',
+        schemaVersion: 22,
+      };
+      const now = new Date();
+      const yyyy = now.getFullYear();
+      const mm = String(now.getMonth() + 1).padStart(2, '0');
+      const dd = String(now.getDate()).padStart(2, '0');
+      const hh = String(now.getHours()).padStart(2, '0');
+      const min = String(now.getMinutes()).padStart(2, '0');
+      const timestampPart = `${yyyy}${mm}${dd}-${hh}${min}`;
+      const fileName = `Limit-questions-${timestampPart}.json`;
+      const dataText = JSON.stringify(data, null, 2);
+      if (window.data?.exportJsonToFile) {
+        const res = await window.data.exportJsonToFile({ defaultFileName: fileName, dataText });
+        if (res?.canceled) return;
+      } else {
+        const blob = new Blob([dataText], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = fileName;
+        a.click();
+        URL.revokeObjectURL(url);
+      }
+      toast.success('Questions exported successfully');
+    } catch (error) {
+      toast.error('Failed to export questions');
+      console.error(error);
+    }
+  };
 
   const questionsStructurallyMatch = (a: any, b: any): boolean => {
     if (!a || !b) return false;
@@ -424,6 +574,7 @@ export default function Settings() {
           db.globalGlossary,
           db.intelligenceSignals,
           db.errorReports,
+          db.lyricsSource,
         ],
         async () => {
           const existingCodes = new Set<string>();
@@ -492,57 +643,60 @@ export default function Settings() {
           if (Array.isArray(rawData.errorReports) && rawData.errorReports.length > 0) {
             await db.errorReports.bulkPut(rawData.errorReports);
           }
-					if (Array.isArray(rawData.songs) && rawData.songs.length > 0) {
-						const mappedSongs = await Promise.all(
-							rawData.songs.map(async (s: any) => {
-								const now = Date.now();
-								const fileName = typeof s?.title === 'string' && s.title.trim() ? `${s.title}.audio` : 'song.audio';
+          if (Array.isArray(rawData.songs) && rawData.songs.length > 0) {
+            const mappedSongs = await Promise.all(
+              rawData.songs.map(async (s: any) => {
+                const now = Date.now();
+                const fileName = typeof s?.title === 'string' && s.title.trim() ? `${s.title}.audio` : 'song.audio';
 
-								// If audio bytes exist in backup, reconstruct to a real file (Electron) or data URL (browser).
-								if (typeof s?.audioDataBase64 === 'string' && s.audioDataBase64.length > 0) {
-									if (window.songs?.saveAudioFile) {
-										try {
-											const saved = await window.songs.saveAudioFile({ fileName, dataBase64: s.audioDataBase64 });
-											return {
-												...s,
-												audioFilePath: saved.filePath,
-												audioFileUrl: saved.fileUrl,
-												updatedAt: typeof s.updatedAt === 'number' ? s.updatedAt : now,
-											};
-										} catch {
-											return {
-												...s,
-												audioFilePath: '',
-												audioFileUrl: `data:audio/*;base64,${s.audioDataBase64}`,
-												updatedAt: typeof s.updatedAt === 'number' ? s.updatedAt : now,
-											};
-										}
-									}
-									return {
-										...s,
-										audioFilePath: '',
-										audioFileUrl: `data:audio/*;base64,${s.audioDataBase64}`,
-										updatedAt: typeof s.updatedAt === 'number' ? s.updatedAt : now,
-									};
-								}
+                // If audio bytes exist in backup, reconstruct to a real file (Electron) or data URL (browser).
+                if (typeof s?.audioDataBase64 === 'string' && s.audioDataBase64.length > 0) {
+                  if (window.songs?.saveAudioFile) {
+                    try {
+                      const saved = await window.songs.saveAudioFile({ fileName, dataBase64: s.audioDataBase64 });
+                      return {
+                        ...s,
+                        audioFilePath: saved.filePath,
+                        audioFileUrl: saved.fileUrl,
+                        updatedAt: typeof s.updatedAt === 'number' ? s.updatedAt : now,
+                      };
+                    } catch {
+                      return {
+                        ...s,
+                        audioFilePath: '',
+                        audioFileUrl: `data:audio/*;base64,${s.audioDataBase64}`,
+                        updatedAt: typeof s.updatedAt === 'number' ? s.updatedAt : now,
+                      };
+                    }
+                  }
+                  return {
+                    ...s,
+                    audioFilePath: '',
+                    audioFileUrl: `data:audio/*;base64,${s.audioDataBase64}`,
+                    updatedAt: typeof s.updatedAt === 'number' ? s.updatedAt : now,
+                  };
+                }
 
-								if (typeof s?.audioDataUrl === 'string' && s.audioDataUrl.startsWith('data:')) {
-									return {
-										...s,
-										audioFilePath: '',
-										audioFileUrl: s.audioDataUrl,
-										updatedAt: typeof s.updatedAt === 'number' ? s.updatedAt : now,
-									};
-								}
+                if (typeof s?.audioDataUrl === 'string' && s.audioDataUrl.startsWith('data:')) {
+                  return {
+                    ...s,
+                    audioFilePath: '',
+                    audioFileUrl: s.audioDataUrl,
+                    updatedAt: typeof s.updatedAt === 'number' ? s.updatedAt : now,
+                  };
+                }
 
-								return s;
-							}),
-						);
-						await db.songs.bulkPut(mappedSongs);
-					}
-					if (Array.isArray(rawData.songModules) && rawData.songModules.length > 0) {
-						await db.songModules.bulkPut(rawData.songModules);
-					}
+                return s;
+              }),
+            );
+            await db.songs.bulkPut(mappedSongs);
+          }
+          if (Array.isArray(rawData.songModules) && rawData.songModules.length > 0) {
+            await db.songModules.bulkPut(rawData.songModules);
+          }
+          if (Array.isArray(rawData.lyricsSource) && rawData.lyricsSource.length > 0) {
+            await db.lyricsSource.bulkPut(rawData.lyricsSource);
+          }
         }
       );
 
@@ -1165,6 +1319,196 @@ export default function Settings() {
           </div>
         </div>
 
+			<Separator />
+
+			<div className="space-y-2">
+				<div className="flex items-center justify-between gap-3">
+					<div>
+						<div className="text-sm font-medium">Song Lyrics Source</div>
+						<div className="text-xs text-muted-foreground">Imported entries: {lyricsSourceCount ?? 0}</div>
+					</div>
+					<Button
+						variant="outline"
+						disabled={(lyricsSourceCount ?? 0) === 0}
+						onClick={() => {
+							setLyricsSourceManageSearch('');
+							setLyricsSourceWriterEdits({});
+							setLyricsSourceManageOpen(true);
+						}}
+					>
+						Edit Writers
+					</Button>
+				</div>
+				<div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+					<div className="space-y-2">
+						<Label>Writer name for this lyrics file (optional)</Label>
+						<Input
+							value={lyricsSourceWriterName}
+							onChange={(e) => setLyricsSourceWriterName(e.target.value)}
+							placeholder="e.g. Rabindranath Tagore"
+							disabled={lyricsImporting}
+						/>
+						<div className="text-xs text-muted-foreground">
+							This will be saved on every imported lyrics entry and can be applied to songs when lyrics are used.
+						</div>
+					</div>
+					<div className="space-y-2">
+						<Label>Apply writer to existing imported lyrics</Label>
+						<Button
+							variant="outline"
+							disabled={lyricsImporting || (lyricsSourceCount ?? 0) === 0}
+							onClick={async () => {
+								const writer = lyricsSourceWriterName.trim();
+								try {
+									if (!writer) {
+										toast.error('Please enter a writer name first');
+										return;
+									}
+									await db.lyricsSource.toCollection().modify((entry) => {
+										(entry as any).writer = writer;
+									});
+									toast.success('Writer name updated for imported lyrics');
+								} catch (e) {
+									console.error(e);
+									toast.error('Failed to update writer name');
+								}
+							}}
+						>
+							Apply Writer to Imported Lyrics
+						</Button>
+						<div className="text-xs text-muted-foreground">
+							Useful if you imported the file before adding the writer name.
+						</div>
+					</div>
+				</div>
+				<div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+					<div className="relative">
+						<Input
+							type="file"
+							accept=".txt"
+							multiple
+							onChange={handleImportLyricsSourceTxt}
+							className="absolute inset-0 opacity-0 cursor-pointer"
+							disabled={lyricsImporting}
+							id="import-lyrics-source"
+						/>
+						<Button variant="outline" className="w-full pointer-events-none" disabled={lyricsImporting}>
+							<Upload className="h-4 w-4 mr-2" />
+							{lyricsImporting ? 'Importing lyrics...' : 'Import Lyrics .txt'}
+						</Button>
+						<label className="flex items-center gap-2 text-sm">
+							<Checkbox
+								checked={lyricsSourceReplaceExisting}
+								onCheckedChange={(v) => setLyricsSourceReplaceExisting(v === true)}
+							/>
+							<span>Replace existing imported lyrics</span>
+						</label>
+					</div>
+					<Button
+						variant="outline"
+						disabled={lyricsImporting || (lyricsSourceCount ?? 0) === 0}
+						onClick={async () => {
+							try {
+								await db.lyricsSource.clear();
+								toast.success('Cleared lyrics source');
+							} catch (e) {
+								console.error(e);
+								toast.error('Failed to clear lyrics source');
+							}
+						}}
+					>
+						Clear Lyrics Source
+					</Button>
+				</div>
+			</div>
+
+			<Dialog
+				open={lyricsSourceManageOpen}
+				onOpenChange={(open) => {
+					setLyricsSourceManageOpen(open);
+					if (!open) {
+						setLyricsSourceManageSearch('');
+						setLyricsSourceWriterEdits({});
+					}
+				}}
+			>
+				<DialogContent className="max-w-4xl">
+					<DialogHeader>
+						<DialogTitle>Edit lyrics writers</DialogTitle>
+						<DialogDescription>Edit the writer name for each imported lyrics entry.</DialogDescription>
+					</DialogHeader>
+					<div className="space-y-3">
+						<div className="flex items-center gap-2">
+							<Input
+								value={lyricsSourceManageSearch}
+								onChange={(e) => setLyricsSourceManageSearch(e.target.value)}
+								placeholder="Search by title or writer..."
+							/>
+						</div>
+						<ScrollArea className="h-[60vh] rounded-md border">
+							<div className="divide-y">
+								{filteredLyricsSourceEntries.length ? (
+									filteredLyricsSourceEntries.map((entry) => {
+										const value =
+											lyricsSourceWriterEdits[entry.id] ??
+											(entry.writer ?? '');
+										return (
+											<div key={entry.id} className="p-3 grid grid-cols-12 gap-3 items-center">
+												<div className="col-span-5 min-w-0">
+													<div className="text-sm font-medium truncate" title={entry.englishTitle}>
+														{entry.englishTitle}
+													</div>
+													<div className="text-xs text-muted-foreground truncate" title={entry.normalizedEnglishTitle}>
+														{entry.normalizedEnglishTitle}
+													</div>
+												</div>
+												<div className="col-span-5">
+													<Input
+														value={value}
+														onChange={(e) =>
+															setLyricsSourceWriterEdits((prev) => ({
+																...prev,
+																[entry.id]: e.target.value,
+															}))
+														}
+														placeholder="Writer name"
+													/>
+												</div>
+												<div className="col-span-2 flex justify-end">
+													<Button
+														size="sm"
+														variant="outline"
+														onClick={async () => {
+															try {
+																const next = (lyricsSourceWriterEdits[entry.id] ?? entry.writer ?? '').trim();
+																await db.lyricsSource.update(entry.id, { writer: next || undefined });
+																toast.success('Writer updated');
+															} catch (e) {
+																console.error(e);
+																toast.error('Failed to update writer');
+															}
+														}}
+													>
+														Save
+													</Button>
+												</div>
+											</div>
+										);
+									})
+								) : (
+									<div className="p-6 text-center text-sm text-muted-foreground">No entries found.</div>
+								)}
+							</div>
+						</ScrollArea>
+					</div>
+					<DialogFooter>
+						<Button variant="outline" onClick={() => setLyricsSourceManageOpen(false)}>
+							Close
+						</Button>
+					</DialogFooter>
+				</DialogContent>
+			</Dialog>
+
         <Separator />
 
         <div>
@@ -1365,7 +1709,8 @@ export default function Settings() {
       </AlertDialog>
     </div>
   </TooltipProvider>
-  );
+);
+
 }
 
 function DatabaseInfo() {
@@ -1489,32 +1834,72 @@ function DatabaseInfo() {
   );
 }
 
-type ExplorerTableKey = 'questions' | 'modules' | 'attempts' | 'integrityEvents' | 'tags' | 'dailyStats' | 'settings' | 'errorReports';
+type ExplorerTableKey =
+  | 'questions'
+  | 'modules'
+  | 'attempts'
+  | 'integrityEvents'
+  | 'tags'
+  | 'dailyStats'
+  | 'errorReports'
+  | 'songs'
+  | 'songModules'
+  | 'songListeningEvents'
+  | 'binaryAssets'
+  | 'lyricsSource'
+  | 'users'
+  | 'settings';
 
 function DatabaseExplorer() {
   const [activeTable, setActiveTable] = useState<ExplorerTableKey>('questions');
   const [search, setSearch] = useState('');
+  const [recordLimit, setRecordLimit] = useState(200);
   const [selectedRecord, setSelectedRecord] = useState<any | null>(null);
   const [editedJson, setEditedJson] = useState('');
   const [isSaving, setIsSaving] = useState(false);
   const [explanation, setExplanation] = useState<string>('');
   const [isBulkDeleting, setIsBulkDeleting] = useState(false);
   const [showBulkDeleteDialog, setShowBulkDeleteDialog] = useState(false);
+  const [showJsonPreview, setShowJsonPreview] = useState(false);
+
+  const safeJsonStringify = (value: any, space?: number) => {
+    return JSON.stringify(
+      value,
+      (_key, v) => {
+        if (typeof Blob !== 'undefined' && v instanceof Blob) {
+          const mime = (v as Blob).type || 'application/octet-stream';
+          return `[Blob ${mime} ${(v as Blob).size} bytes]`;
+        }
+        return v;
+      },
+      space,
+    );
+  };
 
   const records = useLiveQuery(async () => {
     const table = (db as any)[activeTable];
     if (!table) return [];
-    const all = await table.toArray();
+
+    // binaryAssets may contain large Blobs; avoid loading them in list view.
+    if (activeTable === 'binaryAssets') {
+      const keys = (await table.toCollection().limit(recordLimit).primaryKeys()) as any[];
+      const rows = keys.map((id) => ({ id }));
+      if (!search.trim()) return rows;
+      const q = search.toLowerCase();
+      return rows.filter((r) => String(r.id ?? '').toLowerCase().includes(q));
+    }
+
+    const all = await table.toCollection().limit(recordLimit).toArray();
     if (!search.trim()) return all;
     const q = search.toLowerCase();
     return all.filter((row: any) => {
       try {
-        return JSON.stringify(row).toLowerCase().includes(q);
+        return safeJsonStringify(row).toLowerCase().includes(q);
       } catch {
         return false;
       }
     });
-  }, [activeTable, search]) as any[] | undefined;
+  }, [activeTable, search, recordLimit]) as any[] | undefined;
 
   const handleBulkDeleteVisible = async () => {
     if (activeTable === 'settings') {
@@ -1553,7 +1938,7 @@ function DatabaseExplorer() {
     setSelectedRecord(row);
     setExplanation('');
     try {
-      setEditedJson(JSON.stringify(row, null, 2));
+      setEditedJson(safeJsonStringify(row, 2));
     } catch {
       setEditedJson('');
     }
@@ -1622,6 +2007,18 @@ function DatabaseExplorer() {
         return 'Settings';
       case 'errorReports':
         return 'Error Reports';
+      case 'songs':
+        return 'Songs';
+      case 'songModules':
+        return 'Song Modules';
+      case 'songListeningEvents':
+        return 'Song Listening Events';
+      case 'binaryAssets':
+        return 'Binary Assets';
+      case 'lyricsSource':
+        return 'Lyrics Source';
+      case 'users':
+        return 'Users';
       default:
         return activeTable;
     }
@@ -1918,15 +2315,119 @@ function DatabaseExplorer() {
       </div>
 
       <Tabs value={activeTable} onValueChange={(v) => setActiveTable(v as ExplorerTableKey)}>
-        <TabsList className="mb-3 flex flex-wrap">
-          <TabsTrigger value="questions">Questions</TabsTrigger>
-          <TabsTrigger value="modules">Modules</TabsTrigger>
-          <TabsTrigger value="attempts">Attempts</TabsTrigger>
-          <TabsTrigger value="integrityEvents">Integrity</TabsTrigger>
-          <TabsTrigger value="tags">Tags</TabsTrigger>
-          <TabsTrigger value="dailyStats">Daily Stats</TabsTrigger>
-          <TabsTrigger value="errorReports">Error Reports</TabsTrigger>
-          <TabsTrigger value="settings">Settings</TabsTrigger>
+        <TabsList className="mb-3 flex flex-wrap gap-1">
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <TabsTrigger value="questions" aria-label="Questions" className="h-9 w-9 p-0 text-primary/70 data-[state=active]:text-primary">
+                <HelpCircle className="h-4 w-4" />
+              </TabsTrigger>
+            </TooltipTrigger>
+            <TooltipContent>Questions</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <TabsTrigger value="modules" aria-label="Modules" className="h-9 w-9 p-0 text-primary/70 data-[state=active]:text-primary">
+                <LayoutGrid className="h-4 w-4" />
+              </TabsTrigger>
+            </TooltipTrigger>
+            <TooltipContent>Modules</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <TabsTrigger value="attempts" aria-label="Attempts" className="h-9 w-9 p-0 text-primary/70 data-[state=active]:text-primary">
+                <ClipboardList className="h-4 w-4" />
+              </TabsTrigger>
+            </TooltipTrigger>
+            <TooltipContent>Attempts</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <TabsTrigger value="integrityEvents" aria-label="Integrity" className="h-9 w-9 p-0 text-primary/70 data-[state=active]:text-primary">
+                <Shield className="h-4 w-4" />
+              </TabsTrigger>
+            </TooltipTrigger>
+            <TooltipContent>Integrity</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <TabsTrigger value="tags" aria-label="Tags" className="h-9 w-9 p-0 text-primary/70 data-[state=active]:text-primary">
+                <Tag className="h-4 w-4" />
+              </TabsTrigger>
+            </TooltipTrigger>
+            <TooltipContent>Tags</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <TabsTrigger value="dailyStats" aria-label="Daily Stats" className="h-9 w-9 p-0 text-primary/70 data-[state=active]:text-primary">
+                <CalendarDays className="h-4 w-4" />
+              </TabsTrigger>
+            </TooltipTrigger>
+            <TooltipContent>Daily Stats</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <TabsTrigger value="errorReports" aria-label="Error Reports" className="h-9 w-9 p-0 text-primary/70 data-[state=active]:text-primary">
+                <Bug className="h-4 w-4" />
+              </TabsTrigger>
+            </TooltipTrigger>
+            <TooltipContent>Error Reports</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <TabsTrigger value="songs" aria-label="Songs" className="h-9 w-9 p-0 text-primary/70 data-[state=active]:text-primary">
+                <Music className="h-4 w-4" />
+              </TabsTrigger>
+            </TooltipTrigger>
+            <TooltipContent>Songs</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <TabsTrigger value="songModules" aria-label="Song Modules" className="h-9 w-9 p-0 text-primary/70 data-[state=active]:text-primary">
+                <Layers className="h-4 w-4" />
+              </TabsTrigger>
+            </TooltipTrigger>
+            <TooltipContent>Song Modules</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <TabsTrigger value="songListeningEvents" aria-label="Listening Events" className="h-9 w-9 p-0 text-primary/70 data-[state=active]:text-primary">
+                <Activity className="h-4 w-4" />
+              </TabsTrigger>
+            </TooltipTrigger>
+            <TooltipContent>Listening Events</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <TabsTrigger value="binaryAssets" aria-label="Binary Assets" className="h-9 w-9 p-0 text-primary/70 data-[state=active]:text-primary">
+                <Package className="h-4 w-4" />
+              </TabsTrigger>
+            </TooltipTrigger>
+            <TooltipContent>Binary Assets</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <TabsTrigger value="lyricsSource" aria-label="Lyrics Source" className="h-9 w-9 p-0 text-primary/70 data-[state=active]:text-primary">
+                <ScrollText className="h-4 w-4" />
+              </TabsTrigger>
+            </TooltipTrigger>
+            <TooltipContent>Lyrics Source</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <TabsTrigger value="users" aria-label="Users" className="h-9 w-9 p-0 text-primary/70 data-[state=active]:text-primary">
+                <Users className="h-4 w-4" />
+              </TabsTrigger>
+            </TooltipTrigger>
+            <TooltipContent>Users</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <TabsTrigger value="settings" aria-label="Settings" className="h-9 w-9 p-0 text-primary/70 data-[state=active]:text-primary">
+                <SettingsIcon className="h-4 w-4" />
+              </TabsTrigger>
+            </TooltipTrigger>
+            <TooltipContent>Settings</TooltipContent>
+          </Tooltip>
         </TabsList>
 
         <TabsContent value={activeTable} className="mt-0 space-y-4">
@@ -1959,6 +2460,16 @@ function DatabaseExplorer() {
                   </div>
                 )}
                 <div className="flex items-center gap-2">
+                  <Select value={String(recordLimit)} onValueChange={(v) => setRecordLimit(Number(v))}>
+                    <SelectTrigger className="h-9 w-[108px] text-xs">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="50">50 rows</SelectItem>
+                      <SelectItem value="200">200 rows</SelectItem>
+                      <SelectItem value="500">500 rows</SelectItem>
+                    </SelectContent>
+                  </Select>
                   <Input
                     placeholder="Search JSON..."
                     value={search}
@@ -1984,7 +2495,7 @@ function DatabaseExplorer() {
                       const id = row.id ?? row.key ?? idx;
                       let preview = '';
                       try {
-                        const json = JSON.stringify(row);
+                        const json = safeJsonStringify(row);
                         preview = json.length > 140 ? json.slice(0, 140) + '…' : json;
                       } catch {
                         preview = '[unserializable]';
@@ -2036,6 +2547,14 @@ function DatabaseExplorer() {
                 placeholder="Select a record on the left to view/edit its raw JSON."
               />
               <div className="flex justify-end gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={!selectedRecord}
+                  onClick={() => setShowJsonPreview(true)}
+                >
+                  Preview JSON
+                </Button>
                 <Button
                   variant="outline"
                   size="sm"
@@ -2107,6 +2626,23 @@ function DatabaseExplorer() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+		<Dialog open={showJsonPreview} onOpenChange={setShowJsonPreview}>
+			<DialogContent className="max-w-3xl">
+				<DialogHeader>
+					<DialogTitle>JSON Preview</DialogTitle>
+					<DialogDescription>Read-only view of the selected record.</DialogDescription>
+				</DialogHeader>
+				<div className="rounded-md border bg-muted/30 p-3 max-h-[70vh] overflow-auto">
+					<pre className="text-xs font-mono whitespace-pre-wrap break-words">
+						{selectedRecord ? safeJsonStringify(selectedRecord, 2) : 'No record selected.'}
+					</pre>
+				</div>
+				<DialogFooter>
+					<Button variant="outline" onClick={() => setShowJsonPreview(false)}>Close</Button>
+				</DialogFooter>
+			</DialogContent>
+		</Dialog>
     </Card>
   );
 }

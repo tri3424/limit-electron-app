@@ -456,6 +456,15 @@ export interface Song {
   visible?: boolean;
 }
 
+export interface LyricsSourceEntry {
+	id: string;
+	normalizedEnglishTitle: string;
+	englishTitle: string;
+	lyrics: string;
+	writer?: string;
+	createdAt: number;
+}
+
 export interface BinaryAsset {
 	id: string;
 	kind: 'question_image' | 'option_image' | 'song_audio' | 'unknown';
@@ -485,10 +494,13 @@ export interface SongListeningEvent {
 	songModuleId: string;
 	songId: string;
 	songTitle?: string;
-	eventType: 'play' | 'pause' | 'ended' | 'switch';
+	eventType: 'play' | 'pause' | 'ended' | 'switch' | 'view_start' | 'view_end';
 	positionSec?: number;
 	songDurationSec?: number;
 	listenedMs?: number;
+	timeInSongMs?: number;
+	lyricsScrollable?: boolean;
+	didScrollLyrics?: boolean;
 }
 
 // Database class
@@ -513,6 +525,7 @@ export class ExamDatabase extends Dexie {
 	songModules!: Table<SongModule, string>;
 	songListeningEvents!: Table<SongListeningEvent, string>;
 	binaryAssets!: Table<BinaryAsset, string>;
+	lyricsSource!: Table<LyricsSourceEntry, string>;
 
   constructor() {
     super('ExamDatabase');
@@ -673,7 +686,7 @@ export class ExamDatabase extends Dexie {
       integrityEvents: 'id, attemptId, type, timestamp',
       tags: 'id, name',
       settings: 'id',
-      dailyStats: 'id, date, moduleId, moduleType, createdAt',
+      dailyStats: 'id, date, moduleId, [date+moduleId], [moduleId+date], moduleType, createdAt',
     }).upgrade(async (tx) => {
       const questionsTable = tx.table('questions');
       const all = await questionsTable.toArray();
@@ -1068,7 +1081,55 @@ export class ExamDatabase extends Dexie {
 			songListeningEvents: 'id, date, timestamp, songModuleId, userId, songId, [date+songModuleId], [songModuleId+date], [songModuleId+userId], [songModuleId+songId]',
 			binaryAssets: 'id, kind, createdAt'
 		});
-  }
+
+		this.version(22).stores({
+			questions: 'id, type, *tags, *modules, metadata.createdAt',
+			modules: 'id, type, *tags, createdAt, visible, locked',
+			attempts: 'id, moduleId, type, startedAt, syncStatus',
+			integrityEvents: 'id, attemptId, type, timestamp',
+			tags: 'id, name',
+			semanticOntologyTags: 'id, kind, parentId, name, updatedAt',
+			semanticEmbeddings: 'id, [scope+scopeId], scope, scopeId, modelId, createdAt',
+			questionSemanticAnalyses: 'id, questionId, createdAt, [questionId+analysisVersion], [questionId+modelId], source',
+			questionSemanticOverrides: 'id, questionId, updatedAt, baseAnalysisId, [questionId+updatedAt]',
+			settings: 'id',
+			dailyStats: 'id, date, moduleId, [date+moduleId], [moduleId+date], moduleType, createdAt',
+			users: 'id, username',
+			globalGlossary: 'id, normalizedWord, word',
+			intelligenceSignals: 'id, type, questionId, moduleId, [type+moduleId], [questionId+type]',
+			reviewInteractions: 'id, attemptId, moduleId, userId, questionId, timestamp, [attemptId+questionId], [moduleId+userId]',
+			errorReports: 'id, status, createdAt, updatedAt, moduleId, questionId, questionCode, reporterUserId, [status+createdAt]',
+			songs: 'id, visible, createdAt, updatedAt',
+			songModules: 'id, visible, createdAt, updatedAt',
+			songListeningEvents: 'id, date, timestamp, songModuleId, userId, songId, [date+songModuleId], [songModuleId+date], [songModuleId+userId], [songModuleId+songId]',
+			binaryAssets: 'id, kind, createdAt',
+			lyricsSource: 'id, normalizedEnglishTitle, createdAt'
+		});
+
+		this.version(23).stores({
+			questions: 'id, type, *tags, *modules, metadata.createdAt',
+			modules: 'id, type, *tags, createdAt, visible, locked',
+			attempts: 'id, moduleId, type, startedAt, syncStatus',
+			integrityEvents: 'id, attemptId, type, timestamp',
+			tags: 'id, name',
+			semanticOntologyTags: 'id, kind, parentId, name, updatedAt',
+			semanticEmbeddings: 'id, [scope+scopeId], scope, scopeId, modelId, createdAt',
+			questionSemanticAnalyses: 'id, questionId, createdAt, [questionId+analysisVersion], [questionId+modelId], source',
+			questionSemanticOverrides: 'id, questionId, updatedAt, baseAnalysisId, [questionId+updatedAt]',
+			settings: 'id',
+			dailyStats: 'id, date, moduleId, [date+moduleId], [moduleId+date], moduleType, createdAt',
+			users: 'id, username',
+			globalGlossary: 'id, normalizedWord, word',
+			intelligenceSignals: 'id, type, questionId, moduleId, [type+moduleId], [questionId+type]',
+			reviewInteractions: 'id, attemptId, moduleId, userId, questionId, timestamp, [attemptId+questionId], [moduleId+userId]',
+			errorReports: 'id, status, createdAt, updatedAt, moduleId, questionId, questionCode, reporterUserId, [status+createdAt]',
+			songs: 'id, visible, createdAt, updatedAt',
+			songModules: 'id, visible, createdAt, updatedAt',
+			songListeningEvents: 'id, date, timestamp, songModuleId, userId, songId, [date+songModuleId], [songModuleId+date], [songModuleId+userId], [songModuleId+songId]',
+			binaryAssets: 'id, kind, createdAt',
+			lyricsSource: 'id, normalizedEnglishTitle, createdAt, writer'
+		});
+	}
 }
 
 function stemWord(word: string): string {

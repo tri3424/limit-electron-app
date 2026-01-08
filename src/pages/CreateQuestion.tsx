@@ -16,14 +16,6 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { toast } from 'sonner';
 import RichTextEditor from '@/components/RichTextEditor';
 import TypingAnswerMathInput from '@/components/TypingAnswerMathInput';
-import {
-	Dialog,
-	DialogContent,
-	DialogDescription,
-	DialogFooter,
-	DialogHeader,
-	DialogTitle,
-} from '@/components/ui/dialog';
 import { invalidateTagModelCache, suggestTagsAdvanced } from '@/lib/tagLearning';
 import { syncQuestionGlossary } from '@/lib/glossary';
 import { enqueueSemanticAnalysis, startSemanticBackgroundQueue, stopSemanticBackgroundQueue } from '@/lib/semanticQueue';
@@ -77,31 +69,6 @@ async function tryFetchAsBlob(url: string): Promise<{ blob: Blob; mimeType: stri
 	}
 }
 
-type ImportedOcrQuestion = {
-	pageIndex: number;
-	text: string;
-	questionImages: string[];
-	options: Record<string, { text: string; images: string[] }>;
-};
-
-function flattenOcrQuestions(res: any): ImportedOcrQuestion[] {
-	const out: ImportedOcrQuestion[] = [];
-	const pages = Array.isArray(res?.pages) ? res.pages : [];
-	for (const p of pages) {
-		const pageIndex = Number.isFinite(p?.pageIndex) ? p.pageIndex : 0;
-		const qs = Array.isArray(p?.questions) ? p.questions : [];
-		for (const q of qs) {
-			out.push({
-				pageIndex,
-				text: String(q?.text || ''),
-				questionImages: Array.isArray(q?.questionImages) ? q.questionImages.filter(Boolean) : [],
-				options: q?.options && typeof q.options === 'object' ? q.options : {},
-			});
-		}
-	}
-	return out;
-}
-
 function classicDifficultyToLevel(value?: 'easy' | 'medium' | 'hard'): number {
   if (value === 'easy') return 3;
   if (value === 'hard') return 10;
@@ -112,11 +79,6 @@ export default function CreateQuestion() {
   const navigate = useNavigate();
   const { id } = useParams();
   const isEditing = !!id;
-
-  const [importConfigOpen, setImportConfigOpen] = useState(false);
-  const [importPdfFilePath, setImportPdfFilePath] = useState<string>('');
-  const [importRangeText, setImportRangeText] = useState('');
-  const [isImportingPdf, setIsImportingPdf] = useState(false);
 
 	useEffect(() => {
 		// The semantic background queue can be CPU-heavy (offline analysis across many questions)
@@ -166,9 +128,6 @@ export default function CreateQuestion() {
   const [difficultySpectrum, setDifficultySpectrum] = useState<
     { minLevel: number; maxLevel: number; recommendedLevel: number; sampleCount: number; source: 'corpus' | 'heuristic' } | null
   >(null);
-	const [importPreviewOpen, setImportPreviewOpen] = useState(false);
-	const [importedOcrQuestions, setImportedOcrQuestions] = useState<ImportedOcrQuestion[]>([]);
-	const [selectedImportedIndexes, setSelectedImportedIndexes] = useState<Record<number, boolean>>({});
   const settings = useLiveQuery(() => db.settings.get('1'), [], null as any);
   const aiOrchestrator = settings?.aiOrchestrator;
   const levelOptions = useMemo(() => mapLevelToSelectOptions(), []);
@@ -641,236 +600,7 @@ export default function CreateQuestion() {
             {isEditing ? 'Update question details' : 'Add a new question to your bank'}
           </p>
         </div>
-			<div className="ml-auto">
-				<Button
-					type="button"
-					variant="outline"
-					onClick={() => {
-						if (!window.ocr?.pickPdf || !window.ocr?.importExamPdf) {
-							toast.error('PDF import is only available in the desktop (Electron) app.');
-							return;
-						}
-						void (async () => {
-							try {
-								const picked = await window.ocr!.pickPdf!();
-								if (picked?.canceled || !picked?.pdfFilePath) return;
-								setImportPdfFilePath(picked.pdfFilePath);
-								setImportRangeText('');
-								setImportConfigOpen(true);
-							} catch (e) {
-								toast.error('Failed to open PDF picker');
-								console.error(e);
-							}
-						})();
-					}}
-				>
-					Import PDF
-				</Button>
-			</div>
       </div>
-
-			<Dialog open={importConfigOpen} onOpenChange={setImportConfigOpen}>
-				<DialogContent className="max-w-lg">
-					<DialogHeader>
-						<DialogTitle>Import PDF</DialogTitle>
-						<DialogDescription>
-							Choose a page range (optional), then click Import to extract questions from the selected PDF.
-						</DialogDescription>
-					</DialogHeader>
-					<div className="space-y-3">
-						<div className="space-y-1">
-							<Label>Selected PDF</Label>
-							<div className="text-xs text-muted-foreground break-all">{importPdfFilePath || '—'}</div>
-						</div>
-						<div className="space-y-1">
-							<Label>Page range (optional)</Label>
-							<Input
-								value={importRangeText}
-								onChange={(e) => setImportRangeText(e.target.value)}
-								placeholder="Examples: 1 or 1-3 (leave blank for all pages)"
-							/>
-						</div>
-					</div>
-					<DialogFooter>
-						<Button type="button" variant="outline" onClick={() => setImportConfigOpen(false)} disabled={isImportingPdf}>
-							Cancel
-						</Button>
-						<Button
-							type="button"
-							disabled={isImportingPdf}
-							onClick={async () => {
-							try {
-								if (!window.ocr?.importExamPdf) {
-									toast.error('PDF import is only available in the desktop (Electron) app.');
-									return;
-								}
-								if (!importPdfFilePath) {
-									toast.error('No PDF selected');
-									return;
-								}
-								let pageStart: number | undefined;
-								let pageEnd: number | undefined;
-								const raw = importRangeText.trim();
-								if (raw.length) {
-									const m = raw.match(/^\s*(\d+)\s*(?:-\s*(\d+)\s*)?$/);
-									if (!m) {
-										toast.error('Invalid page range. Use 1 or 1-3');
-										return;
-									}
-									pageStart = Number(m[1]);
-									pageEnd = m[2] ? Number(m[2]) : Number(m[1]);
-								}
-								setIsImportingPdf(true);
-								const res = await window.ocr.importExamPdf({
-									dpi: 300,
-									pageStart,
-									pageEnd,
-									pdfFilePath: importPdfFilePath,
-								});
-								const flattened = flattenOcrQuestions(res);
-								if (!flattened.length) {
-									toast.error('No questions detected');
-									return;
-								}
-								setImportedOcrQuestions(flattened);
-								setSelectedImportedIndexes(
-									Object.fromEntries(flattened.map((_, idx) => [idx, true])) as Record<number, boolean>
-								);
-								setImportConfigOpen(false);
-								setImportPreviewOpen(true);
-							} catch (e) {
-								toast.error('Import failed');
-								console.error(e);
-							} finally {
-								setIsImportingPdf(false);
-							}
-						}}
-						>
-							{isImportingPdf ? 'Importing…' : 'Import'}
-						</Button>
-					</DialogFooter>
-				</DialogContent>
-			</Dialog>
-
-			<Dialog open={importPreviewOpen} onOpenChange={setImportPreviewOpen}>
-				<DialogContent className="max-w-4xl">
-					<DialogHeader>
-						<DialogTitle>Import Questions from PDF</DialogTitle>
-						<DialogDescription>Select which extracted questions to insert into your question bank.</DialogDescription>
-					</DialogHeader>
-					<div className="max-h-[70vh] overflow-auto space-y-4 pr-2">
-						{importedOcrQuestions.map((q, idx) => {
-							const checked = !!selectedImportedIndexes[idx];
-							const optionKeys = Object.keys(q.options || {});
-							return (
-								<Card key={`${q.pageIndex}-${idx}`} className="p-4 space-y-3">
-									<div className="flex items-start gap-3">
-										<Checkbox
-											checked={checked}
-											onCheckedChange={(v) => {
-												setSelectedImportedIndexes((prev) => ({ ...prev, [idx]: !!v }));
-											}}
-										/>
-										<div className="flex-1">
-											<div className="text-sm text-muted-foreground">Page {q.pageIndex + 1} • Extracted #{idx + 1}</div>
-											<div className="mt-2 whitespace-pre-wrap text-sm">{q.text?.slice(0, 800) || ''}</div>
-											{Array.isArray(q.questionImages) && q.questionImages.length > 0 ? (
-												<div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-3">
-													{q.questionImages.map((src, i2) => (
-														<img key={`${src}-${i2}`} src={src} className="max-w-full rounded-md border" loading="lazy" />
-													))}
-											</div>
-										) : null}
-										{optionKeys.length ? (
-											<div className="mt-3 space-y-2">
-												<div className="text-sm font-medium">Options</div>
-												{optionKeys.map((k) => (
-													<div key={k} className="text-sm">
-														<div className="font-medium">{k}</div>
-														<div className="whitespace-pre-wrap">{q.options[k]?.text || ''}</div>
-														{Array.isArray(q.options[k]?.images) && q.options[k].images.length > 0 ? (
-															<div className="mt-2 grid grid-cols-1 md:grid-cols-2 gap-3">
-																{q.options[k].images.map((src, oi) => (
-																	<img key={`${src}-${oi}`} src={src} className="max-w-full rounded-md border" loading="lazy" />
-																))}
-															</div>
-														) : null}
-													</div>
-												))}
-											</div>
-										) : null}
-									</div>
-								</div>
-							</Card>
-							);
-						})}
-					</div>
-					<DialogFooter>
-						<Button
-							variant="outline"
-							onClick={() => {
-								setSelectedImportedIndexes(Object.fromEntries(importedOcrQuestions.map((_, idx) => [idx, false])) as any);
-							}}
-						>
-							Select None
-						</Button>
-						<Button
-							variant="outline"
-							onClick={() => {
-								setSelectedImportedIndexes(Object.fromEntries(importedOcrQuestions.map((_, idx) => [idx, true])) as any);
-							}}
-						>
-							Select All
-						</Button>
-						<Button
-							onClick={async () => {
-							try {
-								const now = Date.now();
-								const chosen = importedOcrQuestions
-									.map((q, idx) => ({ q, idx }))
-									.filter(({ idx }) => !!selectedImportedIndexes[idx])
-									.map(({ q }) => q);
-								if (!chosen.length) {
-									toast.error('Select at least one question');
-									return;
-								}
-
-								const toInsert: Question[] = chosen.map((q) => {
-									const qid = uuidv4();
-									const optionKeys = Object.keys(q.options || {});
-									const opts = optionKeys.map((k) => ({
-										id: uuidv4(),
-										text: String(q.options[k]?.text || ''),
-										images: Array.isArray(q.options[k]?.images) ? q.options[k].images.filter(Boolean) : [],
-									}));
-									return {
-										id: qid,
-										code: `Q-${qid.slice(0, 8)}`,
-										text: String(q.text || '').trim(),
-										type: 'mcq',
-										questionImages: Array.isArray(q.questionImages) ? q.questionImages.filter(Boolean) : [],
-										options: opts,
-										correctAnswers: [],
-										tags: [],
-										modules: [],
-										metadata: { createdAt: now, updatedAt: now },
-									};
-								});
-
-								await db.questions.bulkAdd(toInsert);
-								toast.success(`Inserted ${toInsert.length} question${toInsert.length > 1 ? 's' : ''}`);
-								setImportPreviewOpen(false);
-							} catch (e) {
-								toast.error('Failed to insert questions');
-								console.error(e);
-							}
-						}}
-						>
-							Insert Selected
-						</Button>
-					</DialogFooter>
-				</DialogContent>
-			</Dialog>
 
       {/* Form */}
       <div className="pr-2">

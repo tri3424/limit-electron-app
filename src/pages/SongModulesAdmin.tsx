@@ -44,6 +44,23 @@ export default function SongModulesAdmin() {
 	const [listeningDates, setListeningDates] = useState<string[]>([]);
 	const [listeningSelectedDate, setListeningSelectedDate] = useState<string | null>(() => new Date().toISOString().slice(0, 10));
 	const [listeningUserIdFilter, setListeningUserIdFilter] = useState<string | 'all'>('all');
+	const [listeningDetailsOpen, setListeningDetailsOpen] = useState(false);
+	const [listeningDetails, setListeningDetails] = useState<
+		| null
+		| {
+			userId: string;
+			username: string;
+			songId: string;
+			songTitle: string;
+			listenedMs: number;
+			timeInSongMs: number;
+			enteredAtTs?: number;
+			exitedAtTs?: number;
+			songDurationSec?: number;
+			lyricsScrollable: boolean;
+			didScrollLyrics: boolean;
+		}
+	>(null);
 
 	const [deleteId, setDeleteId] = useState<string | null>(null);
 	const [previewSong, setPreviewSong] = useState<Song | null>(null);
@@ -79,6 +96,10 @@ export default function SongModulesAdmin() {
 		});
 	}, [songSearch, songs]);
 
+	const createSongsVisible = useMemo(() => {
+		return filteredCreateSongs.slice(0, 250);
+	}, [filteredCreateSongs]);
+
 	const filteredEditSongs = useMemo(() => {
 		const q = editSongSearch.trim().toLowerCase();
 		if (!q) return songs ?? [];
@@ -86,6 +107,10 @@ export default function SongModulesAdmin() {
 			return (s.title || '').toLowerCase().includes(q) || (s.singer || '').toLowerCase().includes(q);
 		});
 	}, [editSongSearch, songs]);
+
+	const editSongsVisible = useMemo(() => {
+		return filteredEditSongs.slice(0, 250);
+	}, [filteredEditSongs]);
 
 	const usersById = useMemo(() => new Map((users ?? []).map((u) => [u.id, u])), [users]);
 	const songsById = useMemo(() => new Map((songs ?? []).map((s) => [s.id, s])), [songs]);
@@ -100,11 +125,34 @@ export default function SongModulesAdmin() {
 	);
 
 	const listeningUserOptions = useMemo(() => {
-		if (!listeningEvents) return [];
-		const ids = Array.from(new Set(listeningEvents.map((e) => e.userId).filter((x): x is string => !!x)));
-		const resolved = ids.map((id) => usersById.get(id)).filter(Boolean) as User[];
-		return resolved.sort((a, b) => a.username.localeCompare(b.username));
-	}, [listeningEvents, usersById]);
+		if (!listeningEvents || !listeningSelectedDate) return [] as Array<{ value: string; label: string }>;
+		const inDay = listeningEvents.filter((e) => e.date === listeningSelectedDate);
+		const optionsMap = new Map<string, string>();
+		for (const e of inDay) {
+			const id = e.userId;
+			if (id) {
+				const label = e.username || usersById.get(id)?.username || id;
+				optionsMap.set(id, label);
+				continue;
+			}
+			const uname = e.username;
+			if (uname) {
+				optionsMap.set(`username:${uname}`, uname);
+			}
+		}
+		return Array.from(optionsMap.entries())
+			.map(([value, label]) => ({ value, label }))
+			.sort((a, b) => a.label.localeCompare(b.label));
+	}, [listeningEvents, listeningSelectedDate, usersById]);
+
+	useEffect(() => {
+		if (listeningUserIdFilter === 'all') return;
+		if (!listeningSelectedDate) return;
+		const allowed = new Set(listeningUserOptions.map((u) => u.value));
+		if (!allowed.has(listeningUserIdFilter)) {
+			setListeningUserIdFilter('all');
+		}
+	}, [listeningSelectedDate, listeningUserOptions, listeningUserIdFilter]);
 
 	useEffect(() => {
 		if (!listeningEvents) return;
@@ -112,11 +160,76 @@ export default function SongModulesAdmin() {
 		setListeningDates(unique.slice(-60));
 	}, [listeningEvents]);
 
+	const formatMs = (ms: number) => {
+		const sec = Math.max(0, Math.floor(ms / 1000));
+		const m = Math.floor(sec / 60);
+		const s = sec % 60;
+		return `${m}:${String(s).padStart(2, '0')}`;
+	};
+
+	const formatSec = (sec?: number) => {
+		if (sec == null) return '—';
+		const s = Math.max(0, Math.floor(sec));
+		const m = Math.floor(s / 60);
+		const r = s % 60;
+		return `${m}:${String(r).padStart(2, '0')}`;
+	};
+
+	const formatTime = (ts?: number) => {
+		if (!ts) return '—';
+		try {
+			return new Date(ts).toLocaleString([], {
+				year: 'numeric',
+				month: '2-digit',
+				day: '2-digit',
+				hour: '2-digit',
+				minute: '2-digit',
+				second: '2-digit',
+			});
+		} catch {
+			return '—';
+		}
+	};
+
 	const listeningRows = useMemo(() => {
-		if (!listeningEvents || !listeningSelectedDate || !listeningModuleId) return [] as Array<{ userId: string; username: string; songId: string; songTitle: string; listenedMs: number }>;
+		if (!listeningEvents || !listeningSelectedDate || !listeningModuleId) {
+			return [] as Array<{
+				userId: string;
+				username: string;
+				songId: string;
+				songTitle: string;
+				listenedMs: number;
+				timeInSongMs: number;
+				enteredAtTs?: number;
+				exitedAtTs?: number;
+				songDurationSec?: number;
+				lyricsScrollable: boolean;
+				didScrollLyrics: boolean;
+			}>;
+		}
 		const filtered = listeningEvents.filter((e) => e.date === listeningSelectedDate);
-		const scoped = listeningUserIdFilter === 'all' ? filtered : filtered.filter((e) => e.userId === listeningUserIdFilter);
-		const map = new Map<string, { userId: string; username: string; songId: string; songTitle: string; listenedMs: number }>();
+		const scoped =
+			listeningUserIdFilter === 'all'
+				? filtered
+				: listeningUserIdFilter.startsWith('username:')
+					? filtered.filter((e) => e.username === listeningUserIdFilter.slice('username:'.length))
+					: filtered.filter((e) => e.userId === listeningUserIdFilter);
+		const map = new Map<
+			string,
+			{
+				userId: string;
+				username: string;
+				songId: string;
+				songTitle: string;
+				listenedMs: number;
+				timeInSongMs: number;
+				enteredAtTs?: number;
+				exitedAtTs?: number;
+				songDurationSec?: number;
+				lyricsScrollable: boolean;
+				didScrollLyrics: boolean;
+			}
+		>();
 		for (const e of scoped) {
 			const userId = e.userId || 'unknown';
 			const username = e.username || usersById.get(userId)?.username || 'Unknown';
@@ -124,9 +237,42 @@ export default function SongModulesAdmin() {
 			const songTitle = e.songTitle || song?.title || 'Unknown';
 			const key = `${userId}__${e.songId}`;
 			const prev = map.get(key);
-			const addMs = e.listenedMs ?? 0;
-			if (prev) prev.listenedMs += addMs;
-			else map.set(key, { userId, username, songId: e.songId, songTitle, listenedMs: addMs });
+			const addListenedMs = e.listenedMs ?? 0;
+			const addTimeInSongMs = e.timeInSongMs ?? 0;
+			const durationSec = e.songDurationSec;
+			const lyricsScrollable = e.lyricsScrollable === true;
+			const didScrollLyrics = e.didScrollLyrics === true;
+			const enteredAtTs = e.eventType === 'view_start' ? e.timestamp : undefined;
+			const exitedAtTs = e.eventType === 'view_end' ? e.timestamp : undefined;
+			if (prev) {
+				prev.listenedMs += addListenedMs;
+				prev.timeInSongMs += addTimeInSongMs;
+				if (enteredAtTs != null) {
+					prev.enteredAtTs = prev.enteredAtTs == null ? enteredAtTs : Math.min(prev.enteredAtTs, enteredAtTs);
+				}
+				if (exitedAtTs != null) {
+					prev.exitedAtTs = prev.exitedAtTs == null ? exitedAtTs : Math.max(prev.exitedAtTs, exitedAtTs);
+				}
+				if (typeof durationSec === 'number') {
+					prev.songDurationSec = Math.max(prev.songDurationSec ?? 0, durationSec);
+				}
+				prev.lyricsScrollable = prev.lyricsScrollable || lyricsScrollable;
+				prev.didScrollLyrics = prev.didScrollLyrics || didScrollLyrics;
+			} else {
+				map.set(key, {
+					userId,
+					username,
+					songId: e.songId,
+					songTitle,
+					listenedMs: addListenedMs,
+					timeInSongMs: addTimeInSongMs,
+					enteredAtTs,
+					exitedAtTs,
+					songDurationSec: typeof durationSec === 'number' ? durationSec : undefined,
+					lyricsScrollable,
+					didScrollLyrics,
+				});
+			}
 		}
 		return Array.from(map.values()).sort((a, b) => a.username.localeCompare(b.username) || a.songTitle.localeCompare(b.songTitle));
 	}, [listeningEvents, listeningModuleId, listeningSelectedDate, listeningUserIdFilter, songsById, usersById]);
@@ -154,10 +300,15 @@ export default function SongModulesAdmin() {
 					<Label>Select songs for this module</Label>
 					<Input value={songSearch} onChange={(e) => setSongSearch(e.target.value)} placeholder="Search songs..." />
 					<div className="max-h-[260px] overflow-y-auto rounded-md border p-2 space-y-1">
+						{filteredCreateSongs.length > createSongsVisible.length && (
+							<div className="text-xs text-muted-foreground px-1">
+								Showing first {createSongsVisible.length} results. Refine your search to find more.
+							</div>
+						)}
 						{(songs ?? []).length === 0 && (
 							<div className="text-sm text-muted-foreground">No songs available. Upload songs first.</div>
 						)}
-						{filteredCreateSongs.map((s) => {
+						{createSongsVisible.map((s) => {
 							const checked = selectedSongIds.includes(s.id);
 							return (
 								<label key={s.id} className="flex items-center justify-between gap-2 rounded-md border px-2 py-1.5 text-sm">
@@ -337,7 +488,12 @@ export default function SongModulesAdmin() {
 							<Label>Select songs for this module</Label>
 							<Input value={editSongSearch} onChange={(e) => setEditSongSearch(e.target.value)} placeholder="Search songs..." />
 							<div className="max-h-[320px] overflow-y-auto rounded-md border p-2 space-y-1">
-								{filteredEditSongs.map((s) => {
+								{filteredEditSongs.length > editSongsVisible.length && (
+									<div className="text-xs text-muted-foreground px-1">
+										Showing first {editSongsVisible.length} results. Refine your search to find more.
+									</div>
+								)}
+								{editSongsVisible.map((s) => {
 									const checked = editSelectedSongIds.includes(s.id);
 									return (
 										<label key={s.id} className="flex items-center justify-between gap-2 rounded-md border px-2 py-1.5 text-sm">
@@ -488,22 +644,20 @@ export default function SongModulesAdmin() {
 										<div className="font-semibold">{listeningSelectedDate ? new Date(listeningSelectedDate).toLocaleDateString() : new Date().toLocaleDateString()}</div>
 									</div>
 									<div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-										{listeningUserOptions.length > 0 && (
-											<div className="flex items-center gap-2">
-												<span>Student:</span>
-												<Select value={listeningUserIdFilter} onValueChange={(v: any) => setListeningUserIdFilter(v)}>
-													<SelectTrigger className="h-8 w-44 text-xs">
-														<SelectValue placeholder="All students" />
-													</SelectTrigger>
-													<SelectContent>
-														<SelectItem value="all">All students</SelectItem>
-														{listeningUserOptions.map((u) => (
-															<SelectItem key={u.id} value={u.id}>{u.username}</SelectItem>
-														))}
-													</SelectContent>
-												</Select>
-											</div>
-										)}
+										<div className="flex items-center gap-2">
+											<span>Student:</span>
+											<Select value={listeningUserIdFilter} onValueChange={(v: any) => setListeningUserIdFilter(v)}>
+												<SelectTrigger className="h-8 w-44 text-xs" disabled={listeningUserOptions.length === 0}>
+													<SelectValue placeholder="All students" />
+												</SelectTrigger>
+												<SelectContent>
+													<SelectItem value="all">All students</SelectItem>
+													{listeningUserOptions.map((u) => (
+														<SelectItem key={u.value} value={u.value}>{u.label}</SelectItem>
+													))}
+												</SelectContent>
+											</Select>
+										</div>
 									</div>
 								</div>
 								<ScrollArea className="h-[55vh] rounded-md">
@@ -511,16 +665,26 @@ export default function SongModulesAdmin() {
 										<div className="rounded-md border overflow-hidden">
 											<div className="grid grid-cols-12 bg-muted px-3 py-2 text-xs font-medium">
 												<div className="col-span-4">Student</div>
-												<div className="col-span-6">Song</div>
-												<div className="col-span-2 text-right">Listened</div>
+												<div className="col-span-5">Song</div>
+												<div className="col-span-1 text-right" title="Time spent on the song screen (even if audio was not playing)">On screen</div>
+												<div className="col-span-2 text-right" title="Estimated time the audio was actually playing">Audio played</div>
 											</div>
 											<div className="divide-y">
 												{listeningRows.map((r) => (
-													<div key={`${r.userId}-${r.songId}`} className="grid grid-cols-12 gap-2 px-3 py-2 text-sm">
+													<button
+														type="button"
+														key={`${r.userId}-${r.songId}`}
+														className="w-full grid grid-cols-12 gap-2 px-3 py-2 text-sm text-left hover:bg-muted/60 bg-transparent border-0 rounded-none appearance-none"
+														onClick={() => {
+															setListeningDetails(r);
+															setListeningDetailsOpen(true);
+														}}
+													>
 														<div className="col-span-4 truncate" title={r.username}>{r.username}</div>
-														<div className="col-span-6 truncate" title={r.songTitle}>{r.songTitle}</div>
-														<div className="col-span-2 text-right text-xs text-muted-foreground tabular-nums">{Math.round(r.listenedMs / 1000)}s</div>
-													</div>
+														<div className="col-span-5 truncate" title={r.songTitle}>{r.songTitle}</div>
+														<div className="col-span-1 text-right text-xs text-muted-foreground tabular-nums">{formatMs(r.timeInSongMs)}</div>
+														<div className="col-span-2 text-right text-xs text-muted-foreground tabular-nums">{formatMs(r.listenedMs)}</div>
+													</button>
 												))}
 											</div>
 										</div>
@@ -533,6 +697,68 @@ export default function SongModulesAdmin() {
 					</div>
 					<DialogFooter>
 						<Button variant="outline" onClick={() => setListeningOpen(false)}>Close</Button>
+					</DialogFooter>
+				</DialogContent>
+			</Dialog>
+
+			<Dialog
+				open={listeningDetailsOpen}
+				onOpenChange={(open) => {
+					setListeningDetailsOpen(open);
+					if (!open) setListeningDetails(null);
+				}}
+			>
+				<DialogContent className="max-w-lg">
+					<DialogHeader>
+						<DialogTitle>Listening details</DialogTitle>
+						<DialogDescription>Per-student details for the selected song/day.</DialogDescription>
+					</DialogHeader>
+					{listeningDetails ? (
+						<div className="space-y-3 text-sm">
+							<div className="space-y-1">
+								<div className="text-xs text-muted-foreground">Student</div>
+								<div className="font-medium">{listeningDetails.username}</div>
+							</div>
+							<div className="space-y-1">
+								<div className="text-xs text-muted-foreground">Song</div>
+								<div className="font-medium">{listeningDetails.songTitle}</div>
+							</div>
+							<div className="grid grid-cols-2 gap-3">
+								<div className="rounded-md border p-3">
+									<div className="text-xs text-muted-foreground">Song duration</div>
+									<div className="font-semibold tabular-nums">{formatSec(listeningDetails.songDurationSec)}</div>
+								</div>
+								<div className="rounded-md border p-3">
+									<div className="text-xs text-muted-foreground">Audio played</div>
+									<div className="font-semibold tabular-nums">{formatMs(listeningDetails.listenedMs)}</div>
+								</div>
+								<div className="rounded-md border p-3">
+									<div className="text-xs text-muted-foreground">Time on song screen</div>
+									<div className="font-semibold tabular-nums">{formatMs(listeningDetails.timeInSongMs)}</div>
+								</div>
+								<div className="rounded-md border p-3">
+									<div className="text-xs text-muted-foreground">Entered at</div>
+									<div className="font-semibold tabular-nums">{formatTime(listeningDetails.enteredAtTs)}</div>
+								</div>
+								<div className="rounded-md border p-3">
+									<div className="text-xs text-muted-foreground">Exited at</div>
+									<div className="font-semibold tabular-nums">{formatTime(listeningDetails.exitedAtTs)}</div>
+								</div>
+								<div className="rounded-md border p-3">
+									<div className="text-xs text-muted-foreground">Lyrics scrolling</div>
+									<div className="font-semibold">
+										{listeningDetails.lyricsScrollable ? (
+											listeningDetails.didScrollLyrics ? 'Scrollable (scrolled)' : 'Scrollable (not scrolled)'
+										) : (
+											'Not scrollable'
+										)}
+									</div>
+								</div>
+							</div>
+						</div>
+					) : null}
+					<DialogFooter>
+						<Button variant="outline" onClick={() => setListeningDetailsOpen(false)}>Close</Button>
 					</DialogFooter>
 				</DialogContent>
 			</Dialog>

@@ -13,7 +13,6 @@
     "build:dev": "vite build --mode development",
     "lint": "eslint .",
     "preview": "vite preview",
-    "validate:ocr": "node scripts/setup-ocr-binaries.cjs",
     "electron:dev": "concurrently \"vite\" \"wait-on http://localhost:8080 && electron .\"",
     "electron:build": "vite build && electron-builder",
     "electron:build:win": "vite build && electron-builder --win --x64"
@@ -126,21 +125,13 @@
     "files": [
       "app-dist/**/*",
       "electron/**/*",
-      "native/**/*",
       "package.json",
       "node_modules/**/*"
-    ],
-    "asarUnpack": [
-      "native/**"
     ],
     "extraResources": [
       {
         "from": "build/icon.ico",
         "to": "icon.ico"
-      },
-      {
-        "from": "native/offline-ai",
-        "to": "native/offline-ai"
       }
     ],
     "win": {

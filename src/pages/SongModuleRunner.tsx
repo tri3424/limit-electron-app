@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { useNavigate, useParams } from 'react-router-dom';
 import { v4 as uuidv4 } from 'uuid';
@@ -33,7 +33,15 @@ export default function SongModuleRunner() {
 	const [knownPositionSec, setKnownPositionSec] = useState<number>(0);
 	const [isListening, setIsListening] = useState(false);
 	const [segmentStartedAt, setSegmentStartedAt] = useState<number | null>(null);
+	const [lastListenReportedAt, setLastListenReportedAt] = useState<number | null>(null);
 	const [segmentSongId, setSegmentSongId] = useState<string | null>(null);
+	const segmentSongIdRef = useRef<string | null>(null);
+	const lastListenReportedAtRef = useRef<number | null>(null);
+	const [viewStartedAt, setViewStartedAt] = useState<number | null>(null);
+	const [viewSongId, setViewSongId] = useState<string | null>(null);
+	const [lyricsScrollable, setLyricsScrollable] = useState<boolean>(false);
+	const [didScrollLyrics, setDidScrollLyrics] = useState<boolean>(false);
+	const lyricsRef = useRef<HTMLDivElement | null>(null);
 
 	useEffect(() => {
 		setSelectedSongId(null);
@@ -66,10 +74,8 @@ export default function SongModuleRunner() {
 
 	const selectedSong = useMemo(() => {
 		if (!filteredSongs.length) return null;
-		if (selectedSongId) {
-			return filteredSongs.find((s) => s.id === selectedSongId) ?? filteredSongs[0];
-		}
-		return filteredSongs[0];
+		if (!selectedSongId) return null;
+		return filteredSongs.find((s) => s.id === selectedSongId) ?? null;
 	}, [filteredSongs, selectedSongId]);
 
 	const openReportDialogWithCapture = async () => {
@@ -89,10 +95,13 @@ export default function SongModuleRunner() {
 		}
 	};
 
-	const flushListeningSegment = async (eventType: SongListeningEvent['eventType']) => {
-		if (!module || !segmentStartedAt || !segmentSongId) return;
+	const recordListenDelta = async (eventType: SongListeningEvent['eventType']) => {
+		const songId = segmentSongIdRef.current;
+		const lastAt = lastListenReportedAtRef.current;
+		if (!module || !songId || !lastAt) return;
 		const now = Date.now();
-		const listenedMs = Math.max(0, now - segmentStartedAt);
+		const listenedMs = Math.max(0, now - lastAt);
+		if (listenedMs <= 0) return;
 		try {
 			await db.songListeningEvents.add({
 				id: uuidv4(),
@@ -101,8 +110,8 @@ export default function SongModuleRunner() {
 				userId: user?.id,
 				username: user?.username,
 				songModuleId: module.id,
-				songId: segmentSongId,
-				songTitle: songs?.find((s) => s.id === segmentSongId)?.title,
+				songId,
+				songTitle: songs?.find((s) => s.id === songId)?.title,
 				eventType,
 				positionSec: knownPositionSec,
 				songDurationSec: knownSongDurationSec,
@@ -111,9 +120,73 @@ export default function SongModuleRunner() {
 		} catch (e) {
 			console.error('Failed to save song listening event', e);
 		}
+		lastListenReportedAtRef.current = now;
+		setLastListenReportedAt(now);
+	};
+
+	const flushListeningSegment = async (eventType: SongListeningEvent['eventType']) => {
+		if (!module || !segmentSongIdRef.current) return;
+		await recordListenDelta(eventType);
 		setSegmentStartedAt(null);
+		lastListenReportedAtRef.current = null;
+		setLastListenReportedAt(null);
+		segmentSongIdRef.current = null;
 		setIsListening(false);
 	};
+
+	useEffect(() => {
+		if (!isListening) return;
+		const id = window.setInterval(() => {
+			void recordListenDelta('play');
+		}, 1000);
+		return () => window.clearInterval(id);
+	}, [isListening, recordListenDelta]);
+
+	async function flushViewSegment() {
+		if (!module || !viewStartedAt || !viewSongId) return;
+		const now = Date.now();
+		const timeInSongMs = Math.max(0, now - viewStartedAt);
+		try {
+			await db.songListeningEvents.add({
+				id: uuidv4(),
+				date: new Date(now).toISOString().slice(0, 10),
+				timestamp: now,
+				userId: user?.id,
+				username: user?.username,
+				songModuleId: module.id,
+				songId: viewSongId,
+				songTitle: songs?.find((s) => s.id === viewSongId)?.title,
+				eventType: 'view_end',
+				songDurationSec: knownSongDurationSec,
+				timeInSongMs,
+				lyricsScrollable,
+				didScrollLyrics,
+			});
+		} catch (e) {
+			console.error('Failed to save song view event', e);
+		}
+		setViewStartedAt(null);
+		setViewSongId(null);
+	}
+
+	useEffect(() => {
+		const onVisibility = () => {
+			if (document.hidden) {
+				if (isListening) void flushListeningSegment('pause');
+				void flushViewSegment();
+			}
+		};
+		const onBeforeUnload = () => {
+			if (isListening) void flushListeningSegment('pause');
+			void flushViewSegment();
+		};
+		document.addEventListener('visibilitychange', onVisibility);
+		window.addEventListener('beforeunload', onBeforeUnload);
+		return () => {
+			document.removeEventListener('visibilitychange', onVisibility);
+			window.removeEventListener('beforeunload', onBeforeUnload);
+		};
+	}, [isListening, flushListeningSegment]);
 
 	useEffect(() => {
 		// If the user switches songs while one is playing, close the previous segment.
@@ -121,10 +194,55 @@ export default function SongModuleRunner() {
 		if (segmentSongId && selectedSong.id !== segmentSongId && isListening) {
 			void flushListeningSegment('switch');
 		}
+		if (viewSongId && selectedSong.id !== viewSongId) {
+			void flushViewSegment();
+		}
+		try {
+			const now = Date.now();
+			void db.songListeningEvents.add({
+				id: uuidv4(),
+				date: new Date(now).toISOString().slice(0, 10),
+				timestamp: now,
+				userId: user?.id,
+				username: user?.username,
+				songModuleId: module.id,
+				songId: selectedSong.id,
+				songTitle: selectedSong.title,
+				eventType: 'view_start',
+				songDurationSec: knownSongDurationSec,
+			});
+		} catch (e) {
+			console.error('Failed to save song view start event', e);
+		}
+		setViewSongId(selectedSong.id);
+		setViewStartedAt(Date.now());
+		setDidScrollLyrics(false);
+		setLyricsScrollable(false);
+		segmentSongIdRef.current = selectedSong.id;
 		setSegmentSongId(selectedSong.id);
 		setKnownPositionSec(0);
 		setKnownSongDurationSec(undefined);
 	}, [selectedSong?.id]);
+
+	useEffect(() => {
+		if (!selectedSong) return;
+		const el = lyricsRef.current;
+		if (!el) return;
+		const update = () => {
+			setLyricsScrollable(el.scrollHeight > el.clientHeight + 2);
+		};
+		update();
+		const ro = new ResizeObserver(() => update());
+		ro.observe(el);
+		return () => ro.disconnect();
+	}, [selectedSong?.id]);
+
+	useEffect(() => {
+		return () => {
+			if (isListening) void flushListeningSegment('pause');
+			void flushViewSegment();
+		};
+	}, [isListening, lastListenReportedAt, segmentSongId, viewStartedAt, viewSongId, lyricsScrollable, didScrollLyrics]);
 
 	const submitErrorReport = async () => {
 		if (!reportMessage.trim()) {
@@ -240,7 +358,7 @@ export default function SongModuleRunner() {
 
 				<Card className="p-4 lg:col-span-2">
 					{!selectedSong ? (
-						<div className="text-sm text-muted-foreground">No songs in this module.</div>
+						<div className="text-sm text-muted-foreground">Select a song to start.</div>
 					) : (
 						<div className="space-y-4">
 							<div>
@@ -255,15 +373,17 @@ export default function SongModuleRunner() {
 
 							<AudioPlayer
 								src={selectedSong.audioFileUrl}
-								title={selectedSong.title}
 								showVolumeControls={false}
 								onLoadedMetadata={({ duration }) => setKnownSongDurationSec(duration)}
 								onTimeUpdate={({ currentTime }) => setKnownPositionSec(currentTime)}
 								onPlay={() => {
 									if (!module || !selectedSong) return;
+									segmentSongIdRef.current = selectedSong.id;
 									setIsListening(true);
 									setSegmentSongId(selectedSong.id);
 									setSegmentStartedAt(Date.now());
+									lastListenReportedAtRef.current = Date.now();
+									setLastListenReportedAt(lastListenReportedAtRef.current);
 								}}
 								onPause={() => {
 									void flushListeningSegment('pause');
@@ -275,7 +395,11 @@ export default function SongModuleRunner() {
 
 							<div>
 								<div className="text-sm font-semibold mb-2">Lyrics</div>
-								<div className="whitespace-pre-wrap border rounded-md bg-muted/30 p-4 text-lg md:text-xl leading-relaxed max-h-[340px] overflow-y-auto overflow-x-hidden">
+								<div
+									ref={lyricsRef}
+									className="whitespace-pre-wrap border rounded-md bg-muted/30 p-4 text-lg md:text-xl leading-relaxed max-h-[340px] overflow-y-auto overflow-x-hidden"
+									onScroll={() => setDidScrollLyrics(true)}
+								>
 									{selectedSong.lyrics}
 								</div>
 							</div>
