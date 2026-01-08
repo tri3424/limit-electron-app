@@ -45,14 +45,8 @@ function resolveBundledFile(...segments) {
   const appPath = app.getAppPath();
   const isNativeAsset = segments && segments[0] === 'native';
   if (app.isPackaged && isNativeAsset) {
-    // Prefer unpacked location for native assets/binaries.
-    // Executables cannot be spawned from inside app.asar.
-    candidates.push(path.join(process.resourcesPath, 'app.asar.unpacked', ...segments));
-
-		// If we ship binaries via electron-builder "extraResources", they will live under:
-		// <resources>/native/**
-		// This path is outside app.asar and is safe to spawn from.
 		candidates.push(path.join(process.resourcesPath, ...segments));
+		candidates.push(path.join(process.resourcesPath, 'app.asar.unpacked', ...segments));
   }
 
   candidates.push(path.join(appPath, ...segments));
@@ -73,7 +67,29 @@ function sha1(input) {
 	return crypto.createHash('sha1').update(String(input)).digest('hex');
 }
 
+function ensureWinPopplerDeps(exePath) {
+	if (process.platform !== 'win32') return;
+	const base = path.basename(exePath).toLowerCase();
+	if (base !== 'pdftoppm.exe') return;
+	const exeDir = path.dirname(exePath);
+	const required = ['poppler.dll', 'libstdc++-6.dll', 'libgcc_s_seh-1.dll', 'libwinpthread-1.dll'];
+	const missing = required.filter((n) => !fs.existsSync(path.join(exeDir, n)));
+	if (missing.length) {
+		throw new Error(
+			[
+				'Missing required Poppler DLLs next to pdftoppm.exe:',
+				...missing.map((m) => `- ${m}`),
+				'',
+				`exeDir=${exeDir}`,
+				'',
+				'Fix: ensure native/offline-ai/windows-x64 ships with all DLLs and rebuild the Windows installer (GitHub Actions on windows-latest recommended).',
+			].join('\n')
+		);
+	}
+}
+
 function runBinaryOrThrow(exePath, args, opts) {
+	ensureWinPopplerDeps(exePath);
 	const exeDir = path.dirname(exePath);
 	const baseEnv = (opts && opts.env) ? opts.env : process.env;
 	const nextEnv = {
