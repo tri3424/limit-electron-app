@@ -20,6 +20,7 @@ type Props = {
 	clipStartMs?: number;
 	clipEndMs?: number;
 	hideSeekBar?: boolean;
+	hideTimeDisplay?: boolean;
 	onEnded?: () => void;
 	onPlay?: () => void;
 	onPause?: () => void;
@@ -35,6 +36,7 @@ export default function AudioPlayer({
 	clipStartMs,
 	clipEndMs,
 	hideSeekBar = false,
+	hideTimeDisplay = false,
 	onEnded,
 	onPlay,
 	onPause,
@@ -69,6 +71,14 @@ export default function AudioPlayer({
 		return clipEndMs / 1000;
 	}, [clipEndMs]);
 	const clipActive = typeof clipStartSec === 'number' && typeof clipEndSec === 'number' && clipEndSec > clipStartSec;
+	const clipEndEpsilonSec = 0.005;
+	const clipStopSec = useMemo(() => {
+		if (!clipActive || typeof clipEndSec !== 'number') return undefined;
+		const next = clipEndSec - clipEndEpsilonSec;
+		if (!Number.isFinite(next)) return clipEndSec;
+		if (typeof clipStartSec === 'number' && next <= clipStartSec) return clipEndSec;
+		return Math.max(0, next);
+	}, [clipActive, clipEndSec, clipStartSec]);
 
 	useEffect(() => {
 		const el = audioRef.current;
@@ -92,15 +102,15 @@ export default function AudioPlayer({
 			}
 		};
 		const handleTime = () => {
-			if (clipActive && typeof clipEndSec === 'number' && Number.isFinite(el.currentTime) && el.currentTime >= clipEndSec) {
+			if (clipActive && typeof clipStopSec === 'number' && Number.isFinite(el.currentTime) && el.currentTime >= clipStopSec) {
 				try {
 					el.pause();
-					el.currentTime = clipEndSec;
+					el.currentTime = clipStopSec;
 				} catch {
 					// ignore
 				}
 				setPlaying(false);
-				setCurrentTime(clipEndSec);
+				setCurrentTime(clipStopSec);
 				onEnded?.();
 				return;
 			}
@@ -113,7 +123,7 @@ export default function AudioPlayer({
 					if (typeof clipStartSec === 'number' && Number.isFinite(el.currentTime) && el.currentTime < clipStartSec) {
 						el.currentTime = clipStartSec;
 					}
-					if (typeof clipEndSec === 'number' && Number.isFinite(el.currentTime) && el.currentTime >= clipEndSec) {
+					if (typeof clipStopSec === 'number' && Number.isFinite(el.currentTime) && el.currentTime >= clipStopSec) {
 						el.currentTime = clipStartSec ?? 0;
 					}
 				} catch {
@@ -145,7 +155,7 @@ export default function AudioPlayer({
 			el.removeEventListener("pause", handlePause);
 			el.removeEventListener("ended", handleEnded);
 		};
-	}, [clipActive, clipEndSec, clipStartSec, onEnded, onLoadedMetadata, onPlay, onPause, onTimeUpdate, seeking]);
+	}, [clipActive, clipStartSec, clipStopSec, onEnded, onLoadedMetadata, onPlay, onPause, onTimeUpdate, seeking]);
 
 	useEffect(() => {
 		const el = audioRef.current;
@@ -211,7 +221,7 @@ export default function AudioPlayer({
 							if (el.paused) {
 								if (clipActive) {
 									const next = typeof clipStartSec === 'number' ? clipStartSec : 0;
-									if (!Number.isFinite(el.currentTime) || el.currentTime < next || (typeof clipEndSec === 'number' && el.currentTime >= clipEndSec)) {
+									if (!Number.isFinite(el.currentTime) || el.currentTime < next || (typeof clipStopSec === 'number' && el.currentTime >= clipStopSec)) {
 										el.currentTime = next;
 									}
 								}
@@ -260,9 +270,11 @@ export default function AudioPlayer({
 					</div>
 				)}
 
-				<div className="shrink-0 text-xs tabular-nums text-muted-foreground w-[88px] text-right">
-					{formatTime(effectiveTime)} / {formatTime(effectiveDuration)}
-				</div>
+				{hideTimeDisplay ? null : (
+					<div className="shrink-0 text-xs tabular-nums text-muted-foreground w-[88px] text-right">
+						{formatTime(effectiveTime)} / {formatTime(effectiveDuration)}
+					</div>
+				)}
 			</div>
 
 			{showVolumeControls ? (

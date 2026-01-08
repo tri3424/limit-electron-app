@@ -63,6 +63,65 @@ function parseSrtTimeToMs(value: string): number {
 	return (((hh * 60 + mm) * 60 + ss) * 1000 + ms) | 0;
 }
 
+function parseLrcTimeToMs(value: string): number {
+	const v = value.trim();
+	const m = v.match(/^(\d+):(\d+)(?:[\.:](\d+))?$/);
+	if (!m) return 0;
+	const mm = Number(m[1] || 0);
+	const ss = Number(m[2] || 0);
+	const frac = String(m[3] || '');
+	let ms = 0;
+	if (frac.length === 1) ms = Number(frac) * 100;
+	else if (frac.length === 2) ms = Number(frac) * 10;
+	else if (frac.length >= 3) ms = Number(frac.slice(0, 3));
+	return ((mm * 60 + ss) * 1000 + ms) | 0;
+}
+
+function shouldIgnoreLrcLyricText(text: string): boolean {
+	const t = text.trim();
+	if (!t) return true;
+	const lower = t.toLowerCase();
+	if (/(https?:\/\/|www\.)/.test(lower)) return true;
+	if (lower.includes('lrc generator')) return true;
+	if (lower.includes('lrcgenerator')) return true;
+	if (lower.includes('ailrcgenerator')) return true;
+	if (lower.startsWith('by ') && lower.includes('generator')) return true;
+	return false;
+}
+
+function parseLrc(text: string): Array<{ cueIndex: number; startMs: number; endMs: number; text: string }> {
+	const normalized = text.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+	const lines = normalized.split("\n");
+	const items: Array<{ startMs: number; text: string }> = [];
+
+	for (const rawLine of lines) {
+		const line = rawLine.replace(/^\uFEFF/, '').trimEnd();
+		if (!line.trim()) continue;
+		// Skip metadata tags like [ar:...], [ti:...], [offset:...]
+		if (/^\[[a-zA-Z]+\s*:[^\]]*\]\s*$/.test(line.trim())) continue;
+
+		const timeTags = Array.from(line.matchAll(/\[(\d{1,3}:\d{2}(?:[\.:]\d{1,3})?)\]/g)).map((m) => m[1] || '');
+		if (!timeTags.length) continue;
+		const lyricText = line.replace(/\[(\d{1,3}:\d{2}(?:[\.:]\d{1,3})?)\]/g, '').trim();
+		if (shouldIgnoreLrcLyricText(lyricText)) continue;
+
+		for (const t of timeTags) {
+			items.push({ startMs: Math.max(0, parseLrcTimeToMs(t)), text: lyricText });
+		}
+	}
+
+	items.sort((a, b) => a.startMs - b.startMs);
+	const cues: Array<{ cueIndex: number; startMs: number; endMs: number; text: string }> = [];
+	for (let i = 0; i < items.length; i += 1) {
+		const cur = items[i]!;
+		const next = items[i + 1];
+		const startMs = cur.startMs;
+		const endMs = next ? Math.max(startMs, next.startMs) : startMs + 2500;
+		cues.push({ cueIndex: i, startMs, endMs, text: cur.text });
+	}
+	return cues;
+}
+
 function parseSrt(text: string): Array<{ cueIndex: number; startMs: number; endMs: number; text: string }> {
 	const normalized = text.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
 	const blocks = normalized.split(/\n{2,}/g);
@@ -98,6 +157,26 @@ function parseSrt(text: string): Array<{ cueIndex: number; startMs: number; endM
 
 async function persistSongSrtCues(songId: string, srtText: string) {
 	const parsed = parseSrt(srtText);
+	const now = Date.now();
+	await db.transaction('rw', [db.songSrtCues], async () => {
+		await db.songSrtCues.where('songId').equals(songId).delete();
+		if (!parsed.length) return;
+		const rows: SongSrtCue[] = parsed
+			.map((c, i) => ({
+				id: `${songId}:${i}:${c.cueIndex}:${uuidv4()}`,
+				songId,
+				cueIndex: i,
+				startMs: c.startMs,
+				endMs: c.endMs,
+				text: c.text,
+				createdAt: now,
+			}));
+		await db.songSrtCues.bulkPut(rows);
+	});
+}
+
+async function persistSongTimedLyricsCues(songId: string, timedText: string, format: 'srt' | 'lrc') {
+	const parsed = format === 'lrc' ? parseLrc(timedText) : parseSrt(timedText);
 	const now = Date.now();
 	await db.transaction('rw', [db.songSrtCues], async () => {
 		await db.songSrtCues.where('songId').equals(songId).delete();
@@ -236,6 +315,7 @@ export default function SongsAdmin() {
 	const [audioFile, setAudioFile] = useState<File | null>(null);
 	const [srtFile, setSrtFile] = useState<File | null>(null);
 	const [saving, setSaving] = useState(false);
+	const uploadTimedLyricsInputRef = useRef<HTMLInputElement | null>(null);
 
 	const [deleteTarget, setDeleteTarget] = useState<Song | null>(null);
 	const [deleting, setDeleting] = useState(false);
@@ -248,6 +328,7 @@ export default function SongsAdmin() {
 	const [editAudioFile, setEditAudioFile] = useState<File | null>(null);
 	const [editSrtFile, setEditSrtFile] = useState<File | null>(null);
 	const [editing, setEditing] = useState(false);
+	const editTimedLyricsInputRef = useRef<HTMLInputElement | null>(null);
 
 	const [duplicateDialogOpen, setDuplicateDialogOpen] = useState(false);
 	const [duplicateIncomingTitle, setDuplicateIncomingTitle] = useState('');
@@ -297,13 +378,20 @@ export default function SongsAdmin() {
 		const q = adminSearchText.trim().toLowerCase();
 		if (!q) return [] as SongSrtCue[];
 		if (adminSearchSongId) {
-			return (songSrtBySongId.get(adminSearchSongId) || []).filter((c) => (c.text || '').toLowerCase().includes(q));
+			return (songSrtBySongId.get(adminSearchSongId) || [])
+				.filter((c) => !shouldIgnoreLrcLyricText(c.text || ''))
+				.filter((c) => (c.text || '').toLowerCase().includes(q));
 		}
-		return (srtCues ?? []).filter((c) => (c.text || '').toLowerCase().includes(q));
+		return (srtCues ?? [])
+			.filter((c) => !shouldIgnoreLrcLyricText(c.text || ''))
+			.filter((c) => (c.text || '').toLowerCase().includes(q));
 	}, [adminSearchSongId, adminSearchText, songSrtBySongId, srtCues]);
 	const adminActiveCue = useMemo(() => {
 		if (!adminSearchMatches.length) return null;
-		return adminSearchMatches.find((c) => c.id === adminCueId) || adminSearchMatches[0] || null;
+		const picked = adminSearchMatches.find((c) => c.id === adminCueId) || adminSearchMatches[0] || null;
+		if (!picked) return null;
+		if (shouldIgnoreLrcLyricText(picked.text || '')) return null;
+		return picked;
 	}, [adminSearchMatches, adminCueId]);
 
 	const [refetchTarget, setRefetchTarget] = useState<Song | null>(null);
@@ -604,10 +692,11 @@ export default function SongsAdmin() {
 							}}
 						/>
 						<div className="space-y-2">
-							<Label>Timestamped lyrics (.srt) (optional)</Label>
+							<Label>Timestamped lyrics (.srt / .lrc) (optional)</Label>
 							<Input
+								ref={uploadTimedLyricsInputRef}
 								type="file"
-								accept=".srt,text/plain"
+								accept=".srt,.lrc,text/plain"
 								onChange={(e) => setSrtFile(e.target.files?.[0] ?? null)}
 							/>
 							<div className="text-xs text-muted-foreground">
@@ -702,8 +791,10 @@ export default function SongsAdmin() {
 									});
 								}
 								if (srtFile && songIdForSrt) {
-									const srtText = await srtFile.text();
-									await persistSongSrtCues(songIdForSrt, srtText);
+									const timedText = await srtFile.text();
+									const name = (srtFile.name || '').toLowerCase();
+									const format = name.endsWith('.lrc') ? 'lrc' : 'srt';
+									await persistSongTimedLyricsCues(songIdForSrt, timedText, format);
 								}
 								setTitle("");
 								setSinger("");
@@ -711,6 +802,7 @@ export default function SongsAdmin() {
 								setLyrics("");
 								setAudioFile(null);
 								setSrtFile(null);
+								if (uploadTimedLyricsInputRef.current) uploadTimedLyricsInputRef.current.value = "";
 								if (uploadAudioInputRef.current) uploadAudioInputRef.current.value = "";
 								toast.success(window.songs?.saveAudioFile ? 'Song uploaded' : 'Song uploaded (stored locally)');
 							} catch (err) {
@@ -918,7 +1010,7 @@ export default function SongsAdmin() {
 												console.error(err);
 												toast.error('Failed to update visibility');
 											}
-									}}
+										}}
 									/>
 									<span>Visible</span>
 								</label>
@@ -1025,22 +1117,22 @@ export default function SongsAdmin() {
 						<Button
 							disabled={!refetchTarget || !selectedRefetchId}
 							onClick={async () => {
-							if (!refetchTarget) return;
-							const selected = (refetchResults ?? []).find((r) => r.entry.id === selectedRefetchId)?.entry;
-							if (!selected) return;
-							try {
-								await db.songs.update(refetchTarget.id, {
-									lyrics: selected.lyrics,
-									writer: (refetchTarget.writer || '').trim().length ? refetchTarget.writer : (selected.writer || refetchTarget.writer),
-									updatedAt: Date.now(),
-								});
-								toast.success('Lyrics updated');
-								setRefetchTarget(null);
-							} catch (e) {
-								console.error(e);
-								toast.error('Failed to update lyrics');
-							}
-						}}
+								if (!refetchTarget) return;
+								const selected = (refetchResults ?? []).find((r) => r.entry.id === selectedRefetchId)?.entry;
+								if (!selected) return;
+								try {
+									await db.songs.update(refetchTarget.id, {
+										lyrics: selected.lyrics,
+										writer: (refetchTarget.writer || '').trim().length ? refetchTarget.writer : (selected.writer || refetchTarget.writer),
+										updatedAt: Date.now(),
+									});
+									toast.success('Lyrics updated');
+									setRefetchTarget(null);
+								} catch (e) {
+									console.error(e);
+									toast.error('Failed to update lyrics');
+								}
+							}}
 						>
 							Verify &amp; Save
 						</Button>
@@ -1077,7 +1169,7 @@ export default function SongsAdmin() {
 										/>
 										<span className="min-w-0">
 											<span className="font-medium">{d.title}</span>
-											{d.singer ? <span className="text-xs text-muted-foreground"> — {d.singer}</span> : null}
+											{d.singer ? <span className="text-xs text-muted-foreground"> (score {d.singer})</span> : null}
 										</span>
 									</label>
 								))}
@@ -1209,8 +1301,8 @@ export default function SongsAdmin() {
 							<Input type="file" accept="audio/*" onChange={(e) => setEditAudioFile(e.target.files?.[0] ?? null)} />
 						</div>
 						<div className="space-y-2">
-							<Label>Upload timestamped lyrics (.srt) (optional)</Label>
-							<Input type="file" accept=".srt,text/plain" onChange={(e) => setEditSrtFile(e.target.files?.[0] ?? null)} />
+							<Label>Upload timestamped lyrics (.srt / .lrc) (optional)</Label>
+							<Input ref={editTimedLyricsInputRef} type="file" accept=".srt,.lrc,text/plain" onChange={(e) => setEditSrtFile(e.target.files?.[0] ?? null)} />
 						</div>
 					</div>
 					<div className="space-y-2">
@@ -1270,13 +1362,16 @@ export default function SongsAdmin() {
 										updatedAt: Date.now(),
 									});
 									if (editSrtFile) {
-										const srtText = await editSrtFile.text();
-										await persistSongSrtCues(editTarget.id, srtText);
+										const timedText = await editSrtFile.text();
+										const name = (editSrtFile.name || '').toLowerCase();
+										const format = name.endsWith('.lrc') ? 'lrc' : 'srt';
+										await persistSongTimedLyricsCues(editTarget.id, timedText, format);
 									}
 									toast.success('Song updated');
 									setEditTarget(null);
 									setEditAudioFile(null);
 									setEditSrtFile(null);
+									if (editTimedLyricsInputRef.current) editTimedLyricsInputRef.current.value = "";
 								} catch (e) {
 									console.error(e);
 									toast.error('Failed to update song');
