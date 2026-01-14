@@ -1,0 +1,604 @@
+@import '@radix-ui/colors/black-alpha.css';
+@import '@radix-ui/colors/mauve.css';
+@import '@radix-ui/colors/red.css';
+@import '@radix-ui/colors/violet.css';
+@import 'katex/dist/katex.min.css';
+
+/* Ensure KaTeX matches surrounding text sizing and baseline alignment everywhere */
+.katex,
+.katex-display,
+.katex-inline {
+  font-size: 1em;
+  line-height: 1.2;
+}
+
+@layer base {
+  :root {
+    --tk-katex-inline-baseline-shift: -0.08em;
+  }
+}
+
+.tk-katex-wrapper {
+  font-size: 1em;
+  line-height: 1.2;
+}
+
+/* Inline equations can look slightly raised when surrounding text uses a different font.
+   Nudge them down very slightly while keeping display equations unaffected. */
+.tk-katex-wrapper:not(.block) {
+  vertical-align: var(--tk-katex-inline-baseline-shift);
+  align-items: baseline;
+}
+
+.tk-katex-wrapper .katex {
+  vertical-align: baseline;
+}
+
+/* Allow KaTeX to wrap inside word-problem prompts when they are long. */
+ .katex-wrap {
+   max-width: 100%;
+ }
+
+ .katex-wrap .katex,
+ .katex-wrap .katex-display {
+   white-space: normal;
+ }
+
+ .katex-wrap .katex-html {
+   white-space: normal;
+ }
+
+ .katex-wrap .katex-html .base {
+   white-space: normal;
+ }
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Inline blank rectangles used for Fill in the Blanks questions */
+.tk-blank {
+  display: inline-block;
+  padding: 0.1rem 0.4rem;
+  margin: 0 0.1rem;
+  border-radius: 0.25rem;
+  border: 1px solid rgba(15, 23, 42, 0.2);
+  background-color: rgba(148, 163, 184, 0.1);
+}
+
+/* Styles for TypingAnswerMathInput scripts (sup/sub) */
+.tk-script {
+  display: inline-flex;
+  align-items: baseline;
+}
+
+.tk-script .tk-sup {
+  font-size: 0.75em;
+  vertical-align: super;
+  line-height: 1;
+}
+
+.tk-script .tk-sub {
+  font-size: 0.75em;
+  vertical-align: sub;
+  line-height: 1;
+}
+
+/* Definition of the design system. All colors, gradients, fonts, etc should be defined here. 
+All colors MUST be HSL.
+*/
+
+/* Local font faces (place font files in public/fonts) */
+@font-face {
+  font-family: 'Inter';
+  src: url('/fonts/Inter-Variable.woff2') format('woff2-variations');
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Inter';
+  src: url('/fonts/Inter-Italic-Variable.woff2') format('woff2-variations');
+  font-weight: 100 900;
+  font-style: italic;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Roboto Slab';
+  src: url('/Roboto Slab.ttf') format('truetype');
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Lipishree Unicode';
+  src: url('/Lipishree%20Unicode.ttf') format('truetype');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+0980-09FF;
+}
+
+@font-face {
+  font-family: 'KaTeX_Main';
+  src: url('/Lipishree%20Unicode.ttf') format('truetype');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+0980-09FF;
+}
+
+@font-face {
+  font-family: 'KaTeX_Math';
+  src: url('/Lipishree%20Unicode.ttf') format('truetype');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+0980-09FF;
+}
+
+@layer base {
+  :root {
+    /* Green color scheme matching Instructions and Start buttons */
+    --background: 0 0% 100%;
+    --foreground: 32 12% 12%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 32 12% 12%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 32 12% 12%;
+
+    /* Primary - green matching bg-green-700 */
+    --primary: 152 55% 38%;
+    --primary-foreground: 0 0% 100%;
+    --primary-hover: 152 55% 32%;
+    
+    /* Accent - darker green shade */
+    --accent: 158 50% 34%;
+    --accent-foreground: 0 0% 100%;
+    --accent-hover: 158 50% 28%;
+
+    /* Secondary - light green matching bg-green-50 */
+    --secondary: 148 35% 96%;
+    --secondary-foreground: 32 10% 22%;
+
+    /* Muted - soft green-gray */
+    --muted: 148 18% 95%;
+    --muted-foreground: 34 8% 44%;
+
+    /* Success - vibrant green */
+    --success: 152 60% 40%;
+    --success-foreground: 0 0% 100%;
+
+    /* Warning - amber/yellow-green */
+    --warning: 38 90% 50%;
+    --warning-foreground: 32 12% 12%;
+
+    /* Destructive - red-green (complementary) */
+    --destructive: 6 72% 54%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 148 16% 88%;
+    --input: 148 18% 96%;
+    --ring: 152 55% 38%;
+
+    --radius: 0.75rem;
+
+    /* Exam mode - deep green */
+    --exam-primary: 154 62% 26%;
+    --exam-bg: 148 30% 98%;
+    
+    /* Practice mode - medium green */
+    --practice-primary: 152 60% 40%;
+    --practice-bg: 148 22% 99%;
+
+    /* Timer colors - green shades */
+    --timer-normal: 152 55% 38%;
+    --timer-warning: 38 90% 50%;
+    --timer-critical: 6 72% 54%;
+
+    /* Accent warm - yellow-green */
+    --accent-warm: 72 55% 45%;
+    --accent-warm-foreground: 32 12% 12%;
+
+    /* Transitions */
+    --transition-base: 200ms ease-in-out;
+    --transition-smooth: 300ms cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  .dark {
+    --background: 165 18% 10%;
+    --foreground: 40 18% 96%;
+
+    --card: 165 18% 13%;
+    --card-foreground: 40 18% 96%;
+
+    --popover: 165 18% 13%;
+    --popover-foreground: 40 18% 96%;
+
+    --primary: 152 70% 52%;
+    --primary-foreground: 0 0% 100%;
+    --primary-hover: 152 70% 46%;
+
+    --accent: 158 62% 46%;
+    --accent-foreground: 0 0% 100%;
+    --accent-hover: 158 62% 40%;
+
+    --secondary: 155 18% 20%;
+    --secondary-foreground: 40 18% 96%;
+
+    --muted: 155 14% 17%;
+    --muted-foreground: 38 10% 72%;
+
+    --success: 152 70% 52%;
+    --success-foreground: 0 0% 100%;
+
+    --warning: 38 92% 58%;
+    --warning-foreground: 165 18% 10%;
+
+    --destructive: 6 76% 60%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 155 14% 26%;
+    --input: 155 14% 20%;
+    --ring: 152 70% 52%;
+
+    --exam-primary: 154 72% 44%;
+    --exam-bg: 165 18% 11%;
+    
+    --practice-primary: 152 70% 52%;
+    --practice-bg: 165 18% 13%;
+
+    --timer-normal: 152 70% 52%;
+    --timer-warning: 38 92% 58%;
+    --timer-critical: 6 76% 60%;
+
+    /* Accent warm - yellow-green */
+    --accent-warm: 72 62% 58%;
+    --accent-warm-foreground: 165 18% 10%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  html {
+    scroll-behavior: smooth;
+    height: 100%;
+    min-height: 100%;
+  }
+
+  body {
+    @apply bg-background text-foreground font-sans;
+    -webkit-overflow-scrolling: touch;
+    scroll-behavior: smooth;
+    height: 100%;
+    min-height: 100%;
+    overflow: hidden;
+    overscroll-behavior-y: none;
+    margin: 0;
+    padding: 0;
+  }
+
+  #root {
+    height: 100%;
+    min-height: 100%;
+    display: flex;
+    flex-direction: column;
+  }
+
+  [data-radix-scroll-area-viewport] {
+    -webkit-overflow-scrolling: touch;
+    scroll-behavior: smooth;
+    overscroll-behavior: contain;
+  }
+
+  /* Responsive design - automatically resize for mobile */
+  @media (max-width: 768px) {
+    body {
+      font-size: 14px;
+    }
+  }
+}
+
+/* Hide scrollbars globally but keep scrolling enabled */
+* {
+  scrollbar-width: none; /* Firefox */
+}
+
+*::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+
+@layer components {
+  .content-html {
+    @apply max-w-full break-words;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+
+  .tk-bn {
+    font-size: 1.12em;
+  }
+
+  .tk-question-text,
+  .mcq-option-text {
+    font-size: 0.9em;
+    line-height: 1.55;
+  }
+
+  /* Prevent copying in quiz pages */
+  .select-none img,
+  .select-none .katex,
+  .select-none .katex *,
+  .select-none .content-html,
+  .select-none .content-html * {
+    user-select: none !important;
+    -webkit-user-select: none !important;
+    -moz-user-select: none !important;
+    -ms-user-select: none !important;
+    -webkit-touch-callout: none !important;
+  }
+
+  /* Allow code blocks to be clickable and copyable even in select-none contexts */
+  .select-none code,
+  .select-none pre {
+    user-select: text !important;
+    -webkit-user-select: text !important;
+    -moz-user-select: text !important;
+    -ms-user-select: text !important;
+    pointer-events: auto !important;
+  }
+
+  /* Allow input fields and buttons to be selectable/interactive */
+  .select-none input,
+  .select-none textarea,
+  .select-none button {
+    user-select: text !important;
+    -webkit-user-select: text !important;
+    -moz-user-select: text !important;
+    -ms-user-select: text !important;
+  }
+
+  /* Code block styling with click-to-copy */
+  code, pre {
+    cursor: pointer;
+    position: relative;
+    transition: background-color 0.2s ease;
+  }
+
+  code:hover, pre:hover {
+    background-color: hsl(var(--muted)) !important;
+  }
+
+  code::after, pre::after {
+    content: '📋 Click to copy';
+    position: absolute;
+    top: 0.25rem;
+    right: 0.5rem;
+    font-size: 0.625rem;
+    opacity: 0;
+    transition: opacity 0.2s ease;
+    pointer-events: none;
+    background: hsl(var(--primary));
+    color: hsl(var(--primary-foreground));
+    padding: 0.125rem 0.375rem;
+    border-radius: 0.25rem;
+    font-weight: 500;
+    z-index: 10;
+  }
+
+  code:hover::after, pre:hover::after {
+    opacity: 1;
+  }
+
+  .mcq-option-text,
+  .mcq-option-text *:not(.katex):not(.katex *) {
+    font-size: inherit !important;
+    line-height: inherit !important;
+    font-weight: inherit !important;
+    font-family: inherit !important;
+  }
+
+  .content-html .katex,
+  .content-html .katex-display > .katex,
+  .content-html .katex-inline > .katex {
+    font-size: 1.16em;
+    max-width: 100%;
+    white-space: normal !important;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+
+  .tk-question-text .katex,
+  .tk-question-text .katex-display > .katex,
+  .tk-question-text .katex-inline > .katex {
+    font-size: 1.16em;
+  }
+
+  .tk-richtext-editor .katex,
+  .tk-richtext-editor .katex-display > .katex,
+  .tk-richtext-editor .katex-inline > .katex {
+    max-width: 100%;
+    white-space: normal !important;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+
+  .content-html .katex-display,
+  .content-html .katex-inline {
+    max-width: 100%;
+  }
+
+  .tk-richtext-editor .katex-display,
+  .tk-richtext-editor .katex-inline {
+    max-width: 100%;
+  }
+
+  .content-html .katex-html {
+    white-space: normal !important;
+    display: inline !important;
+    max-width: 100%;
+  }
+
+  .tk-richtext-editor .katex-html {
+    white-space: normal !important;
+    display: inline !important;
+    max-width: 100%;
+  }
+
+  .tk-question-snippet {
+    max-width: 100%;
+  }
+
+  .tk-question-snippet .katex,
+  .tk-question-snippet .katex-display {
+    max-width: 100%;
+    overflow-x: hidden;
+  }
+
+  .content-html .katex-html .base,
+  .content-html .katex-html .mord,
+  .content-html .katex-html .mop,
+  .content-html .katex-html .mbin,
+  .content-html .katex-html .mrel,
+  .content-html .katex-html .mopen,
+  .content-html .katex-html .mclose,
+  .content-html .katex-html .mpunct,
+  .content-html .katex-html .minner {
+    display: inline !important;
+    white-space: normal !important;
+    max-width: 100%;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+
+  .tk-richtext-editor .katex-html .base,
+  .tk-richtext-editor .katex-html .mord,
+  .tk-richtext-editor .katex-html .mop,
+  .tk-richtext-editor .katex-html .mbin,
+  .tk-richtext-editor .katex-html .mrel,
+  .tk-richtext-editor .katex-html .mopen,
+  .tk-richtext-editor .katex-html .mclose,
+  .tk-richtext-editor .katex-html .mpunct,
+  .tk-richtext-editor .katex-html .minner {
+    display: inline !important;
+    white-space: normal !important;
+    max-width: 100%;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+
+  /* Make images in rendered question/explanation content responsive
+     while respecting any saved inline width set by the editor. */
+  .content-html img {
+    max-width: 100%;
+    height: auto;
+    display: inline-block;
+  }
+
+  .tk-katex-wrapper {
+    display: inline-flex;
+    align-items: baseline;
+    vertical-align: baseline;
+    position: relative;
+    top: -0.08em;
+  }
+
+  .tk-katex-wrapper .katex {
+    vertical-align: baseline;
+  }
+
+  .katex {
+    font-size: 1em;
+  }
+
+  .tk-katex-wrapper [data-katex-action] {
+    display: none;
+  }
+
+  .tk-richtext-editor .tk-katex-wrapper [data-katex-action] {
+    display: inline-flex;
+  }
+
+  /* Visual hint + hit area for the resize "button" in the editor:
+     clicking and dragging the bottom-right corner of an image resizes it. */
+  .prose img {
+    position: relative;
+    display: inline-block;
+  }
+
+  .prose img::after {
+    content: '';
+    position: absolute;
+    right: -2px;
+    bottom: -2px;
+    width: 14px;
+    height: 14px;
+    background-color: hsl(var(--background));
+    border: 2px solid hsl(var(--primary));
+    box-shadow: 0 0 0 1px hsl(var(--border)), 0 1px 3px rgba(15, 23, 42, 0.25);
+    cursor: nwse-resize;
+    opacity: 0.95;
+    z-index: 1;
+  }
+
+  .show-scrollbar {
+    scrollbar-width: thin;
+    scrollbar-color: hsl(var(--muted-foreground)) hsl(var(--muted));
+    scrollbar-gutter: stable;
+  }
+
+  .show-scrollbar::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  .show-scrollbar::-webkit-scrollbar-track {
+    background: hsl(var(--muted));
+    border-radius: 999px;
+  }
+
+  .show-scrollbar::-webkit-scrollbar-thumb {
+    background: hsl(var(--muted-foreground));
+    border-radius: 999px;
+  }
+
+  .tk-fade-in {
+    animation: tk-fade-slide-up var(--transition-smooth);
+  }
+
+  @keyframes tk-fade-slide-up {
+    from {
+      opacity: 0;
+      transform: translateY(8px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  /* Larger, more prominent text for question stems */
+  .tk-question-editor .prose,
+  .tk-question-editor .prose * {
+    @apply text-lg leading-relaxed;
+  }
+
+  /* Slightly larger text for explanations */
+  .tk-explanation-editor .prose,
+  .tk-explanation-editor .prose * {
+    @apply text-base leading-relaxed;
+  }
+
+  /* Larger option text and comfortable line-height */
+  .tk-option-editor .prose,
+  .tk-option-editor .prose * {
+    @apply text-base leading-relaxed;
+  }
+}
