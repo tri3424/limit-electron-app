@@ -1,0 +1,157 @@
+LIMIT DESKTOP APPLICATION – TERMS & CONDITIONS
+
+(Yes, These Exist. No, They’re Not That Boring.)
+
+Effective Date: 2025-12-21
+
+1. Acceptance of Terms (Yes, This Is the “By Using This, You Agree” Part)
+
+Welcome to the LIMIT Desktop Application (the “Software”). By downloading, installing, launching, accessing, or using the Software, you agree to these Terms & Conditions (the “Terms”). If you don’t agree, don’t use the Software.
+
+If you’re using the Software on behalf of an organization, you represent and warrant that you have authority to bind that organization to these Terms.
+
+2. License Grant (What You’re Allowed to Do)
+
+Subject to these Terms, you’re granted a limited, non-exclusive, non-transferable, non-sublicensable, and revocable license to install and use the Software for your personal, non-commercial study and practice.
+
+This is a license, not a sale. You don’t get any ownership rights in the Software.
+
+3. What You Can Do With the Software (Features)
+
+The Software is an offline-first study, practice, and exam platform. Depending on your role (for example, a student user vs. an admin/teacher user) and depending on what’s enabled in Settings, the Software may let you do some or all of the following:
+
+a) Sign in and use your account
+
+- Sign in using the username/password provided to you (if the Software is configured to require accounts).
+- Use the Software as the currently signed-in user, so progress and results can be tracked per user.
+
+b) Build and manage a question bank
+
+- Create questions in multiple formats (for example multiple-choice, free-text, fill-in-the-blanks, and matching).
+- Add question text, optional images (where supported), answer options (where applicable), and explanations.
+- Add tags and difficulty information to keep your content organized.
+- Create and use a glossary (and glossary hints, where enabled) to support learning.
+- Create reusable “question prompts” you can insert while writing questions.
+- Search, filter, preview, and edit existing questions.
+
+c) Create and manage modules (practice modules and exam modules)
+
+- Group questions into modules.
+- Create modules for practice or exams, with a title and optional instructions.
+- Edit modules later (including the question list and module settings).
+- Optionally randomize question order.
+
+d) Take practice sessions and practice modules
+
+- Run practice modules as made available to you.
+- Receive feedback during practice where enabled by the module or app settings.
+- In certain practice modes, the Software may generate practice questions by topic and difficulty.
+
+e) Take timed exams (where enabled)
+
+- Start an exam during its allowed time window (if scheduling is configured).
+- Take exams with a timer, where the exam/module settings require it.
+
+f) Review (where enabled)
+
+- After an exam ends, review questions and your work for a limited review period, if review is enabled for that exam.
+
+g) Study limits and availability rules (where enabled)
+
+- Practice modules may be restricted to certain days of the week and/or a time-of-day window.
+- Modules may enforce a daily question limit.
+
+h) Attempt history and basic progress tracking
+
+- The Software may keep a per-question attempt history and basic progress/analytics so you can review what you attempted and how you performed.
+
+i) Exam integrity and “lockdown” behaviors (best effort)
+
+To help reduce cheating during exams, the Software may (where enabled) use best-effort integrity measures such as:
+
+- requesting fullscreen mode;
+- detecting focus loss or tab switching; and
+- taking configured actions when integrity rules are violated (for example warning you or auto-submitting).
+
+Important: no software can guarantee exam integrity in every environment. You remain responsible for following your institution’s rules.
+
+j) Student/user management (admin/teacher features)
+
+- Create, edit, and delete student user accounts (where the Software provides a user management interface).
+- Assign or manage access for students to certain modules (where available).
+
+k) Song features (where enabled)
+
+If the “Songs” features are enabled in Settings, the Software may allow students to:
+
+- browse and play available songs;
+- track listening activity; and
+- participate in song recognition practice activities.
+
+Not every build or installation will include every feature listed above, and features may change over time.
+
+4. Restrictions (Please Don’t Do These Things)
+
+Except to the extent a restriction is prohibited by applicable law, you agree that you will not:
+
+a) reverse engineer, decompile, disassemble, or otherwise attempt to derive source code or underlying ideas from the Software;
+b) modify, adapt, translate, or create derivative works based on the Software;
+c) distribute, sell, rent, lease, lend, sublicense, publish, or otherwise make the Software available to any third party;
+d) remove, obscure, or alter any proprietary notices in or on the Software;
+e) bypass, disable, or interfere with security or usage controls, or use the Software in a way that could damage, disable, overburden, or impair it.
+
+Any attempt to do the above is a material breach of these Terms.
+
+5. Ownership (Who Owns What)
+
+The Software and all related intellectual property rights are owned by the publisher/licensor and its licensors (if any). All rights not expressly granted to you are reserved.
+
+6. User Data and Local Storage (Your Stuff, Your Responsibility)
+
+The Software may store content, progress data, settings, and other information locally on your device. Unless the Software explicitly says otherwise, it does not automatically upload your data to a cloud service.
+
+You are responsible for:
+
+a) maintaining backups (if you care about the data);
+b) securing your device and local files; and
+c) any loss, corruption, deletion, or disclosure of data resulting from your device, your actions, third-party software, malware, or hardware failure.
+
+7. Academic Integrity (Use It Responsibly)
+
+The Software is meant for learning and practice. You are solely responsible for how you use it, including during exams, assessments, or evaluations, and for complying with your school/institution rules and any applicable laws.
+
+8. Updates and Changes (Things May Change)
+
+We may provide updates, patches, improvements, bug fixes, or new versions of the Software. Updates may be automatic or manual, depending on how you obtained the Software.
+
+We may also update these Terms. If you continue using the Software after updated Terms are made available, you agree to the updated Terms to the extent permitted by law.
+
+9. Disclaimer of Warranties (No Guarantees)
+
+To the maximum extent permitted by law, the Software is provided “AS IS” and “AS AVAILABLE,” with all faults, and without warranties of any kind, whether express, implied, or statutory.
+
+This includes (without limitation) implied warranties of merchantability, fitness for a particular purpose, title, and non-infringement. We do not warrant that the Software will be uninterrupted, error-free, secure, or meet your requirements.
+
+10. Limitation of Liability (Legal Limits on Damages)
+
+To the maximum extent permitted by law, the publisher/licensor and its contributors, distributors, and affiliates will not be liable for any indirect, incidental, special, consequential, exemplary, or punitive damages, or for any loss of data, profits, revenue, business, goodwill, or productivity, arising out of or relating to the Software or these Terms, even if advised of the possibility of such damages.
+
+To the maximum extent permitted by law, the total liability of the publisher/licensor for any claim arising out of or relating to the Software or these Terms will not exceed the amount you paid to obtain the Software (if any).
+
+Some jurisdictions do not allow certain limitations, so parts of this section may not apply to you.
+
+11. Termination (When This Ends)
+
+These Terms remain effective until terminated.
+
+We may suspend or terminate your license immediately if you breach these Terms. Upon termination, you must stop using the Software and delete all copies you have.
+
+Sections that by their nature should survive termination will survive (including, without limitation, Ownership, Disclaimer of Warranties, Limitation of Liability, and Governing Law).
+
+12. Governing Law (Where the Rules Come From)
+
+These Terms are governed by the laws of the jurisdiction where the publisher/licensor is located, excluding its conflict-of-laws rules, unless applicable law requires otherwise.
+
+13. Contact (Questions, Issues, or Legal Notices)
+
+If you have questions, concerns, or need to send a legal notice related to these Terms, contact the publisher through the official distribution channel where you obtained the Software.

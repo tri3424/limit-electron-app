@@ -1,0 +1,75 @@
+name: Build Windows EXE
+
+on:
+  push:
+    branches: [ main, remove-offline-ai ]
+  workflow_dispatch:
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Sanity check installer config
+        shell: pwsh
+        run: |
+          node -e "const fs=require('fs');const p=JSON.parse(fs.readFileSync('package.json','utf8'));console.log('nsis.include =', p.build && p.build.nsis && p.build.nsis.include);"
+          if (Test-Path .\dist) { Remove-Item .\dist -Recurse -Force }
+
+      - name: Set build version
+        shell: pwsh
+        run: |
+          $ver = "1.0.$env:GITHUB_RUN_NUMBER"
+          Write-Output "BUILD_VERSION=$ver" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Build EXE
+        run: npm run electron:build:win -- --publish never --config.extraMetadata.version=${{ env.BUILD_VERSION }}
+
+      - name: Inspect dist output
+        shell: pwsh
+        run: |
+          Write-Output "=== dist directory ==="
+          if (Test-Path .\dist) { Get-ChildItem .\dist -Force } else { Write-Output "dist not found" }
+          Write-Output "=== dist recursive ==="
+          if (Test-Path .\dist) { Get-ChildItem .\dist -Recurse -Force | Select-Object FullName,Length } else { Write-Output "dist not found" }
+
+      - name: Verify installer for this version exists
+        shell: pwsh
+        run: |
+          $expected = "Limit-Setup-${{ env.BUILD_VERSION }}.exe"
+          $path = Join-Path -Path "dist" -ChildPath $expected
+          if (-not (Test-Path $path)) {
+            Write-Output "Expected installer not found: $path"
+            Write-Output "Available installers under dist:" 
+            Get-ChildItem -Path .\dist -Recurse -Filter *.exe -ErrorAction SilentlyContinue | Select-Object FullName,Length
+            throw "Missing expected installer for version ${{ env.BUILD_VERSION }}"
+          }
+
+      - name: Verify EXE exists
+        shell: pwsh
+        run: |
+          $exes = Get-ChildItem -Path .\dist -Recurse -Filter *.exe -ErrorAction SilentlyContinue
+          if (-not $exes -or $exes.Count -eq 0) {
+            throw "No .exe produced under dist/"
+          }
+
+      - name: Upload EXE
+        uses: actions/upload-artifact@v4
+        with:
+          name: Limit-Windows-${{ env.BUILD_VERSION }}-${{ github.sha }}
+          path: dist/Limit-Setup-${{ env.BUILD_VERSION }}.exe
+
