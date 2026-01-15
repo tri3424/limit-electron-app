@@ -1011,6 +1011,7 @@ export default function Settings() {
                       variants: [
                         { key: 'unit_circle', label: 'Unit circle', defaultValue: 70 },
                         { key: 'ratio_quadrant', label: 'Quadrant + ratio', defaultValue: 10 },
+                        { key: 'identity_simplify', label: 'Identity simplify (MCQ)', defaultValue: 35 },
                       ],
                     };
                   }

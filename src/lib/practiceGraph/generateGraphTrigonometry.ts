@@ -144,6 +144,350 @@ export function generateGraphTrigonometryMcq(input: {
   variantWeights?: Record<string, number>;
 }): GraphPracticeQuestion {
   const rng = mulberry32(input.seed);
+  const pickVariant = (): 'trig_ratio_quadrant' | 'identity_simplify' => {
+    if (input.difficulty !== 'hard') return 'trig_ratio_quadrant';
+    const w = input.variantWeights ?? {};
+    const wRatio = typeof w.ratio_quadrant === 'number' ? Math.max(0, Number(w.ratio_quadrant)) : 65;
+    const wIdentity = typeof w.identity_simplify === 'number' ? Math.max(0, Number(w.identity_simplify)) : 35;
+    const total = wRatio + wIdentity;
+    if (!(total > 0)) return 'trig_ratio_quadrant';
+    const r = rng.next() * total;
+    return r < wIdentity ? 'identity_simplify' : 'trig_ratio_quadrant';
+  };
+
+  const variant = pickVariant();
+
+  if (variant === 'identity_simplify') {
+    const makeWrongPool = (correct: string) => {
+      const pool = [
+        String.raw`\sin\theta`,
+        String.raw`\cos\theta`,
+        String.raw`\tan\theta`,
+        String.raw`\cot\theta`,
+        String.raw`\sec\theta`,
+        String.raw`\csc\theta`,
+        String.raw`\sin^2\theta`,
+        String.raw`\cos^2\theta`,
+        String.raw`\tan^2\theta`,
+        String.raw`\cot^2\theta`,
+        String.raw`\sec^2\theta`,
+        String.raw`\csc^2\theta`,
+        String.raw`=0`,
+        String.raw`=1`,
+        String.raw`=\sin\theta`,
+        String.raw`=\cos\theta`,
+        String.raw`=\tan\theta`,
+        String.raw`=\cot\theta`,
+        String.raw`=\sec\theta`,
+        String.raw`=\csc\theta`,
+        String.raw`=\sin^2\theta`,
+        String.raw`=\cos^2\theta`,
+        String.raw`=\tan^2\theta`,
+        String.raw`=\cot^2\theta`,
+      ];
+      return pool.filter((x) => x !== correct);
+    };
+
+    const pickDistinct = (pool: string[], count: number, avoid: Set<string>) => {
+      const out: string[] = [];
+      let tries = 0;
+      while (out.length < count && tries < 200) {
+        tries += 1;
+        const v = pool[rng.int(0, pool.length - 1)]!;
+        if (avoid.has(v)) continue;
+        avoid.add(v);
+        out.push(v);
+      }
+      while (out.length < count) out.push(pool[0]!);
+      return out;
+    };
+
+    const templates: Array<() => {
+      lhs: string;
+      rhs: string;
+      steps: Array<{ katex: string; text: string }>;
+      wrong: string[];
+    }> = [
+      () => {
+        const p = rng.int(1, 8);
+        const lhs = String.raw`\frac{\sin^{${p}}\theta}{\csc\theta}`;
+        const rhs = String.raw`\sin^{${p + 1}}\theta`;
+        const wrong = [String.raw`\sin^{${p}}\theta`, String.raw`\sin^{${p - 1 < 0 ? 0 : p - 1}}\theta`, String.raw`\csc^{${p + 1}}\theta`].filter((x) => x !== rhs);
+        const steps = [
+          { katex: String.raw`\csc\theta = \frac{1}{\sin\theta}`, text: 'Use the reciprocal identity.' },
+          { katex: String.raw`\frac{\sin^{${p}}\theta}{\csc\theta}=\frac{\sin^{${p}}\theta}{\frac{1}{\sin\theta}}`, text: 'Substitute cscθ.' },
+          { katex: String.raw`=\sin^{${p}}\theta\cdot\sin\theta=\sin^{${p + 1}}\theta`, text: 'Multiply and simplify.' },
+        ];
+        return { lhs, rhs, steps, wrong };
+      },
+      () => {
+        const p = rng.int(1, 8);
+        const lhs = String.raw`\frac{\cos^{${p}}\theta}{\sec\theta}`;
+        const rhs = String.raw`\cos^{${p + 1}}\theta`;
+        const wrong = [String.raw`\cos^{${p}}\theta`, String.raw`\cos^{${p - 1 < 0 ? 0 : p - 1}}\theta`, String.raw`\sec^{${p + 1}}\theta`].filter((x) => x !== rhs);
+        const steps = [
+          { katex: String.raw`\sec\theta = \frac{1}{\cos\theta}`, text: 'Use the reciprocal identity.' },
+          { katex: String.raw`\frac{\cos^{${p}}\theta}{\sec\theta}=\frac{\cos^{${p}}\theta}{\frac{1}{\cos\theta}}`, text: 'Substitute secθ.' },
+          { katex: String.raw`=\cos^{${p}}\theta\cdot\cos\theta=\cos^{${p + 1}}\theta`, text: 'Multiply and simplify.' },
+        ];
+        return { lhs, rhs, steps, wrong };
+      },
+      () => {
+        const useSin = rng.next() < 0.5;
+        const lhs = useSin ? String.raw`1-\cos^2\theta` : String.raw`1-\sin^2\theta`;
+        const rhs = useSin ? String.raw`=\sin^2\theta` : String.raw`=\cos^2\theta`;
+        const wrong = useSin
+          ? [String.raw`=\cos^2\theta`, String.raw`=\sin\theta`, String.raw`=\tan^2\theta`]
+          : [String.raw`=\sin^2\theta`, String.raw`=\cos\theta`, String.raw`=\cot^2\theta`];
+        const steps = useSin
+          ? [
+            { katex: String.raw`\sin^2\theta+\cos^2\theta=1`, text: 'Start from the Pythagorean identity.' },
+            { katex: String.raw`1-\cos^2\theta=\sin^2\theta`, text: 'Subtract cos²θ from both sides.' },
+            { katex: String.raw`\boxed{1-\cos^2\theta=\sin^2\theta}`, text: 'This is the simplified form.' },
+          ]
+          : [
+            { katex: String.raw`\sin^2\theta+\cos^2\theta=1`, text: 'Start from the Pythagorean identity.' },
+            { katex: String.raw`1-\sin^2\theta=\cos^2\theta`, text: 'Subtract sin²θ from both sides.' },
+            { katex: String.raw`\boxed{1-\sin^2\theta=\cos^2\theta}`, text: 'This is the simplified form.' },
+          ];
+        return { lhs, rhs, steps, wrong };
+      },
+      () => {
+        const lhs = String.raw`\sec^2\theta-1`;
+        const rhs = String.raw`\tan^2\theta`;
+        const wrong = [String.raw`\cot^2\theta`, String.raw`\sec\theta`, String.raw`\sin^2\theta`];
+        const steps = [
+          { katex: String.raw`\text{Goal: rewrite }\sec^2\theta-1\text{ in a simpler form.}`, text: 'We will use a standard Pythagorean identity.' },
+          { katex: String.raw`1+\tan^2\theta=\sec^2\theta`, text: 'Recall the identity connecting tan and sec.' },
+          { katex: String.raw`\sec^2\theta-1=\tan^2\theta`, text: 'Subtract 1 from both sides.' },
+          { katex: String.raw`\boxed{\sec^2\theta-1=\tan^2\theta}`, text: 'So the expression simplifies to tan²θ.' },
+          { katex: String.raw`\text{(Optional check)}\;\sec^2\theta=\frac{1}{\cos^2\theta},\;\tan^2\theta=\frac{\sin^2\theta}{\cos^2\theta}`, text: 'You can also verify by writing everything in terms of sin and cos.' },
+          { katex: String.raw`\frac{1}{\cos^2\theta}-1=\frac{1-\cos^2\theta}{\cos^2\theta}=\frac{\sin^2\theta}{\cos^2\theta}=\tan^2\theta`, text: 'This confirms the identity by direct algebra.' },
+        ];
+        return { lhs, rhs, steps, wrong };
+      },
+      () => {
+        const lhs = String.raw`\csc^2\theta-1`;
+        const rhs = String.raw`\cot^2\theta`;
+        const wrong = [String.raw`\tan^2\theta`, String.raw`\csc\theta`, String.raw`\cos^2\theta`];
+        const steps = [
+          { katex: String.raw`\text{Goal: rewrite }\csc^2\theta-1\text{ in a simpler form.}`, text: 'We will use a standard Pythagorean identity.' },
+          { katex: String.raw`1+\cot^2\theta=\csc^2\theta`, text: 'Recall the identity connecting cot and csc.' },
+          { katex: String.raw`\csc^2\theta-1=\cot^2\theta`, text: 'Subtract 1 from both sides.' },
+          { katex: String.raw`\boxed{\csc^2\theta-1=\cot^2\theta}`, text: 'So the expression simplifies to cot²θ.' },
+          { katex: String.raw`\text{(Optional check)}\;\csc^2\theta=\frac{1}{\sin^2\theta},\;\cot^2\theta=\frac{\cos^2\theta}{\sin^2\theta}`, text: 'You can also verify by writing everything in terms of sin and cos.' },
+          { katex: String.raw`\frac{1}{\sin^2\theta}-1=\frac{1-\sin^2\theta}{\sin^2\theta}=\frac{\cos^2\theta}{\sin^2\theta}=\cot^2\theta`, text: 'This confirms the identity by direct algebra.' },
+        ];
+        return { lhs, rhs, steps, wrong };
+      },
+      () => {
+        const p = rng.int(1, 6);
+        const lhs = String.raw`\frac{\tan^{${p}}\theta}{\sec^{${p}}\theta}`;
+        const rhs = String.raw`\sin^{${p}}\theta`;
+        const wrong = [String.raw`\cos^{${p}}\theta`, String.raw`\tan^{${p}}\theta`, String.raw`\sec^{${p}}\theta`].filter((x) => x !== rhs);
+        const steps = [
+          { katex: String.raw`\tan\theta=\frac{\sin\theta}{\cos\theta}`, text: 'Write tan in terms of sin and cos.' },
+          { katex: String.raw`\sec\theta=\frac{1}{\cos\theta}`, text: 'Write sec in terms of cos.' },
+          { katex: String.raw`\frac{\tan^{${p}}\theta}{\sec^{${p}}\theta}=\frac{\left(\frac{\sin\theta}{\cos\theta}\right)^{${p}}}{\left(\frac{1}{\cos\theta}\right)^{${p}}}`, text: 'Substitute and simplify.' },
+          { katex: String.raw`=\sin^{${p}}\theta`, text: 'Cancel the matching powers of cosθ.' },
+        ];
+        return { lhs, rhs, steps, wrong };
+      },
+      () => {
+        const p = rng.int(1, 6);
+        const lhs = String.raw`\frac{\cot^{${p}}\theta}{\csc^{${p}}\theta}`;
+        const rhs = String.raw`\cos^{${p}}\theta`;
+        const wrong = [String.raw`\sin^{${p}}\theta`, String.raw`\cot^{${p}}\theta`, String.raw`\csc^{${p}}\theta`].filter((x) => x !== rhs);
+        const steps = [
+          { katex: String.raw`\cot\theta=\frac{\cos\theta}{\sin\theta}`, text: 'Write cot in terms of sin and cos.' },
+          { katex: String.raw`\csc\theta=\frac{1}{\sin\theta}`, text: 'Write csc in terms of sin.' },
+          { katex: String.raw`\frac{\cot^{${p}}\theta}{\csc^{${p}}\theta}=\frac{\left(\frac{\cos\theta}{\sin\theta}\right)^{${p}}}{\left(\frac{1}{\sin\theta}\right)^{${p}}}`, text: 'Substitute and simplify.' },
+          { katex: String.raw`=\cos^{${p}}\theta`, text: 'Cancel the matching powers of sinθ.' },
+        ];
+        return { lhs, rhs, steps, wrong };
+      },
+      () => {
+        const a = rng.int(2, 9);
+        const b = rng.int(2, 9);
+        const c = rng.int(1, a - 1);
+        const d = rng.int(1, b - 1);
+        const lhs = String.raw`\frac{\sin^{${a}}\theta\,\cos^{${b}}\theta}{\sin^{${c}}\theta\,\cos^{${d}}\theta}`;
+        const rhs = String.raw`\sin^{${a - c}}\theta\,\cos^{${b - d}}\theta`;
+        const wrong = [
+          String.raw`\sin^{${a - c}}\theta\,\cos^{${b + d}}\theta`,
+          String.raw`\sin^{${a + c}}\theta\,\cos^{${b - d}}\theta`,
+          String.raw`\sin^{${a - c}}\theta\,\cos^{${b - d - 1}}\theta`,
+        ].filter((x) => x !== rhs);
+        const steps = [
+          { katex: String.raw`\frac{\sin^{${a}}\theta}{\sin^{${c}}\theta}=\sin^{${a - c}}\theta`, text: 'Divide powers with the same base by subtracting exponents.' },
+          { katex: String.raw`\frac{\cos^{${b}}\theta}{\cos^{${d}}\theta}=\cos^{${b - d}}\theta`, text: 'Do the same for cosθ.' },
+          { katex: rhs, text: 'Combine the simplified factors.' },
+        ];
+        return { lhs, rhs, steps, wrong };
+      },
+      () => {
+        const lhs = String.raw`(\sec\theta-\tan\theta)(\sec\theta+\tan\theta)`;
+        const rhs = String.raw`1`;
+        const wrong = [String.raw`0`, String.raw`\sec^2\theta+\tan^2\theta`, String.raw`\sec\theta+\tan\theta`];
+        const steps = [
+          { katex: String.raw`\text{Goal: simplify }(\sec\theta-\tan\theta)(\sec\theta+\tan\theta).`, text: 'This is set up for a difference-of-squares expansion.' },
+          { katex: String.raw`(a-b)(a+b)=a^2-b^2`, text: 'Use the identity for the product of conjugates.' },
+          { katex: String.raw`(\sec\theta-\tan\theta)(\sec\theta+\tan\theta)=\sec^2\theta-\tan^2\theta`, text: 'Substitute a=secθ and b=tanθ.' },
+          { katex: String.raw`1+\tan^2\theta=\sec^2\theta`, text: 'Recall the Pythagorean identity relating tan and sec.' },
+          { katex: String.raw`\sec^2\theta-\tan^2\theta=1`, text: 'Rearrange by subtracting tan²θ from both sides.' },
+          { katex: String.raw`\boxed{(\sec\theta-\tan\theta)(\sec\theta+\tan\theta)=1}`, text: 'So the expression simplifies to 1.' },
+        ];
+        return { lhs, rhs, steps, wrong };
+      },
+      () => {
+        const lhs = String.raw`(\csc\theta-\cot\theta)(\csc\theta+\cot\theta)`;
+        const rhs = String.raw`1`;
+        const wrong = [String.raw`0`, String.raw`\csc^2\theta+\cot^2\theta`, String.raw`\csc\theta+\cot\theta`];
+        const steps = [
+          { katex: String.raw`\text{Goal: simplify }(\csc\theta-\cot\theta)(\csc\theta+\cot\theta).`, text: 'This is a product of conjugates.' },
+          { katex: String.raw`(a-b)(a+b)=a^2-b^2`, text: 'Use the identity for the product of conjugates.' },
+          { katex: String.raw`(\csc\theta-\cot\theta)(\csc\theta+\cot\theta)=\csc^2\theta-\cot^2\theta`, text: 'Substitute a=cscθ and b=cotθ.' },
+          { katex: String.raw`1+\cot^2\theta=\csc^2\theta`, text: 'Recall the Pythagorean identity relating cot and csc.' },
+          { katex: String.raw`\csc^2\theta-\cot^2\theta=1`, text: 'Rearrange by subtracting cot²θ from both sides.' },
+          { katex: String.raw`\boxed{(\csc\theta-\cot\theta)(\csc\theta+\cot\theta)=1}`, text: 'So the expression simplifies to 1.' },
+        ];
+        return { lhs, rhs, steps, wrong };
+      },
+      () => {
+        const lhs = String.raw`\frac{1-\cos^2\theta}{1+\cos\theta}`;
+        const rhs = String.raw`1-\cos\theta`;
+        const wrong = [String.raw`1+\cos\theta`, String.raw`\sin\theta`, String.raw`\sin^2\theta`];
+        const steps = [
+          { katex: String.raw`\text{Goal: simplify }\frac{1-\cos^2\theta}{1+\cos\theta}.`, text: 'We will factor the numerator and cancel.' },
+          { katex: String.raw`1-\cos^2\theta=(1-\cos\theta)(1+\cos\theta)`, text: 'Use the difference of squares: 1−x²=(1−x)(1+x).' },
+          { katex: String.raw`\frac{1-\cos^2\theta}{1+\cos\theta}=\frac{(1-\cos\theta)(1+\cos\theta)}{1+\cos\theta}`, text: 'Substitute the factorization into the fraction.' },
+          { katex: String.raw`=1-\cos\theta`, text: 'Cancel the common factor (1+cosθ).' },
+          { katex: String.raw`\boxed{\frac{1-\cos^2\theta}{1+\cos\theta}=1-\cos\theta}`, text: 'So the simplified result is 1−cosθ.' },
+        ];
+        return { lhs, rhs, steps, wrong };
+      },
+      () => {
+        const lhs = String.raw`\frac{\sin^2\theta}{1-\cos\theta}`;
+        const rhs = String.raw`1+\cos\theta`;
+        const wrong = [String.raw`1-\cos\theta`, String.raw`\sin\theta`, String.raw`\sin^2\theta`];
+        const steps = [
+          { katex: String.raw`\text{Goal: simplify }\frac{\sin^2\theta}{1-\cos\theta}.`, text: 'We will rewrite sin²θ and then cancel.' },
+          { katex: String.raw`\sin^2\theta+\cos^2\theta=1`, text: 'Start from the Pythagorean identity.' },
+          { katex: String.raw`\sin^2\theta=1-\cos^2\theta`, text: 'Rearrange to express sin²θ in terms of cosθ.' },
+          { katex: String.raw`1-\cos^2\theta=(1-\cos\theta)(1+\cos\theta)`, text: 'Factor using difference of squares.' },
+          { katex: String.raw`\frac{\sin^2\theta}{1-\cos\theta}=\frac{(1-\cos\theta)(1+\cos\theta)}{1-\cos\theta}`, text: 'Substitute the factorization into the fraction.' },
+          { katex: String.raw`=1+\cos\theta`, text: 'Cancel the common factor (1−cosθ).' },
+          { katex: String.raw`\boxed{\frac{\sin^2\theta}{1-\cos\theta}=1+\cos\theta}`, text: 'So the simplified result is 1+cosθ.' },
+        ];
+        return { lhs, rhs, steps, wrong };
+      },
+      () => {
+        const lhs = String.raw`\frac{\sin\theta}{1-\cos\theta}`;
+        const rhs = String.raw`\frac{1+\cos\theta}{\sin\theta}`;
+        const wrong = [String.raw`\frac{1-\cos\theta}{\sin\theta}`, String.raw`\tan\theta`, String.raw`\cot\theta`];
+        const steps = [
+          { katex: String.raw`\text{Goal: simplify }\frac{\sin\theta}{1-\cos\theta}.`, text: 'This has a (1−cosθ) denominator, so we rationalize using the conjugate.' },
+          { katex: String.raw`\frac{\sin\theta}{1-\cos\theta}\cdot\frac{1+\cos\theta}{1+\cos\theta}`, text: 'Multiply by the conjugate (1+cosθ)/(1+cosθ), which equals 1.' },
+          { katex: String.raw`=\frac{\sin\theta(1+\cos\theta)}{(1-\cos\theta)(1+\cos\theta)}`, text: 'Multiply out numerator and denominator.' },
+          { katex: String.raw`(1-\cos\theta)(1+\cos\theta)=1-\cos^2\theta`, text: 'Use difference of squares in the denominator.' },
+          { katex: String.raw`=\frac{\sin\theta(1+\cos\theta)}{1-\cos^2\theta}`, text: 'Substitute 1−cos²θ.' },
+          { katex: String.raw`1-\cos^2\theta=\sin^2\theta`, text: 'Use 1 = sin²θ + cos²θ.' },
+          { katex: String.raw`=\frac{\sin\theta(1+\cos\theta)}{\sin^2\theta}`, text: 'Replace the denominator with sin²θ.' },
+          { katex: String.raw`=\frac{1+\cos\theta}{\sin\theta}`, text: 'Cancel one factor of sinθ.' },
+          { katex: String.raw`\boxed{\frac{\sin\theta}{1-\cos\theta}=\frac{1+\cos\theta}{\sin\theta}}`, text: 'So the simplified form is (1+cosθ)/sinθ.' },
+        ];
+        return { lhs, rhs, steps, wrong };
+      },
+      () => {
+        const p = rng.int(1, 5);
+        const lhs = String.raw`\frac{(1+\tan^2\theta)^{${p}}}{\sec^{2${p}}\theta}`;
+        const rhs = String.raw`1`;
+        const wrong = [String.raw`0`, String.raw`\sec^{2${p}}\theta`, String.raw`\tan^{2${p}}\theta`];
+        const steps = [
+          { katex: String.raw`1+\tan^2\theta=\sec^2\theta`, text: 'Use the Pythagorean identity.' },
+          { katex: String.raw`\frac{(\sec^2\theta)^{${p}}}{\sec^{2${p}}\theta}=\frac{\sec^{2${p}}\theta}{\sec^{2${p}}\theta}`, text: 'Substitute and simplify powers.' },
+          { katex: String.raw`=1`, text: 'Any nonzero expression divided by itself equals 1.' },
+        ];
+        return { lhs, rhs, steps, wrong };
+      },
+      () => {
+        const which = rng.int(0, 2);
+        const lhs = which === 0
+          ? String.raw`\frac{\sin\theta}{\cos\theta}`
+          : which === 1
+            ? String.raw`\frac{\cos\theta}{\sin\theta}`
+            : String.raw`\frac{1}{\tan\theta}`;
+        const rhs = which === 0 ? String.raw`\tan\theta` : which === 1 ? String.raw`\cot\theta` : String.raw`\cot\theta`;
+        const wrong = which === 0
+          ? [String.raw`\cot\theta`, String.raw`\sec\theta`, String.raw`\csc\theta`]
+          : [String.raw`\tan\theta`, String.raw`\sec\theta`, String.raw`\csc\theta`];
+        const steps = which === 0
+          ? [
+            { katex: String.raw`\tan\theta=\frac{\sin\theta}{\cos\theta}`, text: 'Use the quotient identity.' },
+            { katex: String.raw`\frac{\sin\theta}{\cos\theta}=\tan\theta`, text: 'Match the given expression.' },
+          ]
+          : which === 1
+            ? [
+              { katex: String.raw`\cot\theta=\frac{\cos\theta}{\sin\theta}`, text: 'Use the quotient identity.' },
+              { katex: String.raw`\frac{\cos\theta}{\sin\theta}=\cot\theta`, text: 'Match the given expression.' },
+            ]
+            : [
+              { katex: String.raw`\cot\theta=\frac{1}{\tan\theta}`, text: 'Use the reciprocal identity.' },
+              { katex: String.raw`\frac{1}{\tan\theta}=\cot\theta`, text: 'Match the given expression.' },
+            ];
+        return { lhs, rhs, steps, wrong };
+      },
+      () => {
+        const lhs = String.raw`\frac{\sin^2\theta}{1+\cot^2\theta}`;
+        const rhs = String.raw`\sin^4\theta`;
+        const wrong = [String.raw`\sin^2\theta`, String.raw`\cos^2\theta`, String.raw`\sin^2\theta\cos^2\theta`];
+        const steps = [
+          { katex: String.raw`1+\cot^2\theta=\csc^2\theta`, text: 'Use the Pythagorean identity for cotangent.' },
+          { katex: String.raw`\csc^2\theta=\frac{1}{\sin^2\theta}`, text: 'Write csc in terms of sin.' },
+          { katex: String.raw`\frac{\sin^2\theta}{1+\cot^2\theta}=\frac{\sin^2\theta}{\frac{1}{\sin^2\theta}}`, text: 'Substitute the identities.' },
+          { katex: String.raw`=\sin^2\theta\cdot\sin^2\theta=\sin^4\theta`, text: 'Multiply and simplify.' },
+        ];
+        return { lhs, rhs, steps, wrong };
+      },
+    ];
+
+    const row = templates[rng.int(0, templates.length - 1)]!();
+    const correct = row.rhs;
+    const wrongFromTemplate = row.wrong.filter((x) => x !== correct);
+    const wrongPool = makeWrongPool(correct);
+    const avoid = new Set<string>([correct, ...wrongFromTemplate]);
+    const extraWrong = pickDistinct(wrongPool, Math.max(0, 3 - wrongFromTemplate.length), avoid);
+    const optionsRaw = [correct, ...wrongFromTemplate, ...extraWrong];
+    const optionsUnique: string[] = [];
+    for (const o of optionsRaw) if (!optionsUnique.includes(o)) optionsUnique.push(o);
+    while (optionsUnique.length < 4) optionsUnique.push(optionsUnique[0]!);
+    const shuffled = shuffle(rng, optionsUnique.slice(0, 4));
+    const correctIndex = shuffled.indexOf(correct);
+
+    const promptText = '';
+    const promptKatex = String.raw`\text{What can }(${row.lhs})\text{ be written as.}`;
+
+    return {
+      kind: 'graph',
+      id: stableId('trig-ident-simplify', 0, `${row.lhs}__${row.rhs}`),
+      topicId: 'graph_trigonometry',
+      difficulty: input.difficulty,
+      seed: input.seed,
+      generatorParams: { kind: 'identity_simplify' },
+      promptText,
+      promptKatex,
+      katexQuestion: '',
+      katexOptions: shuffled,
+      correctIndex,
+      svgDataUrl: '',
+      svgAltText: 'A trigonometry identity multiple-choice question.',
+      katexExplanation: {
+        steps: row.steps,
+        summary: 'Rewrite everything in terms of sin and cos (or use standard identities), then simplify.',
+      },
+    };
+  }
+
   {
     const allRatios = ['sin', 'cos', 'tan', 'cot', 'sec', 'csc'] as const;
     const givenPool = input.difficulty === 'hard' ? allRatios : (['tan', 'cot'] as const);

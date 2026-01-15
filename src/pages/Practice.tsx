@@ -676,6 +676,7 @@ export default function Practice() {
 
   useEffect(() => {
     if (step !== 'session') return;
+    if (!practiceHistoryLoadedRef.current) return;
     if (!question) {
       generateNext(sessionSeed);
     }
@@ -1412,7 +1413,6 @@ export default function Practice() {
               ) : (() => {
                   const isWordProblem = (question as any).topicId === 'word_problems' || (question as any).kind === 'word_problem';
                   const wpPromptText = isWordProblem ? String((question as any).promptText ?? '') : '';
-                  const isNumberPropertiesPuzzle = isWordProblem && String((question as any).variantId ?? '') === 'number_properties_puzzle';
 
                   const stripLatex = (src: string) => src
                     // Remove common LaTeX wrappers seen in some prompt strings.
@@ -1480,7 +1480,7 @@ export default function Practice() {
                       .filter(Boolean);
 
                     return (
-                      <div className={`w-full select-none font-slab text-xl md:text-2xl leading-snug text-left${isNumberPropertiesPuzzle ? ' tk-wp-number-properties-font' : ''}`}>
+                      <div className={`w-full select-none font-slab text-xl md:text-2xl leading-snug text-left`}>
                         <div className="w-full min-w-0 max-w-full space-y-2">
                           {sentences.map((t, i) => {
                             const segs = restoreFractionsParts(t, fracs);
@@ -1511,7 +1511,7 @@ export default function Practice() {
                       if (cleaned) {
                         const segs = restoreFractionsParts(cleaned, fracs);
                         return (
-                          <div className={`w-full select-none font-slab text-xl md:text-2xl leading-snug text-left${isNumberPropertiesPuzzle ? ' tk-wp-number-properties-font' : ''}`}>
+                          <div className={`w-full select-none font-slab text-xl md:text-2xl leading-snug text-left`}>
                             {segs.map((seg, j) => seg.kind === 'math'
                               ? (
                                 <span key={j} className="inline-block align-baseline mx-1">

@@ -408,12 +408,6 @@ All colors MUST be HSL.
     word-break: break-word;
   }
 
-  .tk-wp-number-properties-font,
-  .tk-wp-number-properties-font *:not(.katex):not(.katex *) {
-    font-family: 'DejanireText', ui-serif, Georgia, Cambria, 'Times New Roman', Times, serif !important;
-    font-style: italic;
-  }
-
   .tk-wp-expl-text,
   .tk-wp-expl-text *:not(.katex):not(.katex *) {
     font-family: 'Roboto Slab', ui-serif, Georgia, Cambria, 'Times New Roman', Times, serif;

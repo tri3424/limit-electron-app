@@ -269,6 +269,9 @@ export function generatePracticeQuestion(input: {
         ? Math.max(0, weights.unit_circle)
         : (input.difficulty === 'easy' ? 75 : input.difficulty === 'medium' ? 70 : 65);
       const ratioQuadrantWeight = typeof weights?.ratio_quadrant === 'number' ? Math.max(0, weights.ratio_quadrant) : 10;
+      const identitySimplifyWeight = typeof weights?.identity_simplify === 'number'
+        ? Math.max(0, weights.identity_simplify)
+        : (input.difficulty === 'hard' ? 35 : 0);
 
       const total = unitCircleWeight + ratioQuadrantWeight;
       const pick = total <= 0 ? 0 : rng.next() * total;
@@ -288,6 +291,7 @@ export function generatePracticeQuestion(input: {
         // Forward internal weights for the non-unit-circle variants.
         variantWeights: {
           ratio_quadrant: ratioQuadrantWeight,
+          identity_simplify: identitySimplifyWeight,
         },
       });
     }
@@ -430,38 +434,58 @@ function generateLinear(input: { topicId: PracticeTopicId; difficulty: PracticeD
 function generateFractions(input: { topicId: PracticeTopicId; difficulty: PracticeDifficulty; seed: number }): FractionsQuestion {
   const rng = mulberry32(input.seed);
 
-  const maxD = input.difficulty === 'easy' ? 9 : input.difficulty === 'medium' ? 12 : 20;
-  const a = rng.int(1, maxD);
-  const b = rng.int(1, maxD);
-  const c = rng.int(1, maxD);
-  const d = rng.int(1, maxD);
+  const gcdInt = (x: number, y: number): number => {
+    let A = Math.abs(x);
+    let B = Math.abs(y);
+    while (B !== 0) {
+      const t = A % B;
+      A = B;
+      B = t;
+    }
+    return A;
+  };
 
-  const op = rng.next() < 0.5 ? '+' : '-';
+  const makeReducibleFraction = () => {
+    const factorMax = input.difficulty === 'easy' ? 9 : input.difficulty === 'medium' ? 12 : 18;
+    const aMax = input.difficulty === 'easy' ? 12 : input.difficulty === 'medium' ? 18 : 25;
+    const bMax = input.difficulty === 'easy' ? 14 : input.difficulty === 'medium' ? 22 : 35;
 
-  // a/b ± c/d
-  const n = op === '+' ? a * d + c * b : a * d - c * b;
-  const den = b * d;
-  const sol = frac(n, den);
+    let tries = 0;
+    while (tries < 200) {
+      tries += 1;
+      const k = rng.int(2, factorMax);
+      const a = rng.int(1, aMax);
+      const b = rng.int(2, bMax);
+      if (gcdInt(a, b) !== 1) continue;
+      const n = a * k;
+      const d = b * k;
+      if (d === 0) continue;
+      if (n === d) continue;
+      if (n > d * 3) continue;
+      return { n, d };
+    }
+    return { n: 12, d: 30 };
+  };
 
-  const qLatex = `\\frac{${a}}{${b}} ${op} \\frac{${c}}{${d}}`;
+  const f = makeReducibleFraction();
+  const hcf = gcdInt(f.n, f.d);
+  const sn = f.n / hcf;
+  const sd = f.d / hcf;
+  const sol = frac(sn, sd);
+
+  const qLatex = String.raw`\text{Write~}\frac{${f.n}}{${f.d}}\text{~in~its~simplest~form.}`;
   const solLatex = fractionToLatex(sol);
 
   const explanation: KatexExplanationBlock[] = [
-    { kind: 'text', content: 'We want to calculate the result and write it as a simplified fraction.' },
-    { kind: 'math', content: qLatex, displayMode: true },
-    { kind: 'text', content: 'First, we make the denominators the same.' },
-    { kind: 'math', content: `\\frac{${a}}{${b}} = \\frac{${a}\\cdot${d}}{${b}\\cdot${d}} = \\frac{${a * d}}{${b * d}}`, displayMode: true },
-    { kind: 'math', content: `\\frac{${c}}{${d}} = \\frac{${c}\\cdot${b}}{${d}\\cdot${b}} = \\frac{${c * b}}{${d * b}}`, displayMode: true },
-    { kind: 'text', content: `Now we ${op === '+' ? 'add' : 'subtract'} the numerators and keep the common denominator.` },
-    { kind: 'math', content: `= \\frac{${a * d} ${op} ${c * b}}{${b * d}}`, displayMode: true },
-    { kind: 'math', content: `= \\frac{${n}}{${den}}`, displayMode: true },
-    { kind: 'text', content: 'Finally, we simplify the fraction if possible.' },
-    { kind: 'math', content: `= ${solLatex}`, displayMode: true },
+    { kind: 'text', content: `Find the highest common factor (HCF) of ${f.n} and ${f.d}.` },
+    { kind: 'text', content: `The HCF is ${hcf}.` },
+    { kind: 'math', content: String.raw`\frac{${f.n}}{${f.d}} = \frac{${f.n}\div ${hcf}}{${f.d}\div ${hcf}}`, displayMode: true },
+    { kind: 'math', content: String.raw`= ${solLatex}`, displayMode: true },
   ];
 
   return {
     kind: 'fractions',
-    id: stableId('fractions', input.seed, `${a}-${b}-${c}-${d}-${op}`),
+    id: stableId('fractions', input.seed, `simplify-${f.n}-${f.d}`),
     topicId: 'fractions',
     difficulty: input.difficulty,
     seed: input.seed,

@@ -223,6 +223,7 @@ export function generateWordProblemQuestion(input: {
   const rng = mulberry32(input.seed);
   const variantId = pickVariantByDifficulty(rng, input.difficulty, input.avoidVariantId, input.variantWeights);
   const sub = rng.int(0, 9);
+  const topicId: WordProblemQuestion['topicId'] = 'word_problems';
 
   const mk = (payload: {
     idSuffix: string;
@@ -239,7 +240,7 @@ export function generateWordProblemQuestion(input: {
     return {
       kind: 'word_problem',
       id,
-      topicId: 'word_problems',
+      topicId,
       variantId,
       difficulty: input.difficulty,
       seed: input.seed,
@@ -1708,63 +1709,6 @@ export function generateWordProblemQuestion(input: {
       checks: ['Answer should be smaller than 9.6 because m/s is a smaller unit per second.'],
     });
     return mk({ idSuffix: `mini-kmh-${kmh}`, katexQuestion: q, katexExplanation: expl, answerKind: 'decimal_2dp', expectedNumber: Number(asFixed2(ms)) });
-  }
-
-  if (mixSub === 8) {
-    const gcdInt = (x: number, y: number): number => {
-      let A = Math.abs(x);
-      let B = Math.abs(y);
-      while (B !== 0) {
-        const t = A % B;
-        A = B;
-        B = t;
-      }
-      return A;
-    };
-
-    const makeReducibleFraction = () => {
-      const factorMax = input.difficulty === 'easy' ? 9 : input.difficulty === 'medium' ? 12 : 18;
-      const aMax = input.difficulty === 'easy' ? 12 : input.difficulty === 'medium' ? 18 : 25;
-      const bMax = input.difficulty === 'easy' ? 14 : input.difficulty === 'medium' ? 22 : 35;
-
-      let tries = 0;
-      while (tries < 200) {
-        tries += 1;
-        const k = rng.int(2, factorMax);
-        const a = rng.int(1, aMax);
-        const b = rng.int(2, bMax);
-        if (gcdInt(a, b) !== 1) continue;
-        const n = a * k;
-        const d = b * k;
-        if (d === 0) continue;
-        if (n === d) continue;
-        if (n > d * 3) continue;
-        return { n, d, k, a, b };
-      }
-      return { n: 12, d: 30, k: 6, a: 2, b: 5 };
-    };
-
-    const f = makeReducibleFraction();
-    const hcf = gcdInt(f.n, f.d);
-    const sn = f.n / hcf;
-    const sd = f.d / hcf;
-
-    const q = String.raw`\text{Write~}\frac{${f.n}}{${f.d}}\text{~in~its~simplest~form.}`;
-    const working: KatexExplanationBlock[] = [
-      { kind: 'text', content: `Find the highest common factor (HCF) of ${f.n} and ${f.d}.` },
-      { kind: 'text', content: `The HCF is ${hcf}.` },
-      { kind: 'math', content: String.raw`\frac{${f.n}}{${f.d}} = \frac{${f.n}\div ${hcf}}{${f.d}\div ${hcf}}`, displayMode: true },
-      { kind: 'math', content: String.raw`= \frac{${sn}}{${sd}}`, displayMode: true },
-    ];
-    const expl = scaffoldExplanation({
-      title: 'Number skill: simplifying a fraction.',
-      givens: [`fraction = ${f.n}/${f.d}`],
-      goal: 'Write the fraction in simplest form.',
-      method: ['Find the HCF of numerator and denominator.', 'Divide numerator and denominator by the HCF.'],
-      working,
-      checks: [`${sn} and ${sd} have no common factor greater than 1, so it is simplest.`],
-    });
-    return mk({ idSuffix: `mini-simplify-${f.n}-${f.d}`, katexQuestion: q, katexExplanation: expl, answerKind: 'rational', expectedFraction: frac(sn, sd) });
   }
 
   // mixSub === 9
