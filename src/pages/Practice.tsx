@@ -899,6 +899,13 @@ export default function Practice() {
         if (!Number.isFinite(v)) return false;
         return v === (q as any).expectedNumber;
       }
+      case 'permutation_combination': {
+        const trimmed = String(answer1 ?? '').trim().replace(/\s+/g, '').replace(/[−–]/g, '-');
+        if (!/^\d+$/.test(trimmed)) return false;
+        const v = Number(trimmed);
+        if (!Number.isFinite(v)) return false;
+        return v === Number((q as any).expectedNumber);
+      }
       case 'simultaneous': {
         const xOk = checkSingleFractionAnswer(q.solutionX, answer1);
         const yOk = checkSingleFractionAnswer(q.solutionY, answer2);
@@ -1064,6 +1071,15 @@ export default function Practice() {
 
   const chooserTitle = mode === 'mixed' ? 'Mixed Exercises' : 'Individual Topics';
 
+  const currentTitle = useMemo(() => {
+    if (step === 'chooser') return chooserTitle;
+    if (mode === 'mixed') {
+      const m = (mixedModules ?? []).find((x) => x.id === mixedModuleId);
+      return m?.title || 'Mixed Exercises';
+    }
+    return selectedTopic?.title || 'Practice';
+  }, [chooserTitle, mixedModuleId, mixedModules, mode, selectedTopic?.title, step]);
+
   const nowMs = Date.now();
   const chooserList = mode === 'mixed'
     ? (mixedModules ?? []).map((m) => {
@@ -1072,23 +1088,6 @@ export default function Practice() {
         return { id: m.id, title: m.title || 'Untitled mixed module', disabled: !isOpen };
       })
     : PRACTICE_TOPICS.map((t) => ({ id: t.id, title: t.title, disabled: !t.enabled || !!(practiceTopicLocks as any)[t.id] }));
-
-  const currentTitle = useMemo(() => {
-    if (mode === 'mixed') return selectedMixedModule?.title || 'Mixed Exercises';
-    return selectedTopic?.title || 'Practice';
-  }, [mode, selectedMixedModule?.title, selectedTopic?.title]);
-
-  const currentInstruction = useMemo(() => {
-    if (!question) return '';
-    if (mode === 'mixed') {
-      const items = selectedMixedModule?.items ?? [];
-      const idx = mixedCursor % (items.length || 1);
-      const it = items[idx];
-      const topic = PRACTICE_TOPICS.find((t) => t.id === it?.topicId);
-      return '';
-    }
-    return '';
-  }, [mode, mixedCursor, question, selectedMixedModule?.items, selectedTopic?.description]);
 
   const sessionInstruction = useMemo(() => {
     if (!question) return '';
@@ -1105,6 +1104,10 @@ export default function Practice() {
         return 'Calculate the result and enter your answer as a simplified fraction (or integer).';
       case 'indices':
         return 'Use index laws to find the final exponent. Enter only the exponent as an integer.';
+      case 'polynomial':
+        return 'Enter your answer as an integer.';
+      case 'permutation_combination':
+        return 'Enter your answer as an integer.';
       case 'simultaneous':
         return 'Solve for x and y. Enter both values (fractions are allowed).';
       case 'factorisation':
@@ -1116,7 +1119,7 @@ export default function Practice() {
       default:
         return '';
     }
-  }, [currentInstruction, question]);
+  }, [question]);
 
   return (
     <div className="w-full py-8">

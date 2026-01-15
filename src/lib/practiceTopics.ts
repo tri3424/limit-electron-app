@@ -6,6 +6,7 @@ export type PracticeTopicId =
   | 'algebraic_factorisation'
   | 'fractions'
   | 'indices'
+  | 'permutation_combination'
   | 'polynomials'
   | 'simultaneous_equations'
   | 'graph_quadratic_line'
@@ -57,6 +58,13 @@ export const PRACTICE_TOPICS: PracticeTopic[] = [
     id: 'indices',
     title: 'Indices',
     description: 'Use index laws to find the final exponent.',
+    enabled: true,
+    difficulties: ['easy', 'medium', 'hard'],
+  },
+  {
+    id: 'permutation_combination',
+    title: 'Permutation Combination',
+    description: 'Counting techniques: permutations, combinations, and restrictions.',
     enabled: true,
     difficulties: ['easy', 'medium', 'hard'],
   },

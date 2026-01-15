@@ -158,6 +158,20 @@ export function generateGraphTrigonometryMcq(input: {
   const variant = pickVariant();
 
   if (variant === 'identity_simplify') {
+    const fmtTrigPow = (name: 'sin' | 'cos', exp: number): string => {
+      if (exp === 0) return '';
+      const base = name === 'sin' ? String.raw`\sin\theta` : String.raw`\cos\theta`;
+      if (exp === 1) return base;
+      return name === 'sin' ? String.raw`\sin^{${exp}}\theta` : String.raw`\cos^{${exp}}\theta`;
+    };
+
+    const joinFactors = (factors: string[]): string => {
+      const xs = factors.map((s) => String(s ?? '').trim()).filter(Boolean);
+      if (!xs.length) return String.raw`1`;
+      if (xs.length === 1) return xs[0]!;
+      return xs.join(String.raw`\,`);
+    };
+
     const makeWrongPool = (correct: string) => {
       const pool = [
         String.raw`\sin\theta`,
@@ -211,7 +225,7 @@ export function generateGraphTrigonometryMcq(input: {
       () => {
         const p = rng.int(1, 8);
         const lhs = String.raw`\frac{\sin^{${p}}\theta}{\csc\theta}`;
-        const rhs = String.raw`\sin^{${p + 1}}\theta`;
+        const rhs = fmtTrigPow('sin', p + 1);
         const wrong = [String.raw`\sin^{${p}}\theta`, String.raw`\sin^{${p - 1 < 0 ? 0 : p - 1}}\theta`, String.raw`\csc^{${p + 1}}\theta`].filter((x) => x !== rhs);
         const steps = [
           { katex: String.raw`\text{Goal: simplify }\frac{\sin^{${p}}\theta}{\csc\theta}.`, text: 'We will rewrite everything using basic trig identities.' },
@@ -219,15 +233,15 @@ export function generateGraphTrigonometryMcq(input: {
           { katex: String.raw`\frac{\sin^{${p}}\theta}{\csc\theta}=\frac{\sin^{${p}}\theta}{\frac{1}{\sin\theta}}`, text: 'Substitute cscθ into the expression.' },
           { katex: String.raw`\frac{1}{\frac{1}{\sin\theta}}=\sin\theta`, text: 'Dividing by a fraction means multiplying by its reciprocal.' },
           { katex: String.raw`\frac{\sin^{${p}}\theta}{\frac{1}{\sin\theta}}=\sin^{${p}}\theta\cdot\sin\theta`, text: 'Rewrite as a product.' },
-          { katex: String.raw`\sin^{${p}}\theta\cdot\sin\theta=\sin^{${p+1}}\theta`, text: 'Multiply same-base powers: add exponents.' },
-          { katex: String.raw`\boxed{\frac{\sin^{${p}}\theta}{\csc\theta}=\sin^{${p + 1}}\theta}`, text: 'So the simplified form is sin^{p+1}θ.' },
+          { katex: String.raw`\sin^{${p}}\theta\cdot\sin\theta=\sin^{${p + 1}}\theta`, text: 'Multiply same-base powers: add exponents.' },
+          { katex: String.raw`\boxed{\frac{\sin^{${p}}\theta}{\csc\theta}=${rhs}}`, text: 'So this is the simplified form.' },
         ];
         return { lhs, rhs, steps, wrong };
       },
       () => {
         const p = rng.int(1, 8);
         const lhs = String.raw`\frac{\cos^{${p}}\theta}{\sec\theta}`;
-        const rhs = String.raw`\cos^{${p + 1}}\theta`;
+        const rhs = fmtTrigPow('cos', p + 1);
         const wrong = [String.raw`\cos^{${p}}\theta`, String.raw`\cos^{${p - 1 < 0 ? 0 : p - 1}}\theta`, String.raw`\sec^{${p + 1}}\theta`].filter((x) => x !== rhs);
         const steps = [
           { katex: String.raw`\text{Goal: simplify }\frac{\cos^{${p}}\theta}{\sec\theta}.`, text: 'We will rewrite everything using basic trig identities.' },
@@ -235,8 +249,8 @@ export function generateGraphTrigonometryMcq(input: {
           { katex: String.raw`\frac{\cos^{${p}}\theta}{\sec\theta}=\frac{\cos^{${p}}\theta}{\frac{1}{\cos\theta}}`, text: 'Substitute secθ into the expression.' },
           { katex: String.raw`\frac{1}{\frac{1}{\cos\theta}}=\cos\theta`, text: 'Dividing by a fraction means multiplying by its reciprocal.' },
           { katex: String.raw`\frac{\cos^{${p}}\theta}{\frac{1}{\cos\theta}}=\cos^{${p}}\theta\cdot\cos\theta`, text: 'Rewrite as a product.' },
-          { katex: String.raw`\cos^{${p}}\theta\cdot\cos\theta=\cos^{${p+1}}\theta`, text: 'Multiply same-base powers: add exponents.' },
-          { katex: String.raw`\boxed{\frac{\cos^{${p}}\theta}{\sec\theta}=\cos^{${p + 1}}\theta}`, text: 'So the simplified form is cos^{p+1}θ.' },
+          { katex: String.raw`\cos^{${p}}\theta\cdot\cos\theta=\cos^{${p + 1}}\theta`, text: 'Multiply same-base powers: add exponents.' },
+          { katex: String.raw`\boxed{\frac{\cos^{${p}}\theta}{\sec\theta}=${rhs}}`, text: 'So this is the simplified form.' },
         ];
         return { lhs, rhs, steps, wrong };
       },
@@ -291,7 +305,7 @@ export function generateGraphTrigonometryMcq(input: {
       () => {
         const p = rng.int(1, 6);
         const lhs = String.raw`\frac{\tan^{${p}}\theta}{\sec^{${p}}\theta}`;
-        const rhs = String.raw`\sin^{${p}}\theta`;
+        const rhs = fmtTrigPow('sin', p);
         const wrong = [String.raw`\cos^{${p}}\theta`, String.raw`\tan^{${p}}\theta`, String.raw`\sec^{${p}}\theta`].filter((x) => x !== rhs);
         const steps = [
           { katex: String.raw`\text{Goal: simplify }\frac{\tan^{${p}}\theta}{\sec^{${p}}\theta}.`, text: 'Rewrite tan and sec using sin and cos, then simplify.' },
@@ -302,14 +316,14 @@ export function generateGraphTrigonometryMcq(input: {
           { katex: String.raw`\frac{\tan^{${p}}\theta}{\sec^{${p}}\theta}=\frac{\left(\frac{\sin\theta}{\cos\theta}\right)^{${p}}}{\left(\frac{1}{\cos\theta}\right)^{${p}}}`, text: 'Substitute into the original expression.' },
           { katex: String.raw`=\left(\frac{\sin\theta}{\cos\theta}\right)^{${p}}\cdot\left(\cos\theta\right)^{${p}}`, text: 'Dividing by (1/cosθ)^p is multiplying by (cosθ)^p.' },
           { katex: String.raw`=\sin^{${p}}\theta`, text: 'The cos^p factors cancel, leaving sin^pθ.' },
-          { katex: String.raw`\boxed{\frac{\tan^{${p}}\theta}{\sec^{${p}}\theta}=\sin^{${p}}\theta}`, text: 'So the simplified form is sin^pθ.' },
+          { katex: String.raw`\boxed{\frac{\tan^{${p}}\theta}{\sec^{${p}}\theta}=${rhs}}`, text: 'So this is the simplified form.' },
         ];
         return { lhs, rhs, steps, wrong };
       },
       () => {
         const p = rng.int(1, 6);
         const lhs = String.raw`\frac{\cot^{${p}}\theta}{\csc^{${p}}\theta}`;
-        const rhs = String.raw`\cos^{${p}}\theta`;
+        const rhs = fmtTrigPow('cos', p);
         const wrong = [String.raw`\sin^{${p}}\theta`, String.raw`\cot^{${p}}\theta`, String.raw`\csc^{${p}}\theta`].filter((x) => x !== rhs);
         const steps = [
           { katex: String.raw`\text{Goal: simplify }\frac{\cot^{${p}}\theta}{\csc^{${p}}\theta}.`, text: 'Rewrite cot and csc using sin and cos, then simplify.' },
@@ -320,7 +334,7 @@ export function generateGraphTrigonometryMcq(input: {
           { katex: String.raw`\frac{\cot^{${p}}\theta}{\csc^{${p}}\theta}=\frac{\left(\frac{\cos\theta}{\sin\theta}\right)^{${p}}}{\left(\frac{1}{\sin\theta}\right)^{${p}}}`, text: 'Substitute into the original expression.' },
           { katex: String.raw`=\left(\frac{\cos\theta}{\sin\theta}\right)^{${p}}\cdot\left(\sin\theta\right)^{${p}}`, text: 'Dividing by (1/sinθ)^p is multiplying by (sinθ)^p.' },
           { katex: String.raw`=\cos^{${p}}\theta`, text: 'The sin^p factors cancel, leaving cos^pθ.' },
-          { katex: String.raw`\boxed{\frac{\cot^{${p}}\theta}{\csc^{${p}}\theta}=\cos^{${p}}\theta}`, text: 'So the simplified form is cos^pθ.' },
+          { katex: String.raw`\boxed{\frac{\cot^{${p}}\theta}{\csc^{${p}}\theta}=${rhs}}`, text: 'So this is the simplified form.' },
         ];
         return { lhs, rhs, steps, wrong };
       },
@@ -330,7 +344,9 @@ export function generateGraphTrigonometryMcq(input: {
         const c = rng.int(1, a - 1);
         const d = rng.int(1, b - 1);
         const lhs = String.raw`\frac{\sin^{${a}}\theta\,\cos^{${b}}\theta}{\sin^{${c}}\theta\,\cos^{${d}}\theta}`;
-        const rhs = String.raw`\sin^{${a - c}}\theta\,\cos^{${b - d}}\theta`;
+        const sExp = a - c;
+        const cExp = b - d;
+        const rhs = joinFactors([fmtTrigPow('sin', sExp), fmtTrigPow('cos', cExp)]);
         const wrong = [
           String.raw`\sin^{${a - c}}\theta\,\cos^{${b + d}}\theta`,
           String.raw`\sin^{${a + c}}\theta\,\cos^{${b - d}}\theta`,
@@ -342,8 +358,8 @@ export function generateGraphTrigonometryMcq(input: {
           { katex: String.raw`\frac{\sin^{${a}}\theta\,\cos^{${b}}\theta}{\sin^{${c}}\theta\,\cos^{${d}}\theta}=\frac{\sin^{${a}}\theta}{\sin^{${c}}\theta}\cdot\frac{\cos^{${b}}\theta}{\cos^{${d}}\theta}`, text: 'Apply the split to this expression.' },
           { katex: String.raw`\frac{\sin^{${a}}\theta}{\sin^{${c}}\theta}=\sin^{${a - c}}\theta`, text: 'Divide same-base powers by subtracting exponents.' },
           { katex: String.raw`\frac{\cos^{${b}}\theta}{\cos^{${d}}\theta}=\cos^{${b - d}}\theta`, text: 'Do the same for cosθ.' },
-          { katex: String.raw`\sin^{${a - c}}\theta\cdot\cos^{${b - d}}\theta`, text: 'Multiply the simplified factors together.' },
-          { katex: String.raw`\boxed{\frac{\sin^{${a}}\theta\,\cos^{${b}}\theta}{\sin^{${c}}\theta\,\cos^{${d}}\theta}=\sin^{${a - c}}\theta\,\cos^{${b - d}}\theta}`, text: 'So the expression simplifies to sin^{a−c}θ cos^{b−d}θ.' },
+          { katex: rhs, text: 'Multiply the simplified factors together.' },
+          { katex: String.raw`\boxed{\frac{\sin^{${a}}\theta\,\cos^{${b}}\theta}{\sin^{${c}}\theta\,\cos^{${d}}\theta}=${rhs}}`, text: 'So this is the simplified form.' },
         ];
         return { lhs, rhs, steps, wrong };
       },

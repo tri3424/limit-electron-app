@@ -1016,6 +1016,32 @@ export default function Settings() {
                     };
                   }
 
+                  if (t.id === 'fractions') {
+                    return {
+                      ...base,
+                      variants: [
+                        { key: 'simplify_fraction', label: 'Simplify a fraction', defaultValue: 35 },
+                        { key: 'add_sub_fractions', label: 'Add/Subtract fractions', defaultValue: 35 },
+                        { key: 'fraction_of_number', label: 'Fraction of a number', defaultValue: 20 },
+                        { key: 'mixed_to_improper', label: 'Mixed -> improper', defaultValue: 10 },
+                      ],
+                    };
+                  }
+
+                  if (t.id === 'permutation_combination') {
+                    return {
+                      ...base,
+                      variants: [
+                        { key: 'team_no_restriction', label: 'Team selection (no restrictions)', defaultValue: 20 },
+                        { key: 'team_group_not_separated', label: 'Team selection (group not separated)', defaultValue: 20 },
+                        { key: 'digits_even_unique', label: 'Digits (even, unique, no leading 0)', defaultValue: 20 },
+                        { key: 'arrange_together', label: 'Arrangements (two together)', defaultValue: 20 },
+                        { key: 'arrange_not_together', label: 'Arrangements (two not together)', defaultValue: 20 },
+                        { key: 'committee_men_women', label: 'Committee (men & women)', defaultValue: 20 },
+                      ],
+                    };
+                  }
+
                   if (t.id === 'graph_straight_line') {
                     return {
                       ...base,

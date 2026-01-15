@@ -8,6 +8,7 @@ import { generateIntegrationQuestion } from '@/lib/practiceGenerators/integratio
 import { generateCircularMeasureProblem } from '@/lib/practiceGenerators/circularMeasure';
 import { generateWordProblemQuestion, WordProblemQuestion, WordProblemVariantId } from '@/lib/practiceGenerators/wordProblems';
 import { generatePolynomialsQuestion } from '@/lib/practiceGenerators/polynomials';
+import { generatePermutationCombinationQuestion, PermutationCombinationQuestion, PermutationCombinationVariantId } from '@/lib/practiceGenerators/permutationCombination';
 
 export type PracticeDifficulty = 'easy' | 'medium' | 'hard';
 
@@ -46,6 +47,7 @@ export type PracticeTopicId =
   | 'algebraic_factorisation'
   | 'fractions'
   | 'indices'
+  | 'permutation_combination'
   | 'polynomials'
   | 'simultaneous_equations'
   | 'graph_quadratic_line'
@@ -65,6 +67,8 @@ export type PracticeQuestionBase = {
   katexExplanation: KatexExplanationBlock[];
 };
 
+export type PermutationCombinationPracticeQuestion = PermutationCombinationQuestion & PracticeQuestionBase;
+
 export type QuadraticQuestion = {
   kind: 'quadratic';
   solutions: Fraction[]; // length 2, repeated-root duplicated
@@ -79,9 +83,16 @@ export type LinearQuestion = {
 
 export type FractionsQuestion = {
   kind: 'fractions';
+  variantId: FractionsVariantId;
   solution: Fraction;
   solutionLatex: string;
 } & PracticeQuestionBase;
+
+export type FractionsVariantId =
+  | 'simplify_fraction'
+  | 'add_sub_fractions'
+  | 'fraction_of_number'
+  | 'mixed_to_improper';
 
 export type SimultaneousQuestion = {
   kind: 'simultaneous';
@@ -164,6 +175,7 @@ export type PracticeQuestion =
   | FractionsQuestion
   | SimultaneousQuestion
   | IndicesQuestion
+  | PermutationCombinationPracticeQuestion
   | PolynomialsQuestion
   | FactorisationQuestion
   | CalculusPracticeQuestion
@@ -222,9 +234,32 @@ export function generatePracticeQuestion(input: {
     case 'linear_equations':
       return generateLinear(input);
     case 'fractions':
-      return generateFractions(input);
+      return generateFractions({
+        topicId: 'fractions',
+        difficulty: input.difficulty,
+        seed: input.seed,
+        avoidVariantId: input.avoidVariantId as FractionsVariantId | undefined,
+        variantWeights: input.variantWeights,
+      });
     case 'indices':
       return generateIndices(input);
+    case 'permutation_combination': {
+      const q = generatePermutationCombinationQuestion({
+        seed: input.seed,
+        difficulty: input.difficulty,
+        avoidVariantId: input.avoidVariantId as PermutationCombinationVariantId | undefined,
+        variantWeights: input.variantWeights,
+      });
+      return {
+        ...(q as any),
+        // Ensure base shape aligns with PracticeQuestionBase.
+        topicId: 'permutation_combination',
+        seed: input.seed,
+        difficulty: input.difficulty,
+        katexQuestion: q.katexQuestion,
+        katexExplanation: q.katexExplanation,
+      } as any;
+    }
     case 'polynomials': {
       const q = generatePolynomialsQuestion({ seed: input.seed, difficulty: input.difficulty });
       return {
@@ -431,8 +466,40 @@ function generateLinear(input: { topicId: PracticeTopicId; difficulty: PracticeD
   };
 }
 
-function generateFractions(input: { topicId: PracticeTopicId; difficulty: PracticeDifficulty; seed: number }): FractionsQuestion {
+function generateFractions(input: {
+  topicId: PracticeTopicId;
+  difficulty: PracticeDifficulty;
+  seed: number;
+  avoidVariantId?: FractionsVariantId;
+  variantWeights?: Record<string, number>;
+}): FractionsQuestion {
   const rng = mulberry32(input.seed);
+
+  const pickVariant = (): FractionsVariantId => {
+    const all: FractionsVariantId[] = ['simplify_fraction', 'add_sub_fractions', 'fraction_of_number', 'mixed_to_improper'];
+    const pool = all.filter((v) => v !== input.avoidVariantId);
+    const weights = pool.map((k) => {
+      const w = (input.variantWeights as any)?.[k];
+      return typeof w === 'number' ? Math.max(0, Number(w)) : 1;
+    });
+    // difficulty gating
+    const allowed = pool.filter((v, idx) => {
+      if (input.difficulty === 'easy') return v === 'simplify_fraction' || v === 'fraction_of_number';
+      if (input.difficulty === 'medium') return v !== 'mixed_to_improper';
+      return true;
+    });
+    const allowedWeights = allowed.map((v) => weights[pool.indexOf(v)] ?? 1);
+    const total = allowedWeights.reduce((a, b) => a + b, 0);
+    if (!(total > 0)) return allowed[rng.int(0, allowed.length - 1)]!;
+    let r = rng.next() * total;
+    for (let i = 0; i < allowed.length; i++) {
+      r -= allowedWeights[i]!;
+      if (r <= 0) return allowed[i]!;
+    }
+    return allowed[allowed.length - 1]!;
+  };
+
+  const variantId = pickVariant();
 
   const gcdInt = (x: number, y: number): number => {
     let A = Math.abs(x);
@@ -467,32 +534,103 @@ function generateFractions(input: { topicId: PracticeTopicId; difficulty: Practi
     return { n: 12, d: 30 };
   };
 
-  const f = makeReducibleFraction();
-  const hcf = gcdInt(f.n, f.d);
-  const sn = f.n / hcf;
-  const sd = f.d / hcf;
-  const sol = frac(sn, sd);
+  const simplifyFractionVariant = () => {
+    const f = makeReducibleFraction();
+    const hcf = gcdInt(f.n, f.d);
+    const sn = f.n / hcf;
+    const sd = f.d / hcf;
+    const sol = frac(sn, sd);
+    const qLatex = String.raw`\text{Write~}\frac{${f.n}}{${f.d}}\text{~in~its~simplest~form.}`;
+    const solLatex = fractionToLatex(sol);
+    const explanation: KatexExplanationBlock[] = [
+      { kind: 'text', content: `Find the highest common factor (HCF) of ${f.n} and ${f.d}.` },
+      { kind: 'text', content: `The HCF is ${hcf}.` },
+      { kind: 'math', content: String.raw`\frac{${f.n}}{${f.d}} = \frac{${f.n}\div ${hcf}}{${f.d}\div ${hcf}}`, displayMode: true },
+      { kind: 'math', content: String.raw`= ${solLatex}`, displayMode: true },
+    ];
+    return { qLatex, explanation, sol, idSuffix: `simplify-${f.n}-${f.d}` };
+  };
 
-  const qLatex = String.raw`\text{Write~}\frac{${f.n}}{${f.d}}\text{~in~its~simplest~form.}`;
-  const solLatex = fractionToLatex(sol);
+  const addSubVariant = () => {
+    const maxD = input.difficulty === 'easy' ? 8 : input.difficulty === 'medium' ? 12 : 18;
+    const a = rng.int(1, input.difficulty === 'hard' ? 15 : 12);
+    const b = rng.int(2, maxD);
+    const c = rng.int(1, input.difficulty === 'hard' ? 15 : 12);
+    const d = rng.int(2, maxD);
+    const op = rng.next() < 0.5 ? '+' : '-';
+    const n = op === '+' ? a * d + c * b : a * d - c * b;
+    const den = b * d;
+    const sol = frac(n, den);
+    const qLatex = String.raw`\text{Calculate: }\frac{${a}}{${b}}\;${op}\;\frac{${c}}{${d}}\text{ (give a simplified answer).}`;
+    const solLatex = fractionToLatex(sol);
+    const explanation: KatexExplanationBlock[] = [
+      { kind: 'text', content: 'To add/subtract fractions, use a common denominator.' },
+      { kind: 'math', content: String.raw`\frac{${a}}{${b}}\;${op}\;\frac{${c}}{${d}}`, displayMode: true },
+      { kind: 'text', content: `Common denominator is ${b}\times ${d} = ${den}.` },
+      { kind: 'math', content: String.raw`= \frac{${a}\cdot ${d}}{${b}\cdot ${d}}\;${op}\;\frac{${c}\cdot ${b}}{${d}\cdot ${b}}`, displayMode: true },
+      { kind: 'math', content: String.raw`= \frac{${a * d} \;${op}\; ${c * b}}{${den}}`, displayMode: true },
+      { kind: 'math', content: String.raw`= \frac{${n}}{${den}}`, displayMode: true },
+      { kind: 'text', content: 'Finally, simplify the fraction if possible.' },
+      { kind: 'math', content: String.raw`= ${solLatex}`, displayMode: true },
+    ];
+    return { qLatex, explanation, sol, idSuffix: `addsub-${a}-${b}-${c}-${d}-${op}` };
+  };
 
-  const explanation: KatexExplanationBlock[] = [
-    { kind: 'text', content: `Find the highest common factor (HCF) of ${f.n} and ${f.d}.` },
-    { kind: 'text', content: `The HCF is ${hcf}.` },
-    { kind: 'math', content: String.raw`\frac{${f.n}}{${f.d}} = \frac{${f.n}\div ${hcf}}{${f.d}\div ${hcf}}`, displayMode: true },
-    { kind: 'math', content: String.raw`= ${solLatex}`, displayMode: true },
-  ];
+  const fractionOfNumberVariant = () => {
+    const denom = rng.int(2, input.difficulty === 'hard' ? 15 : 12);
+    const num = rng.int(1, denom - 1);
+    const k = rng.int(2, input.difficulty === 'hard' ? 30 : 18);
+    const whole = denom * k;
+    const ans = (num * whole) / denom;
+    const sol = frac(ans, 1);
+    const qLatex = String.raw`\text{Find }\frac{${num}}{${denom}}\text{ of }${whole}\text{.}`;
+    const explanation: KatexExplanationBlock[] = [
+      { kind: 'text', content: '“Fraction of a number” means multiply the number by the fraction.' },
+      { kind: 'math', content: String.raw`\frac{${num}}{${denom}}\times ${whole}`, displayMode: true },
+      { kind: 'text', content: `First divide ${whole} by ${denom}, then multiply by ${num}.` },
+      { kind: 'math', content: String.raw`${whole}\div ${denom} = ${whole / denom}`, displayMode: true },
+      { kind: 'math', content: String.raw`${whole / denom}\times ${num} = ${ans}`, displayMode: true },
+      { kind: 'math', content: String.raw`\boxed{${ans}}`, displayMode: true },
+    ];
+    return { qLatex, explanation, sol, idSuffix: `fracof-${num}-${denom}-${whole}` };
+  };
+
+  const mixedToImproperVariant = () => {
+    const d = rng.int(2, input.difficulty === 'hard' ? 15 : 12);
+    const a = rng.int(1, d - 1);
+    const w = rng.int(1, input.difficulty === 'hard' ? 9 : 6);
+    const n = w * d + a;
+    const sol = frac(n, d);
+    const qLatex = String.raw`\text{Write }${w}\;\frac{${a}}{${d}}\text{ as an improper fraction in simplest form.}`;
+    const solLatex = fractionToLatex(sol);
+    const explanation: KatexExplanationBlock[] = [
+      { kind: 'text', content: 'To convert a mixed number to an improper fraction:' },
+      { kind: 'text', content: 'Multiply the whole number by the denominator, then add the numerator.' },
+      { kind: 'math', content: String.raw`${w}\;\frac{${a}}{${d}} = \frac{${w}\cdot ${d} + ${a}}{${d}}`, displayMode: true },
+      { kind: 'math', content: String.raw`= \frac{${n}}{${d}}`, displayMode: true },
+      { kind: 'math', content: String.raw`= ${solLatex}`, displayMode: true },
+    ];
+    return { qLatex, explanation, sol, idSuffix: `mixed-${w}-${a}-${d}` };
+  };
+
+  const chosen = (() => {
+    if (variantId === 'simplify_fraction') return simplifyFractionVariant();
+    if (variantId === 'add_sub_fractions') return addSubVariant();
+    if (variantId === 'fraction_of_number') return fractionOfNumberVariant();
+    return mixedToImproperVariant();
+  })();
 
   return {
     kind: 'fractions',
-    id: stableId('fractions', input.seed, `simplify-${f.n}-${f.d}`),
+    variantId,
+    id: stableId('fractions', input.seed, `${variantId}-${chosen.idSuffix}`),
     topicId: 'fractions',
     difficulty: input.difficulty,
     seed: input.seed,
-    katexQuestion: qLatex,
-    katexExplanation: explanation,
-    solution: sol,
-    solutionLatex: solLatex,
+    katexQuestion: chosen.qLatex,
+    katexExplanation: chosen.explanation,
+    solution: chosen.sol,
+    solutionLatex: fractionToLatex(chosen.sol),
   };
 }
 
