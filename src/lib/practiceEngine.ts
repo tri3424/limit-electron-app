@@ -31,6 +31,13 @@ export type PracticeGraphSpec = {
 export type KatexExplanationBlock =
   | { kind: 'text'; content: string }
   | { kind: 'math'; content: string; displayMode?: boolean }
+  | {
+    kind: 'long_division';
+    divisorLatex: string;
+    dividendLatex: string;
+    quotientLatex: string;
+    steps: Array<{ subLatex: string; remainderLatex: string }>;
+  }
   | { kind: 'graph'; graphSpec: PracticeGraphSpec; altText: string };
 
 export type PracticeTopicId =
@@ -101,6 +108,7 @@ export type FactorisationQuestion = {
   xTerm: string;
   yTerm: string;
   expectedNormalized: string[];
+  expectedFactors?: string[];
 } & PracticeQuestionBase;
 
 export type PolynomialsQuestion = {
@@ -298,7 +306,7 @@ export function generatePracticeQuestion(input: {
         variantWeights: input.variantWeights,
       });
     case 'differentiation': {
-      const q = generateDifferentiationQuestion({ seed: input.seed, difficulty: input.difficulty });
+      const q = generateDifferentiationQuestion({ seed: input.seed, difficulty: input.difficulty, variantWeights: input.variantWeights });
       return {
         kind: 'calculus',
         id: q.id,
@@ -812,6 +820,18 @@ function generateFactorisation(input: { topicId: PracticeTopicId; difficulty: Pr
   let questionLatex = '';
   let expectedNormalized: string[] = [];
   let explanation: KatexExplanationBlock[] = [];
+  let expectedFactors: string[] | undefined = undefined;
+
+  const gcd = (u: number, v: number): number => {
+    let a0 = Math.abs(u);
+    let b0 = Math.abs(v);
+    while (b0 !== 0) {
+      const t = a0 % b0;
+      a0 = b0;
+      b0 = t;
+    }
+    return a0;
+  };
 
   const fmtSigned = (v: number) => (v < 0 ? `- ${Math.abs(v)}` : `+ ${v}`);
   const fmtSignedVar = (v: number, variable: string) => {
@@ -833,14 +853,39 @@ function generateFactorisation(input: { topicId: PracticeTopicId; difficulty: Pr
   };
   const buildExpectedFromFactors = (factors: string[]) => {
     const forms: string[] = [];
-    const concat = factors.join('');
-    const mult = factors.join('*');
-    forms.push(concat, mult);
-    if (factors.length === 2) {
-      forms.push(`${factors[0]}(${factors[1]})`, `${factors[0]}*(${factors[1]})`);
-      forms.push(`${factors[1]}(${factors[0]})`, `${factors[1]}*(${factors[0]})`);
+
+    const perms = (arr: string[]) => {
+      if (arr.length <= 1) return [arr];
+      if (arr.length === 2) return [[arr[0], arr[1]], [arr[1], arr[0]]];
+      if (arr.length === 3) {
+        const [a0, a1, a2] = arr;
+        return [
+          [a0, a1, a2],
+          [a0, a2, a1],
+          [a1, a0, a2],
+          [a1, a2, a0],
+          [a2, a0, a1],
+          [a2, a1, a0],
+        ];
+      }
+      return [arr];
+    };
+
+    for (const p of perms(factors)) {
+      forms.push(p.join(''));
+      forms.push(p.join('*'));
+      // optional explicit parentheses around each factor
+      forms.push(p.map((f) => `(${f})`).join(''));
+      forms.push(p.map((f) => `(${f})`).join('*'));
     }
-    return forms.map(norm);
+
+    return Array.from(new Set(forms.map(norm)));
+  };
+
+  const formatLinearFactor = (coeffX: number, constant: number, variable: string) => {
+    const cx = coeffX === 1 ? variable : `${coeffX}${variable}`;
+    if (constant === 0) return `(${cx})`;
+    return `(${cx}${constant < 0 ? '-' : '+'}${Math.abs(constant)})`;
   };
 
   if (factorVariant === 'simple') {
@@ -856,6 +901,12 @@ function generateFactorisation(input: { topicId: PracticeTopicId; difficulty: Pr
       `${a}*(${xTerm}+${yTerm})`,
       `${a}*(${yTerm}+${xTerm})`,
     ].map(norm);
+
+    const factor1 = String(a);
+    const factor2 = `${xTerm}+${yTerm}`;
+    const factor2b = `${yTerm}+${xTerm}`;
+    expectedFactors = [factor1, factor2];
+    expectedNormalized = Array.from(new Set(expectedNormalized.concat(buildExpectedFromFactors([factor1, factor2]), buildExpectedFromFactors([factor1, factor2b]))));
 
     explanation = [
       { kind: 'text', content: 'We want to factorise the expression.' },
@@ -882,6 +933,9 @@ function generateFactorisation(input: { topicId: PracticeTopicId; difficulty: Pr
         `${a}x^${k}*(${inside})`,
       ].map(norm);
 
+      expectedFactors = [`${a}x^${k}`, `${inside}`];
+      expectedNormalized = Array.from(new Set(expectedNormalized.concat(buildExpectedFromFactors(expectedFactors))));
+
       explanation = [
         { kind: 'text', content: 'We want to factorise the expression.' },
         { kind: 'math', content: questionLatex, displayMode: true },
@@ -891,6 +945,16 @@ function generateFactorisation(input: { topicId: PracticeTopicId; difficulty: Pr
           kind: 'math',
           content: `${termHigh} ${op1} ${termMid} ${op2} ${termLow} = ${a}x^${k}(${inside})`,
           displayMode: true,
+        },
+        { kind: 'text', content: 'You can also get the factor in brackets using polynomial long division:' },
+        {
+          kind: 'long_division',
+          divisorLatex: `${a}x^${k}`,
+          dividendLatex: `${termHigh} ${op1} ${termMid} ${op2} ${termLow}`,
+          quotientLatex: `${inside}`,
+          steps: [
+            { subLatex: `${a}x^${k}(${inside})`, remainderLatex: '0' },
+          ],
         },
       ];
     } else {
@@ -908,6 +972,9 @@ function generateFactorisation(input: { topicId: PracticeTopicId; difficulty: Pr
         `${a}x^${k}*(${inside})`,
       ].map(norm);
 
+      expectedFactors = [`${a}x^${k}`, `(${inside})`];
+      expectedNormalized = Array.from(new Set(expectedNormalized.concat(buildExpectedFromFactors(expectedFactors))));
+
       explanation = [
         { kind: 'text', content: 'We want to factorise the expression.' },
         { kind: 'math', content: questionLatex, displayMode: true },
@@ -917,6 +984,16 @@ function generateFactorisation(input: { topicId: PracticeTopicId; difficulty: Pr
           kind: 'math',
           content: `${termHigh} ${op} ${termLow} = ${a}x^${k}(${inside})`,
           displayMode: true,
+        },
+        { kind: 'text', content: 'You can also get the factor in brackets using polynomial long division:' },
+        {
+          kind: 'long_division',
+          divisorLatex: `${a}x^${k}`,
+          dividendLatex: `${termHigh} ${op} ${termLow}`,
+          quotientLatex: `${inside}`,
+          steps: [
+            { subLatex: `${a}x^${k}(${inside})`, remainderLatex: '0' },
+          ],
         },
       ];
     }
@@ -934,26 +1011,45 @@ function generateFactorisation(input: { topicId: PracticeTopicId; difficulty: Pr
     const n = nonZeroInt(rng, input.difficulty === 'medium' ? -18 : -30, input.difficulty === 'medium' ? 18 : 30);
     const sign = rng.next() < 0.5 ? 1 : -1;
 
-    const common = fmtCoeffVarPow(g * sign, variable, k);
-    const binom = `${m}${variable} ${fmtSigned(n)}`;
+    // Keep factors in simplest form: use a monomial with a higher power rather than (monomial)^2.
+    const squareCommon = input.difficulty === 'hard' && rng.next() < 0.45;
 
-    // Expanded expression: (g*var^k) * (m*var + n)
-    const t1Coeff = g * sign * m;
-    const t2Coeff = g * sign * n;
-    const term1 = fmtCoeffVarPow(t1Coeff, variable, k + 1);
-    const term2Abs = `${Math.abs(t2Coeff)}${fmtVarPow(variable, k)}`;
-    questionLatex = `${term1} ${t2Coeff < 0 ? '- ' : '+ '}${term2Abs}`;
+    const commonCoeff = squareCommon ? (g * sign) * (g * sign) : (g * sign);
+    const commonPow = squareCommon ? 2 * k : k;
+    // Ensure the binomial itself is primitive by pulling out any gcd(m, n) into the common factor.
+    const d = gcd(m, n);
+    const m2 = Math.trunc(m / (d || 1));
+    const n2 = Math.trunc(n / (d || 1));
+    const common2 = fmtCoeffVarPow(commonCoeff * (d || 1), variable, commonPow);
+    const binom = `${m2}${variable} ${fmtSigned(n2)}`;
 
-    const f1 = common;
-    const f2 = `(${binom})`;
-    expectedNormalized = buildExpectedFromFactors([f1, f2]);
+    const t1Coeff = (commonCoeff * (d || 1)) * m2;
+    const t2Coeff = (commonCoeff * (d || 1)) * n2;
+    const term1 = fmtCoeffVarPow(t1Coeff, variable, commonPow + 1);
+    const term2 = fmtCoeffVarPow(t2Coeff, variable, commonPow);
+    questionLatex = `${term1} ${t2Coeff < 0 ? '- ' : '+ '}${String(term2).replace(/^-/, '')}`;
+
+    const f1 = common2;
+    const f2 = binom;
+    expectedFactors = [f1, f2];
+    expectedNormalized = buildExpectedFromFactors(expectedFactors);
 
     explanation = [
       { kind: 'text', content: 'We want to factorise the expression completely.' },
       { kind: 'math', content: questionLatex, displayMode: true },
-      { kind: 'text', content: `Both terms share a common factor of ${common}.` },
+      { kind: 'text', content: `Both terms share a common factor of ${common2}.` },
       { kind: 'text', content: 'Factor out the common factor.' },
-      { kind: 'math', content: `${questionLatex} = ${common}${f2}`, displayMode: true },
+      { kind: 'math', content: `${questionLatex} = ${f1}(${f2})`, displayMode: true },
+      { kind: 'text', content: 'You can also find the bracket using polynomial long division:' },
+      {
+        kind: 'long_division',
+        divisorLatex: `${f1}`,
+        dividendLatex: `${questionLatex}`,
+        quotientLatex: `${f2}`,
+        steps: [
+          { subLatex: `${f1}(${f2})`, remainderLatex: '0' },
+        ],
+      },
     ];
   }
 
@@ -972,30 +1068,82 @@ function generateFactorisation(input: { topicId: PracticeTopicId; difficulty: Pr
     const q = nonZeroInt(rng, input.difficulty === 'medium' ? -10 : -18, input.difficulty === 'medium' ? 10 : 18);
     const s = nonZeroInt(rng, input.difficulty === 'medium' ? -10 : -18, input.difficulty === 'medium' ? 10 : 18);
 
-    const A = p * r;
-    const B = p * s + q * r;
-    const C = q * s;
+    // Make each binomial primitive by pulling out gcd(p,q) and gcd(r,s) into the common factor.
+    const d1 = gcd(p, q);
+    const d2 = gcd(r, s);
+    const p1 = Math.trunc(p / (d1 || 1));
+    const q1 = Math.trunc(q / (d1 || 1));
+    const r1 = Math.trunc(r / (d2 || 1));
+    const s1 = Math.trunc(s / (d2 || 1));
 
-    const common = fmtCoeffVarPow(g * sign, variable, k);
+    const A = p1 * r1;
+    const B = p1 * s1 + q1 * r1;
+    const C = q1 * s1;
+
+    const common = fmtCoeffVarPow(g * sign * (d1 || 1) * (d2 || 1), variable, k);
     // Expand out fully for the question.
-    const lead = g * sign * A;
-    const mid = g * sign * B;
-    const con = g * sign * C;
+    const lead = g * sign * (d1 || 1) * (d2 || 1) * A;
+    const mid = g * sign * (d1 || 1) * (d2 || 1) * B;
+    const con = g * sign * (d1 || 1) * (d2 || 1) * C;
     const leadTerm = fmtCoeffVarPow(lead, variable, k + 2);
     const midTerm = `${mid < 0 ? '- ' : '+ '}${Math.abs(mid)}${fmtVarPow(variable, k + 1)}`;
     const conTerm = `${con < 0 ? '- ' : '+ '}${Math.abs(con)}${fmtVarPow(variable, k)}`;
     questionLatex = `${leadTerm} ${midTerm} ${conTerm}`;
 
     const f1 = common;
-    const f2 = `(${p}${variable} ${fmtSigned(q)})(${r}${variable} ${fmtSigned(s)})`;
-    expectedNormalized = buildExpectedFromFactors([f1, f2]);
+    const f2 = `${p1}${variable} ${fmtSigned(q1)}`;
+    const f3 = `${r1}${variable} ${fmtSigned(s1)}`;
+    expectedFactors = [f1, f2, f3];
+    expectedNormalized = buildExpectedFromFactors(expectedFactors);
+
+    const innerPoly = `${A}${variable}^2 ${B < 0 ? '- ' : '+ '}${Math.abs(B)}${variable} ${C < 0 ? '- ' : '+ '}${Math.abs(C)}`;
+    const divisor = `${p1}${variable} ${fmtSigned(q1)}`;
+    const quotient = `${r1}${variable} ${fmtSigned(s1)}`;
+
+    // Long division steps (handwritten-style layout).
+    // Because A = p1*r1 and C = q1*s1, the division always terminates with remainder 0.
+    const step1SubCoeff = q1 * r1;
+    const step2SubConst = q1 * s1;
+    const remCoeff = p1 * s1;
+
+    const step1Product = `${A}${variable}^2 ${step1SubCoeff < 0 ? '- ' : '+ '}${Math.abs(step1SubCoeff)}${variable}`;
+    const remainder1 = `${remCoeff}${variable} ${C < 0 ? '- ' : '+ '}${Math.abs(C)}`;
+    const step2Product = `${remCoeff}${variable} ${step2SubConst < 0 ? '- ' : '+ '}${Math.abs(step2SubConst)}`;
+
+    const longDivisionBlock: KatexExplanationBlock = {
+      kind: 'long_division',
+      divisorLatex: divisor,
+      dividendLatex: innerPoly,
+      quotientLatex: quotient,
+      steps: [
+        { subLatex: step1Product, remainderLatex: remainder1 },
+        { subLatex: step2Product, remainderLatex: '0' },
+      ],
+    };
 
     explanation = [
       { kind: 'text', content: 'We want to factorise the expression completely.' },
       { kind: 'math', content: questionLatex, displayMode: true },
       { kind: 'text', content: `First factor out the common factor ${common}.` },
+      { kind: 'math', content: `${questionLatex} = ${common}(${innerPoly})`, displayMode: true },
+      { kind: 'text', content: 'Now factorise the quadratic in brackets.' },
+      { kind: 'math', content: `${innerPoly} = (${f2})(${f3})`, displayMode: true },
+      { kind: 'text', content: 'Check by expanding:' },
+      {
+        kind: 'math',
+        content: String.raw`\begin{aligned}
+(${f2})(${f3}) &= (${p1}x ${fmtSigned(q1)})(${r1}x ${fmtSigned(s1)})\\
+&= (${p1}\cdot ${r1})x^2 + (${p1}\cdot ${s1} + ${q1}\cdot ${r1})x + (${q1}\cdot ${s1})\\
+&= ${A}x^2 ${B < 0 ? '- ' : '+ '}${Math.abs(B)}x ${C < 0 ? '- ' : '+ '}${Math.abs(C)}
+\end{aligned}`,
+        displayMode: true,
+      },
       { kind: 'text', content: 'Then factorise the remaining quadratic into two binomials.' },
-      { kind: 'math', content: `${questionLatex} = ${common}${f2}`, displayMode: true },
+      { kind: 'math', content: `${questionLatex} = ${f1}(${f2})(${f3})`, displayMode: true },
+      { kind: 'text', content: 'Finally, multiply the common factor back in to confirm it matches the original expression.' },
+      { kind: 'math', content: `${common}(${innerPoly}) = ${questionLatex}`, displayMode: true },
+      { kind: 'text', content: `One way to find the second binomial is polynomial long division.` },
+      longDivisionBlock,
     ];
   }
 
@@ -1011,5 +1159,6 @@ function generateFactorisation(input: { topicId: PracticeTopicId; difficulty: Pr
     xTerm,
     yTerm,
     expectedNormalized,
+    expectedFactors,
   };
 }

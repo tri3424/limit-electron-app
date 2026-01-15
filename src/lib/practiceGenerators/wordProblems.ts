@@ -1258,18 +1258,24 @@ export function generateWordProblemQuestion(input: {
       { kind: 'math', content: String.raw`\text{Cost on 1st Jan ${targetYear}} = \$${asFixed2(finalCost)}`, displayMode: true },
     ];
 
-    const expl = scaffoldExplanation({
-      title: 'Percentages: repeated percentage increases (multi-step).',
-      givens: [`Base cost on 1st Jan ${startYear}: $${baseCost}`, `Yearly increases: ${increases.map((p) => `${p}%`).join(', ')}`],
-      goal: `Find the bus pass cost on 1st Jan ${targetYear}. Give the answer to 2 decimal places.`,
-      method: [
-        'Convert each percentage increase into a multiplier (1 + p/100).',
-        'Apply the multipliers one year at a time in the correct order.',
-        'Round the final cost to 2 decimal places.',
-      ],
-      working,
-      checks: ['Each percentage increase should make the cost go up (multiplier > 1).', 'The final cost should be greater than the starting cost if increases are positive.'],
-    });
+    const expl: KatexExplanationBlock[] = [
+      { kind: 'text', content: 'Use multipliers for percentage increases.' },
+      { kind: 'text', content: `Start value (1st Jan ${startYear}): $${baseCost}.` },
+      { kind: 'math', content: String.raw`\text{new} = \text{old}\times\left(1+\frac{p}{100}\right)`, displayMode: true },
+      { kind: 'math', content: String.raw`V_0 = ${baseCost}`, displayMode: true },
+      ...increases.flatMap((pct, idx) => {
+        const year = startYear + idx + 1;
+        const mult = 1 + pct / 100;
+        const prev = idx === 0 ? baseCost : Number(asFixed2(baseCost * increases.slice(0, idx).reduce((acc, p) => acc * (1 + p / 100), 1)));
+        const next = Number(asFixed2(prev * mult));
+        return [
+          { kind: 'text' as const, content: `1st Jan ${year}: increase by ${pct}%  →  multiply by ${asFixed2(mult)}.` },
+          { kind: 'math' as const, content: String.raw`V_${idx + 1} = ${asFixed2(prev)}\times ${asFixed2(mult)} = ${asFixed2(next)}`, displayMode: true },
+        ];
+      }),
+      { kind: 'text', content: 'Final step: round to 2 decimal places.' },
+      { kind: 'math', content: String.raw`\text{Cost on 1st Jan ${targetYear}} = \$${asFixed2(finalCost)}`, displayMode: true },
+    ];
 
     return mk({
       idSuffix: `${sub}-${startYear}-${baseCost}-${increases.join('-')}`,

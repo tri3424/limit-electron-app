@@ -5,6 +5,13 @@ export type PracticeDifficulty = 'easy' | 'medium' | 'hard';
 export type KatexExplanationBlock =
   | { kind: 'text'; content: string }
   | { kind: 'math'; content: string; displayMode?: boolean }
+  | {
+    kind: 'long_division';
+    divisorLatex: string;
+    dividendLatex: string;
+    quotientLatex: string;
+    steps: Array<{ subLatex: string; remainderLatex: string }>;
+  }
   | { kind: 'graph'; graphSpec: any; altText: string };
 
 export type QuadraticFactorizationQuestion = {

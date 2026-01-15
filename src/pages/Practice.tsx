@@ -9,7 +9,8 @@ import { Alert } from '@/components/ui/alert';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Textarea } from '@/components/ui/textarea';
 import { Katex } from '@/components/Katex';
-import { ArrowLeft, Bug } from 'lucide-react';
+import { PolynomialLongDivision } from '@/components/PolynomialLongDivision';
+import { ArrowLeft, Bug, CircleHelp } from 'lucide-react';
 import TypingAnswerMathInput from '@/components/TypingAnswerMathInput';
 import InteractiveGraph from '@/components/InteractiveGraph';
 import { PRACTICE_TOPICS, PracticeTopicId } from '@/lib/practiceTopics';
@@ -60,11 +61,13 @@ export default function Practice() {
 
   const practiceContentRef = useRef<HTMLDivElement | null>(null);
   const [reportDialogOpen, setReportDialogOpen] = useState(false);
+  const [reportHelpOpen, setReportHelpOpen] = useState(false);
   const [reportMessage, setReportMessage] = useState('');
   const [reportScreenshotDataUrl, setReportScreenshotDataUrl] = useState<string | undefined>(undefined);
   const [isCapturingReportScreenshot, setIsCapturingReportScreenshot] = useState(false);
   const [reportScreenshotError, setReportScreenshotError] = useState<string | null>(null);
   const [isSubmittingReport, setIsSubmittingReport] = useState(false);
+  const [reportCaptureMode, setReportCaptureMode] = useState<'practice_full' | 'screen'>('practice_full');
 
   const findScrollableAncestor = (el: HTMLElement | null): HTMLElement | null => {
     let cur: HTMLElement | null = el;
@@ -158,6 +161,97 @@ export default function Practice() {
     return canvas.toDataURL('image/png');
   };
 
+  const cropDataUrl = async (dataUrl: string, crop: { x: number; y: number; w: number; h: number }): Promise<string> => {
+    const img = new Image();
+    img.decoding = 'async';
+    img.src = dataUrl;
+    await img.decode();
+
+    const x = Math.max(0, Math.min(img.naturalWidth - 1, Math.round(crop.x)));
+    const y = Math.max(0, Math.min(img.naturalHeight - 1, Math.round(crop.y)));
+    const w = Math.max(1, Math.min(img.naturalWidth - x, Math.round(crop.w)));
+    const h = Math.max(1, Math.min(img.naturalHeight - y, Math.round(crop.h)));
+
+    const canvas = document.createElement('canvas');
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) throw new Error('Canvas 2D context not available');
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, w, h);
+    ctx.drawImage(img, x, y, w, h, 0, 0, w, h);
+    return canvas.toDataURL('image/png');
+  };
+
+  const capturePracticeContentScreenshotDataUrl = async (): Promise<string> => {
+    const el = practiceContentRef.current;
+    if (!el) return captureAppVisualStateScreenshotDataUrl();
+
+    const rect = el.getBoundingClientRect();
+    const pad = 16;
+    const viewportW = Math.max(1, window.innerWidth);
+    const viewportH = Math.max(1, window.innerHeight);
+
+    const x = Math.max(0, rect.left - pad);
+    const y = Math.max(0, rect.top - pad);
+    const w = Math.min(viewportW - x, rect.width + pad * 2);
+    const h = Math.min(viewportH - y, rect.height + pad * 2);
+
+    const dataUrl = await captureAppVisualStateScreenshotDataUrl();
+    const img = new Image();
+    img.decoding = 'async';
+    img.src = dataUrl;
+    await img.decode();
+
+    const scaleX = img.naturalWidth / viewportW;
+    const scaleY = img.naturalHeight / viewportH;
+    return cropDataUrl(dataUrl, { x: x * scaleX, y: y * scaleY, w: w * scaleX, h: h * scaleY });
+  };
+
+  const capturePracticeContentFullScreenshotDataUrl = async (): Promise<string> => {
+    const el = practiceContentRef.current;
+    if (!el) return capturePracticeContentScreenshotDataUrl();
+
+    const container = findScrollableAncestor(el);
+    const viewportWidth = Math.max(1, window.innerWidth);
+    const viewportHeight = Math.max(1, window.innerHeight);
+
+    const pad = 16;
+    const rect = el.getBoundingClientRect();
+
+    const containerRect = container ? container.getBoundingClientRect() : null;
+    const topStripHeight = containerRect ? Math.max(0, Math.min(viewportHeight, Math.floor(containerRect.top))) : 0;
+
+    const xCss = (() => {
+      if (containerRect) return Math.max(0, (rect.left - containerRect.left) + (container?.scrollLeft ?? 0) - pad);
+      return Math.max(0, (rect.left + (window.scrollX || 0)) - pad);
+    })();
+    const yCss = (() => {
+      if (containerRect) return Math.max(0, (rect.top - containerRect.top) + (container?.scrollTop ?? 0) - pad);
+      return Math.max(0, (rect.top + (window.scrollY || 0)) - pad);
+    })();
+
+    const wCss = Math.max(1, rect.width + pad * 2);
+    const hCss = Math.max(1, rect.height + pad * 2);
+
+    const stitchedDataUrl = await captureFullContentScreenshotDataUrl(container);
+    const stitchedImg = new Image();
+    stitchedImg.decoding = 'async';
+    stitchedImg.src = stitchedDataUrl;
+    await stitchedImg.decode();
+
+    const scale = containerRect
+      ? (stitchedImg.naturalWidth / Math.max(1, containerRect.width))
+      : (stitchedImg.naturalWidth / viewportWidth);
+
+    const cropX = xCss * scale;
+    const cropY = (topStripHeight + yCss) * scale;
+    const cropW = wCss * scale;
+    const cropH = hCss * scale;
+
+    return cropDataUrl(stitchedDataUrl, { x: cropX, y: cropY, w: cropW, h: cropH });
+  };
+
   const captureFullContentScreenshotDataUrl = async (scrollContainer?: HTMLElement | null): Promise<string> => {
     const container = scrollContainer ?? null;
     const viewportWidth = Math.max(1, window.innerWidth);
@@ -168,7 +262,7 @@ export default function Practice() {
       const all = Array.from(document.querySelectorAll<HTMLElement>('body *'));
       for (const el of all) {
         const style = window.getComputedStyle(el);
-        if (style.position !== 'fixed') continue;
+        if (style.position !== 'fixed' && style.position !== 'sticky') continue;
         const rect = el.getBoundingClientRect();
         if (!(rect.height > 0 && rect.width > viewportWidth * 0.5)) continue;
         // Only hide elements that are anchored to the top of the viewport.
@@ -190,24 +284,28 @@ export default function Practice() {
     const totalHeight = container
       ? Math.max(container.scrollHeight, container.clientHeight)
       : Math.max(document.documentElement.scrollHeight, document.body?.scrollHeight ?? 0);
-    const steps = Math.max(1, Math.ceil(totalHeight / containerViewportHeight));
+    // Add overlap between tiles to avoid gaps due to rounding/layout jitter.
+    const overlapCss = 24;
+    const strideCss = Math.max(1, containerViewportHeight - overlapCss);
+    const steps = Math.max(1, Math.ceil(totalHeight / strideCss));
 
     const originalWindowX = window.scrollX;
     const originalWindowY = window.scrollY;
     const originalContainerScrollTop = container ? container.scrollTop : 0;
 
-    const tiles: { y: number; dataUrl: string; width: number; height: number }[] = [];
+    const tiles: { y: number; dataUrl: string; width: number; height: number; cropTopCss: number }[] = [];
     let topStripTile: { dataUrl: string; width: number; height: number } | null = null;
     let scale = 1;
     try {
       for (let i = 0; i < steps; i++) {
-        const y = Math.min(i * containerViewportHeight, Math.max(0, totalHeight - containerViewportHeight));
+        const yTarget = Math.min(i * strideCss, Math.max(0, totalHeight - containerViewportHeight));
         if (container) {
-          container.scrollTop = y;
+          container.scrollTop = yTarget;
         } else {
-          window.scrollTo(originalWindowX, y);
+          window.scrollTo(originalWindowX, yTarget);
         }
         await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+        const yActual = container ? container.scrollTop : (window.scrollY || 0);
         const dataUrl = await captureAppVisualStateScreenshotDataUrl(container);
         const img = new Image();
         img.decoding = 'async';
@@ -220,7 +318,7 @@ export default function Practice() {
             topStripTile = { dataUrl, width: img.naturalWidth, height: img.naturalHeight };
           }
         }
-        tiles.push({ y, dataUrl, width: img.naturalWidth, height: img.naturalHeight });
+        tiles.push({ y: yActual, dataUrl, width: img.naturalWidth, height: img.naturalHeight, cropTopCss: i === 0 ? 0 : overlapCss });
       }
     } finally {
       restoreFixed();
@@ -261,14 +359,17 @@ export default function Practice() {
       img.decoding = 'async';
       img.src = t.dataUrl;
       await img.decode();
-      const destY = Math.round((t.y + topStripHeight) * scale);
-      ctx.drawImage(img, 0, 0, t.width, t.height, 0, destY, canvas.width, t.height);
+      const cropTopPx = Math.max(0, Math.round(t.cropTopCss * scale));
+      const srcY = cropTopPx;
+      const srcH = Math.max(1, t.height - cropTopPx);
+      const destY = Math.round((t.y + topStripHeight + t.cropTopCss) * scale);
+      ctx.drawImage(img, 0, srcY, t.width, srcH, 0, destY, canvas.width, srcH);
     }
 
     return canvas.toDataURL('image/png');
   };
 
-  const openReportDialogWithCapture = useCallback(async () => {
+  const openReportDialogWithCapture = useCallback(async (mode?: 'practice_full' | 'screen') => {
     if (isCapturingReportScreenshot) return;
     setReportDialogOpen(false);
     await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
@@ -277,8 +378,10 @@ export default function Practice() {
     setIsCapturingReportScreenshot(true);
     void (async () => {
       try {
-        const scrollEl = findScrollableAncestor(practiceContentRef.current) ?? practiceContentRef.current;
-        const url = await captureFullContentScreenshotDataUrl(scrollEl);
+        const m = mode ?? reportCaptureMode;
+        const url = m === 'screen'
+          ? await captureAppVisualStateScreenshotDataUrl()
+          : await capturePracticeContentFullScreenshotDataUrl();
         setReportScreenshotDataUrl(url);
       } catch (e) {
         console.error('Failed to capture screenshot for report preview:', e);
@@ -288,7 +391,7 @@ export default function Practice() {
         setReportDialogOpen(true);
       }
     })();
-  }, [isCapturingReportScreenshot]);
+  }, [isCapturingReportScreenshot, reportCaptureMode]);
 
   const submitErrorReport = useCallback(async () => {
     if (!reportMessage.trim()) {
@@ -303,7 +406,7 @@ export default function Practice() {
       const effectiveScrollY = scrollEl ? scrollEl.scrollTop : window.scrollY;
       if (!screenshotDataUrl) {
         try {
-          screenshotDataUrl = await captureFullContentScreenshotDataUrl(scrollEl);
+          screenshotDataUrl = await capturePracticeContentFullScreenshotDataUrl();
         } catch (e) {
           console.error('Failed to capture screenshot for report:', e);
           setReportScreenshotError('Screenshot capture failed');
@@ -809,34 +912,42 @@ export default function Practice() {
         const norm = (s: string) => String(s ?? '')
           .trim()
           .replace(/[−–]/g, '-')
+          .replace(/\u200b/g, '')
           .replace(/\s+/g, '')
+          // TypingAnswerMathInput can emit scripts as ^{3} / _{2}; normalize to ^3 / _2
+          .replace(/\^\{([^}]+)\}/g, '^$1')
+          .replace(/_\{([^}]+)\}/g, '_$1')
           .toLowerCase();
 
-        const f1 = norm(answer1);
-        const f2 = norm(answer2);
-        if (!f1 || !f2) return false;
+        const fq = q as any;
+        const expectedCount = Math.max(2, Math.min(3, Number(fq.expectedFactors?.length ?? 2)));
 
-        const candidates = [
-          // raw concatenation / multiplication
-          `${f1}${f2}`,
-          `${f1}*${f2}`,
-          `(${f1})${f2}`,
-          `(${f1})*${f2}`,
-          `${f2}${f1}`,
-          `${f2}*${f1}`,
-          `(${f2})${f1}`,
-          `(${f2})*${f1}`,
+        const factors = [norm(answer1), norm(answer2), norm(answer3)].filter(Boolean);
+        if (factors.length !== expectedCount) return false;
 
-          // parenthesize the second factor (helps when users type the inner without brackets)
-          `${f1}(${f2})`,
-          `${f1}*(${f2})`,
-          `(${f1})(${f2})`,
-          `(${f1})*(${f2})`,
-          `${f2}(${f1})`,
-          `${f2}*(${f1})`,
-          `(${f2})(${f1})`,
-          `(${f2})*(${f1})`,
-        ];
+        const perms = (arr: string[]) => {
+          if (arr.length <= 1) return [arr];
+          if (arr.length === 2) return [[arr[0], arr[1]], [arr[1], arr[0]]];
+          if (arr.length === 3) {
+            const [a0, a1, a2] = arr;
+            return [
+              [a0, a1, a2],
+              [a0, a2, a1],
+              [a1, a0, a2],
+              [a1, a2, a0],
+              [a2, a0, a1],
+              [a2, a1, a0],
+            ];
+          }
+          return [arr];
+        };
+
+        const candidates: string[] = [];
+        for (const p of perms(factors)) {
+          const paren = p.map((f) => `(${f})`);
+          candidates.push(paren.join(''));
+          candidates.push(paren.join('*'));
+        }
 
         for (const c of candidates) {
           if (q.expectedNormalized.includes(c)) return true;
@@ -973,9 +1084,9 @@ export default function Practice() {
       const idx = mixedCursor % (items.length || 1);
       const it = items[idx];
       const topic = PRACTICE_TOPICS.find((t) => t.id === it?.topicId);
-      return it ? (topic ? topic.description : String(it.topicId)) : '';
+      return '';
     }
-    return selectedTopic?.description || '';
+    return '';
   }, [mode, mixedCursor, question, selectedMixedModule?.items, selectedTopic?.description]);
 
   const sessionInstruction = useMemo(() => {
@@ -1002,7 +1113,7 @@ export default function Practice() {
         return '';
       }
       default:
-        return currentInstruction || 'Answer the question.';
+        return '';
     }
   }, [currentInstruction, question]);
 
@@ -1086,7 +1197,7 @@ export default function Practice() {
                 ) : (
                   <>
                     <div className="text-base font-semibold">Choose a level</div>
-                    <div className="text-sm text-muted-foreground mt-1">{chooserTitle}</div>
+                    <div className="text-sm text-muted-foreground mt-1">{selectedTopic?.title || chooserTitle}</div>
                     <div className="mt-5 space-y-3">
                       <Button
                         variant="outline"
@@ -1175,19 +1286,85 @@ export default function Practice() {
                   <div className="text-lg font-semibold leading-tight text-foreground truncate">{currentTitle}</div>
                 </div>
               </div>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => {
-                  void openReportDialogWithCapture();
-                }}
-                className="bg-white"
-              >
-                <Bug className="h-4 w-4 mr-2" />
-                Report issue
-              </Button>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    void openReportDialogWithCapture();
+                  }}
+                  className="bg-white"
+                >
+                  <Bug className="h-4 w-4 mr-2" />
+                  Report issue
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon"
+                  onClick={() => setReportHelpOpen(true)}
+                  className="bg-white rounded-full"
+                  aria-label="Answer input help"
+                  title="Answer input help"
+                >
+                  <CircleHelp className="h-5 w-5" />
+                </Button>
+              </div>
             </div>
           </Card>
+
+          <Dialog open={reportHelpOpen} onOpenChange={setReportHelpOpen}>
+            <DialogContent className="max-w-2xl">
+              <DialogHeader>
+                <DialogTitle>Answer input help</DialogTitle>
+                <DialogDescription>
+                  How to type answers and what format is accepted.
+                </DialogDescription>
+              </DialogHeader>
+              <div className="space-y-3 text-sm leading-relaxed text-foreground">
+                <div className="font-semibold">General rules</div>
+                <div>
+                  - Do <span className="font-semibold">not</span> include spaces between parts of an answer.
+                </div>
+                <div>
+                  Example: type <span className="font-mono">2x-1</span>, not <span className="font-mono">2x - 1</span>.
+                </div>
+
+                <div className="font-semibold mt-2">Powers (superscripts)</div>
+                <div>
+                  Use <span className="font-mono">^</span> for powers.
+                </div>
+                <div>
+                  Examples:
+                  <div className="mt-1 font-mono">x^2</div>
+                  <div className="font-mono">(x+1)^2</div>
+                </div>
+
+                <div className="font-semibold mt-2">Subscripts</div>
+                <div>
+                  Use <span className="font-mono">_</span> for subscripts.
+                </div>
+                <div>
+                  Examples:
+                  <div className="mt-1 font-mono">a_1</div>
+                  <div className="font-mono">x_0</div>
+                </div>
+
+                <div className="font-semibold mt-2">Factorisation</div>
+                <div>
+                  Enter each factor in its own box. Each factor is treated as being inside brackets.
+                </div>
+                <div>
+                  Example: <span className="font-mono">(12x)(2x-1)(5x+3)</span>
+                </div>
+              </div>
+              <DialogFooter>
+                <Button type="button" variant="outline" onClick={() => setReportHelpOpen(false)}>
+                  Close
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
 
           <Card ref={practiceContentRef} className="p-6 border-2">
             {sessionInstruction ? (
@@ -1232,40 +1409,122 @@ export default function Practice() {
                     </div>
                   ) : null}
                 </div>
-              ) : (
-                (() => {
+              ) : (() => {
                   const isWordProblem = (question as any).topicId === 'word_problems' || (question as any).kind === 'word_problem';
                   const wpPromptText = isWordProblem ? String((question as any).promptText ?? '') : '';
                   const isNumberPropertiesPuzzle = isWordProblem && String((question as any).variantId ?? '') === 'number_properties_puzzle';
 
+                  const stripLatex = (src: string) => src
+                    // Remove common LaTeX wrappers seen in some prompt strings.
+                    .replace(/\\text\{([^}]*)\}/g, '$1')
+                    // Handle malformed \\text{... with no closing brace.
+                    .replace(/\\text\{([^}]*)/g, '$1')
+                    // Some prompts may contain \text(...) instead of braces.
+                    .replace(/\\text\(([^)]*)\)/g, '$1')
+                    // If \text appears without a brace, drop it.
+                    .replace(/\\text\b\{?/g, '')
+                    .replace(/\\!+/g, '')
+                    // Line breaks and spacing escapes.
+                    .replace(/\\\\/g, ' ')
+                    .replace(/\\,/g, ' ')
+                    .replace(/\\quad/g, ' ')
+                    .replace(/\\;/g, ' ')
+                    // Punctuation escapes.
+                    .replace(/\\\./g, '.')
+                    .replace(/\\\}/g, '')
+                    .replace(/\\\{/g, '')
+                    // Remove any remaining LaTeX commands/backslashes.
+                    .replace(/\\[a-zA-Z]+/g, '')
+                    .replace(/\\+/g, '')
+                    .replace(/~/g, ' ')
+                    .replace(/[{}]/g, '')
+                    .replace(/\s+/g, ' ')
+                    .trim();
+
+                  const preserveFractions = (src: string) => {
+                    const fracs: string[] = [];
+                    const out = src.replace(/\\frac\{[^}]+\}\{[^}]+\}/g, (m) => {
+                      const id = fracs.length;
+                      fracs.push(m);
+                      return `@@FRAC_${id}@@`;
+                    });
+                    return { out, fracs };
+                  };
+
+                  const restoreFractionsParts = (src: string, fracs: string[]) => {
+                    const parts = src.split(/(@@FRAC_\d+@@)/g).filter((p) => p.length > 0);
+                    return parts.map((p) => {
+                      const m = p.match(/^@@FRAC_(\d+)@@$/);
+                      if (!m) return { kind: 'text' as const, value: p };
+                      const idx = Number(m[1]);
+                      const latex = fracs[idx] ?? '';
+                      return { kind: 'math' as const, value: latex };
+                    });
+                  };
+
                   if (isWordProblem && wpPromptText.trim().length) {
                     const wp = question as any;
-                    const baseText = wpPromptText.replace(/\s*\n+\s*/g, ' ').trim();
+
+                    const { out: tmp, fracs } = preserveFractions(wpPromptText);
+                    const baseText = stripLatex(tmp.replace(/\s*\n+\s*/g, ' ').trim());
                     const needsFixed2 = wp?.answerKind === 'decimal_2dp';
 
                     const hasFixed2Instruction = /give\s+your\s+answer\s+to\s+2\s+decimal\s+places\.?/i.test(baseText);
-
                     const fullText = needsFixed2 && !hasFixed2Instruction
                       ? `${baseText}${baseText.endsWith('.') ? '' : '.'} Give your answer to 2 decimal places.`
                       : baseText;
 
-                    // Render as readable lines (sentences) with spacing.
-                    // Keep punctuation with the sentence; avoid inserting manual '\n' which can cause premature wraps.
-                    const parts = fullText
+                    const sentences = fullText
                       .split(/(?<=[.!?])\s+/)
                       .map((s) => s.trim())
                       .filter(Boolean);
+
                     return (
-                      <div className={`w-full select-none text-xl md:text-2xl leading-snug text-left${isNumberPropertiesPuzzle ? ' tk-wp-number-properties-font' : ''}`}>
+                      <div className={`w-full select-none font-slab text-xl md:text-2xl leading-snug text-left${isNumberPropertiesPuzzle ? ' tk-wp-number-properties-font' : ''}`}>
                         <div className="w-full min-w-0 max-w-full space-y-2">
-                          {parts.map((t, i) => (
-                            <div key={i} className="whitespace-normal">
-                              {t}
-                            </div>
-                          ))}
+                          {sentences.map((t, i) => {
+                            const segs = restoreFractionsParts(t, fracs);
+                            return (
+                              <div key={i} className="whitespace-normal">
+                                {segs.map((seg, j) => seg.kind === 'math'
+                                  ? (
+                                    <span key={j} className="inline-block align-baseline mx-1">
+                                      <Katex latex={seg.value} displayMode={false} />
+                                    </span>
+                                  )
+                                  : (
+                                    <span key={j}>{seg.value}</span>
+                                  ))}
+                              </div>
+                            );
+                          })}
                         </div>
                       </div>
                     );
+                  }
+
+                  if (isWordProblem) {
+                    const wpLatex = String((question as any).katexQuestion ?? '').trim();
+                    if (wpLatex && /\\text\b|\\!|\\\.|\\,|\{|\}|\\|\\frac\{/.test(wpLatex)) {
+                      const { out: tmp, fracs } = preserveFractions(wpLatex);
+                      const cleaned = stripLatex(tmp);
+                      if (cleaned) {
+                        const segs = restoreFractionsParts(cleaned, fracs);
+                        return (
+                          <div className={`w-full select-none font-slab text-xl md:text-2xl leading-snug text-left${isNumberPropertiesPuzzle ? ' tk-wp-number-properties-font' : ''}`}>
+                            {segs.map((seg, j) => seg.kind === 'math'
+                              ? (
+                                <span key={j} className="inline-block align-baseline mx-1">
+                                  <Katex latex={seg.value} displayMode={false} />
+                                </span>
+                              )
+                              : (
+                                <span key={j}>{seg.value}</span>
+                              ))}
+                          </div>
+                        );
+                      }
+                    }
                   }
 
                   const promptBlocks = (question as any).promptBlocks as any[] | undefined;
@@ -1305,6 +1564,33 @@ export default function Practice() {
                   const useResponsiveScale = isWordProblem && !wpPromptText.trim().length && !isMultiline;
                   const scale = useResponsiveScale ? wpKatexScale : 1;
 
+                  // If the prompt is pure text (\text{...}), render it as HTML so we can control the font.
+                  // This improves headings like the stationary-points prompt.
+                  const textOnlyMatch = latex.match(/^\\text\{([\s\S]*)\}$/);
+                  if (textOnlyMatch && !/\\frac\{|\^\{|_\{|\\int\b|\\cdot\b|\\sqrt\b|\\sum\b|\\pi\b/.test(textOnlyMatch[1] ?? '')) {
+                    return (
+                      <div className={`${promptTextClass} font-slab max-w-full select-none`}>
+                        {String(textOnlyMatch[1] ?? '').replace(/\\\\/g, ' ')}
+                      </div>
+                    );
+                  }
+
+                  const boldTextWithMathMatch = latex.match(/^\\textbf\{([\s\S]*?)\}\\;\s*([\s\S]*)$/);
+                  if (boldTextWithMathMatch) {
+                    const t = String(boldTextWithMathMatch[1] ?? '').replace(/\\\\/g, ' ').trim();
+                    const rest = String(boldTextWithMathMatch[2] ?? '').trim();
+                    return (
+                      <div className={'text-xl md:text-2xl leading-snug text-center font-slab max-w-full select-none'}>
+                        <span className="inline-flex flex-wrap items-baseline justify-center gap-x-2 gap-y-1">
+                          <span>{t}</span>
+                          <span className="inline-block">
+                            <Katex latex={rest} displayMode={false} />
+                          </span>
+                        </span>
+                      </div>
+                    );
+                  }
+
                   return (
                     <div className={`${promptTextClass} select-none`}>
                       <div className={isWordProblem ? 'w-full min-w-0 max-w-full px-2' : 'w-full min-w-0 max-w-full'}>
@@ -1314,8 +1600,8 @@ export default function Practice() {
                         >
                           <div
                             ref={useResponsiveScale ? wpKatexInnerRef : undefined}
-                            className="inline-block"
-                            style={useResponsiveScale && scale < 0.999 ? { transform: `scale(${scale})`, transformOrigin: 'left top' } : undefined}
+                            className={useResponsiveScale ? 'inline-block w-max max-w-none' : 'w-full'}
+                            style={useResponsiveScale ? { transform: `scale(${scale})`, transformOrigin: 'top left' } : undefined}
                           >
                             <Katex latex={latex} displayMode />
                           </div>
@@ -1323,8 +1609,7 @@ export default function Practice() {
                       </div>
                     </div>
                   );
-                })()
-              )}
+                })()}
             </div>
 
             <Dialog
@@ -1338,53 +1623,71 @@ export default function Practice() {
                 }
               }}
             >
-              <DialogContent className="max-w-3xl">
+              <DialogContent className="max-w-6xl h-[85vh] flex flex-col">
                 <DialogHeader>
                   <DialogTitle>Report an issue</DialogTitle>
                   <DialogDescription>
                     Send a detailed description so the admin can fix it.
                   </DialogDescription>
                 </DialogHeader>
-                <div className="space-y-3">
-                  <div className="space-y-1">
+                <div className="flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-2 gap-4">
+                  <div className="min-h-0 flex flex-col gap-2">
                     <div className="flex items-center justify-between gap-3">
                       <div className="text-xs text-muted-foreground">Screenshot</div>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        disabled={isCapturingReportScreenshot}
-                        onClick={() => {
-                          void openReportDialogWithCapture();
-                        }}
-                      >
-                        Retry
-                      </Button>
+                      <div className="flex items-center gap-2">
+                        <Button
+                          variant={reportCaptureMode === 'practice_full' ? 'default' : 'outline'}
+                          size="sm"
+                          disabled={isCapturingReportScreenshot}
+                          onClick={() => {
+                            setReportCaptureMode('practice_full');
+                            void openReportDialogWithCapture('practice_full');
+                          }}
+                        >
+                          Capture practice
+                        </Button>
+                        <Button
+                          variant={reportCaptureMode === 'screen' ? 'default' : 'outline'}
+                          size="sm"
+                          disabled={isCapturingReportScreenshot}
+                          onClick={() => {
+                            setReportCaptureMode('screen');
+                            void openReportDialogWithCapture('screen');
+                          }}
+                        >
+                          Capture screen
+                        </Button>
+                      </div>
                     </div>
                     {reportScreenshotDataUrl ? (
-                      <div className="max-h-[40vh] overflow-auto rounded-md border">
+                      <div className="flex-1 min-h-0 overflow-auto rounded-md border bg-muted/20">
                         <img
                           src={reportScreenshotDataUrl}
                           alt="Report screenshot preview"
-                          className="w-full h-auto"
+                          className="w-full h-auto block"
                         />
                       </div>
                     ) : (
-                      <div className="rounded-md border p-3 text-xs text-muted-foreground">
+                      <div className="flex-1 min-h-0 rounded-md border bg-muted/20 p-3 text-xs text-muted-foreground flex items-center justify-center text-center">
                         {isCapturingReportScreenshot
                           ? 'Capturing screenshot…'
                           : reportScreenshotError
                             ? reportScreenshotError
-                            : 'Screenshot will appear here.'}
+                            : 'Click “Capture practice” (recommended) or “Capture screen”.'}
                       </div>
                     )}
+                    <div className="text-[11px] text-muted-foreground">
+                      Tip: “Capture practice” includes off-screen content; “Capture screen” captures exactly what you see.
+                    </div>
                   </div>
-                  <div className="space-y-1">
+
+                  <div className="min-h-0 flex flex-col gap-2">
                     <div className="text-xs text-muted-foreground">Issue description</div>
                     <Textarea
                       value={reportMessage}
                       onChange={(e) => setReportMessage(e.target.value)}
                       placeholder="Please describe the issue in detail (what you expected vs what happened, steps to reproduce, etc.)"
-                      className="min-h-[180px]"
+                      className="flex-1 min-h-0"
                     />
                   </div>
                 </div>
@@ -1543,29 +1846,60 @@ export default function Practice() {
                 <div className="max-w-sm mx-auto space-y-1">
                   <Label className="text-xs text-muted-foreground">Answer</Label>
                   {(question as PracticeQuestion).kind === 'factorisation' ? (
-                    <div className="grid grid-cols-2 gap-3">
+                    <div className={`grid gap-3 ${(question as any).expectedFactors?.length === 3 ? 'grid-cols-3' : 'grid-cols-2'}`}>
                       <div className="space-y-1">
                         <Label className="text-xs text-muted-foreground">Factor 1</Label>
-                        <TypingAnswerMathInput
-                          value={answer1}
-                          onChange={setAnswer1}
-                          placeholder=""
-                          disabled={submitted}
-                          enableScripts
-                          className={'text-2xl font-normal text-center'}
-                        />
+                        <div className="flex items-center justify-center gap-2">
+                          <div className="text-2xl select-none">(</div>
+                          <div className="flex-1">
+                            <TypingAnswerMathInput
+                              value={answer1}
+                              onChange={setAnswer1}
+                              placeholder=""
+                              disabled={submitted}
+                              enableScripts
+                              className={'text-2xl font-normal text-center'}
+                            />
+                          </div>
+                          <div className="text-2xl select-none">)</div>
+                        </div>
                       </div>
                       <div className="space-y-1">
                         <Label className="text-xs text-muted-foreground">Factor 2</Label>
-                        <TypingAnswerMathInput
-                          value={answer2}
-                          onChange={setAnswer2}
-                          placeholder=""
-                          disabled={submitted}
-                          enableScripts
-                          className={'text-2xl font-normal text-center'}
-                        />
+                        <div className="flex items-center justify-center gap-2">
+                          <div className="text-2xl select-none">(</div>
+                          <div className="flex-1">
+                            <TypingAnswerMathInput
+                              value={answer2}
+                              onChange={setAnswer2}
+                              placeholder=""
+                              disabled={submitted}
+                              enableScripts
+                              className={'text-2xl font-normal text-center'}
+                            />
+                          </div>
+                          <div className="text-2xl select-none">)</div>
+                        </div>
                       </div>
+                      {(question as any).expectedFactors?.length === 3 ? (
+                        <div className="space-y-1">
+                          <Label className="text-xs text-muted-foreground">Factor 3</Label>
+                          <div className="flex items-center justify-center gap-2">
+                            <div className="text-2xl select-none">(</div>
+                            <div className="flex-1">
+                              <TypingAnswerMathInput
+                                value={answer3}
+                                onChange={setAnswer3}
+                                placeholder=""
+                                disabled={submitted}
+                                enableScripts
+                                className={'text-2xl font-normal text-center'}
+                              />
+                            </div>
+                            <div className="text-2xl select-none">)</div>
+                          </div>
+                        </div>
+                      ) : null}
                     </div>
                   ) : (question as PracticeQuestion).kind === 'calculus' && (question as any).topicId === 'integration' && /\\int_\{/.test(String((question as any).katexQuestion ?? '')) ? (
                     <Input
@@ -1763,8 +2097,8 @@ export default function Practice() {
                           <div
                             className={
                               (question as any).generatorParams?.circularMeasure
-                                ? 'text-xl md:text-2xl leading-snug max-w-full'
-                                : 'text-3xl leading-snug max-w-full'
+                                ? 'text-lg md:text-xl leading-snug max-w-full'
+                                : 'text-xl md:text-2xl leading-snug max-w-full'
                             }
                           >
                             <Katex latex={s.katex} displayMode />
@@ -1786,8 +2120,8 @@ export default function Practice() {
                           <div
                             className={
                               (question as any).generatorParams?.circularMeasure
-                                ? 'mt-1 text-lg md:text-xl leading-snug max-w-full'
-                                : 'mt-1 text-xl leading-snug max-w-full'
+                                ? 'mt-1 text-base md:text-lg leading-snug max-w-full'
+                                : 'mt-1 text-lg md:text-xl leading-snug max-w-full'
                             }
                           >
                             <Katex
@@ -1859,6 +2193,15 @@ export default function Practice() {
                               spec={b.graphSpec}
                               altText={b.altText}
                               interactive={(question as any).topicId === 'integration'}
+                            />
+                          </div>
+                        ) : b.kind === 'long_division' ? (
+                          <div key={idx} className="py-2">
+                            <PolynomialLongDivision
+                              divisorLatex={b.divisorLatex}
+                              dividendLatex={b.dividendLatex}
+                              quotientLatex={b.quotientLatex}
+                              steps={b.steps}
                             />
                           </div>
                         ) : (

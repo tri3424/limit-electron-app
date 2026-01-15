@@ -155,14 +155,19 @@ export type DifferentiationQuestion = {
   normalize: (raw: string) => string;
 };
 
-export function generateDifferentiationQuestion(input: { seed: number; difficulty: PracticeDifficulty }): DifferentiationQuestion {
+export function generateDifferentiationQuestion(input: { seed: number; difficulty: PracticeDifficulty; variantWeights?: Record<string, number> }): DifferentiationQuestion {
   const rng = mulberry32(input.seed);
 
   const variant = (() => {
     // Add a "double derivation" stationary-points style question.
     // Keep weighting stable by difficulty.
-    const wStationary = input.difficulty === 'easy' ? 20 : input.difficulty === 'medium' ? 30 : 40;
-    const wBasic = 100 - wStationary;
+    const w = input.variantWeights ?? {};
+    const wStationary = typeof w.stationary_points === 'number'
+      ? Math.max(0, w.stationary_points)
+      : (input.difficulty === 'easy' ? 20 : input.difficulty === 'medium' ? 30 : 40);
+    const wBasic = typeof w.basic_polynomial === 'number'
+      ? Math.max(0, w.basic_polynomial)
+      : Math.max(0, 100 - wStationary);
     const total = wStationary + wBasic;
     const pick = total <= 0 ? 0 : rng.next() * total;
     return pick < wStationary ? ('stationary_points' as const) : ('basic_polynomial' as const);
@@ -273,8 +278,8 @@ export function generateDifferentiationQuestion(input: { seed: number; difficult
       normalizeStationaryXList(expectedRawList),
       normalizeStationaryXList(`x=${expectedRawList}`),
       // Also allow reversed order.
-      normalizeStationaryXList(`${rrDen === 1 ? rrNum : `${rrNum}/${rrDen}`},${-p}`),
-      normalizeStationaryXList(`x=${rrDen === 1 ? rrNum : `${rrNum}/${rrDen}`},${-p}`),
+      normalizeStationaryXList(`${secondRaw},${firstRaw}`),
+      normalizeStationaryXList(`x=${secondRaw},${firstRaw}`),
     ].filter(Boolean);
 
     const explanation: Array<{ kind: 'text'; content: string } | { kind: 'math'; content: string; displayMode?: boolean }> = [
@@ -284,36 +289,40 @@ export function generateDifferentiationQuestion(input: { seed: number; difficult
       { kind: 'math' as const, content: String.raw`y = ${kLatex}\,u\,v`, displayMode: true },
       { kind: 'math' as const, content: u, displayMode: true },
       { kind: 'math' as const, content: v, displayMode: true },
-      { kind: 'text' as const, content: 'Step 2: Differentiate u and v. For v we use the power rule + chain rule: d/dx[(x+p)^2] = 2(x+p)·d/dx(x+p) = 2(x+p).' },
+      { kind: 'text' as const, content: 'Step 2: Differentiate u and v. For v we use the power rule + chain rule:' },
+      { kind: 'math' as const, content: String.raw`\frac{d}{dx}\left[(x+p)^2\right] = 2(x+p)\cdot\frac{d}{dx}(x+p) = 2(x+p)`, displayMode: true },
       { kind: 'math' as const, content: uPrime, displayMode: true },
       { kind: 'math' as const, content: vPrime, displayMode: true },
       { kind: 'text' as const, content: 'Step 3: Apply the product rule (for uv): (uv)\' = u\'v + uv\'.' },
       { kind: 'math' as const, content: yPrimeUnfactored, displayMode: true },
-      { kind: 'text' as const, content: 'Step 4: Factor out the common term (x + p). This makes solving dy/dx = 0 much easier.' },
+      { kind: 'text' as const, content: squareFirst ? `Step 4: Factor out the common term (${mSafe} - ${n}x). This makes solving dy/dx = 0 much easier.` : 'Step 4: Factor out the common term (x + p). This makes solving dy/dx = 0 much easier.' },
       { kind: 'math' as const, content: yPrimeFactored, displayMode: true },
       { kind: 'text' as const, content: 'Step 5: Simplify the bracket carefully by collecting like terms.' },
-      { kind: 'math' as const, content: String.raw`- ${n}\left(x + ${p}\right) + 2\left(${mSafe} - ${n}x\right)`, displayMode: true },
+      { kind: 'math' as const, content: squareFirst ? String.raw`-2${n}\left(x + ${p}\right) + \left(${mSafe} - ${n}x\right)` : String.raw`- ${n}\left(x + ${p}\right) + 2\left(${mSafe} - ${n}x\right)`, displayMode: true },
       { kind: 'math' as const, content: String.raw`= ${bracketSimplified}`, displayMode: true },
       { kind: 'math' as const, content: yPrimeFinal, displayMode: true },
       { kind: 'text' as const, content: 'Step 6: Stationary points: set dy/dx = 0. A product is zero when at least one factor is zero.' },
-      { kind: 'math' as const, content: String.raw`${kLatex}\left(x + ${p}\right)\left(${2 * mSafe - n * p} - ${3 * n}x\right) = 0`, displayMode: true },
+      { kind: 'math' as const, content: squareFirst ? String.raw`${kLatex}\left(${mSafe} - ${n}x\right)\left(${mSafe - 2 * n * p} - ${3 * n}x\right) = 0` : String.raw`${kLatex}\left(x + ${p}\right)\left(${2 * mSafe - n * p} - ${3 * n}x\right) = 0`, displayMode: true },
       { kind: 'text' as const, content: squareFirst ? `First factor: ${mSafe} - ${n}x = 0 gives x = ${firstRaw}.` : `First factor: x + ${p} = 0 gives x = ${-p}.` },
       { kind: 'math' as const, content: String.raw`x = ${x1Latex}`, displayMode: true },
       { kind: 'text' as const, content: 'Second factor: solve the linear equation.' },
-      { kind: 'math' as const, content: String.raw`${2 * mSafe - n * p} - ${3 * n}x = 0`, displayMode: true },
-      { kind: 'math' as const, content: String.raw`${3 * n}x = ${2 * mSafe - n * p}`, displayMode: true },
+      { kind: 'math' as const, content: squareFirst ? String.raw`${mSafe - 2 * n * p} - ${3 * n}x = 0` : String.raw`${2 * mSafe - n * p} - ${3 * n}x = 0`, displayMode: true },
+      { kind: 'math' as const, content: squareFirst ? String.raw`${3 * n}x = ${mSafe - 2 * n * p}` : String.raw`${3 * n}x = ${2 * mSafe - n * p}`, displayMode: true },
       { kind: 'math' as const, content: String.raw`x = ${x2Latex}`, displayMode: true },
       { kind: 'text' as const, content: 'So the x-coordinates of the stationary points are:' },
       { kind: 'math' as const, content: String.raw`x = ${answerListLatex}`, displayMode: true },
       { kind: 'text' as const, content: 'Step 7 (double derivation): Differentiate again to find d²y/dx². We start from the simplified factored form of dy/dx because it reduces algebra mistakes.' },
       { kind: 'math' as const, content: ySecondStart, displayMode: true },
-      { kind: 'text' as const, content: 'This is again a product of two brackets. Apply the product rule to (x+p)(A-3nx), noting that A is constant.' },
+      { kind: 'text' as const, content: squareFirst ? 'This is again a product of two brackets. Apply the product rule, noting that constants stay constant.' : 'This is again a product of two brackets. Apply the product rule to (x+p)(A-3nx), noting that A is constant.' },
       { kind: 'math' as const, content: ySecondUseProd, displayMode: true },
       { kind: 'math' as const, content: ySecondSimplified, displayMode: true },
       { kind: 'math' as const, content: ySecondFinal, displayMode: true },
-      { kind: 'text' as const, content: 'You can now substitute the stationary-point x-values into d²y/dx² to classify each point (positive -> minimum, negative -> maximum). This classification is not required here, but the second derivative is shown in full as requested.' },
+      { kind: 'text' as const, content: 'You can now substitute the stationary-point x-values into the second derivative to classify each point:' },
+      { kind: 'math' as const, content: String.raw`\text{positive}\;\rightarrow\;\text{minimum},\qquad\text{negative}\;\rightarrow\;\text{maximum}`, displayMode: true },
+      { kind: 'text' as const, content: 'This classification is not required here, but the second derivative is shown in full as requested.' },
       { kind: 'text' as const, content: 'Common errors to avoid:' },
-      { kind: 'text' as const, content: '1) Forgetting the chain rule when differentiating (x+p)^2.' },
+      { kind: 'text' as const, content: '1) Forgetting the chain rule when differentiating:' },
+      { kind: 'math' as const, content: String.raw`(x+p)^2`, displayMode: true },
       { kind: 'text' as const, content: '2) Missing a negative sign from d/dx(m - nx) = -n.' },
       { kind: 'text' as const, content: '3) When solving dy/dx = 0, forgetting that each factor can be zero.' },
       { kind: 'text' as const, content: '4) In the second derivative, differentiating a constant term as if it contained x.' },

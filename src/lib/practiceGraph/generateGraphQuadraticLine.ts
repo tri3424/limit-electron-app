@@ -302,7 +302,7 @@ export function generateGraphQuadraticLineMcq(input: {
         text: 'The parabola is also shown on the graph, but the question asks for the straight line equation.',
       },
       {
-        katex: 'Choose\,two\,clear\,points\,on\,the\,line',
+        katex: String.raw`\text{Choose two clear points on the line.}`,
         text: `For example, use the points where the line crosses the grid at x=${x1} and x=${x2}.`,
       },
       {

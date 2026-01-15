@@ -1,6 +1,7 @@
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Katex } from '@/components/Katex';
+import { PolynomialLongDivision } from '@/components/PolynomialLongDivision';
 import { QuadraticFactorizationQuestion } from '@/lib/practiceGenerators/quadraticFactorization';
 
 type Props = {
@@ -36,6 +37,19 @@ export function QuadraticPreviewModal({ open, onOpenChange, question }: Props) {
                       b.kind === 'text' ? (
                         <div key={idx} className="text-sm leading-relaxed text-foreground">
                           {b.content}
+                        </div>
+                      ) : b.kind === 'long_division' ? (
+                        <div key={idx} className="py-2">
+                          <PolynomialLongDivision
+                            divisorLatex={b.divisorLatex}
+                            dividendLatex={b.dividendLatex}
+                            quotientLatex={b.quotientLatex}
+                            steps={b.steps}
+                          />
+                        </div>
+                      ) : b.kind === 'graph' ? (
+                        <div key={idx} className="text-sm leading-relaxed text-foreground">
+                          {b.altText}
                         </div>
                       ) : (
                         <div key={idx} className="overflow-x-auto">

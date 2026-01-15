@@ -1033,6 +1033,18 @@ export default function Settings() {
                         { key: 'x2', label: 'x^2 common factor', defaultValue: 3 },
                         { key: 'x3', label: 'x^3 common factor', defaultValue: 2 },
                         { key: 'x3_3term', label: 'x^3 three-term', defaultValue: 2 },
+                        { key: 'gcf_binomial', label: 'GCF + binomial', defaultValue: 4 },
+                        { key: 'gcf_quadratic', label: 'GCF + quadratic -> 2 binomials', defaultValue: 4 },
+                      ],
+                    };
+                  }
+
+                  if (t.id === 'differentiation') {
+                    return {
+                      ...base,
+                      variants: [
+                        { key: 'basic_polynomial', label: 'Basic derivative', defaultValue: 70 },
+                        { key: 'stationary_points', label: 'Stationary points (double derivation)', defaultValue: 30 },
                       ],
                     };
                   }

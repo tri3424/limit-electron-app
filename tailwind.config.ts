@@ -30,6 +30,17 @@ export default {
           'Segoe UI Symbol',
           'Noto Color Emoji',
         ],
+        slab: [
+          'Roboto Slab',
+          'Inter',
+          'ui-sans-serif',
+          'system-ui',
+          'Segoe UI',
+          'Roboto',
+          'Helvetica Neue',
+          'Arial',
+          'Noto Sans',
+        ],
       },
       colors: {
         border: "hsl(var(--border))",
