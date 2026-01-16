@@ -29,3 +29,4 @@ native/offline-ai/models/*.gguf
 
 [A-Za-z]:*
 **/[A-Za-z]:*
+node_modules.tgz
