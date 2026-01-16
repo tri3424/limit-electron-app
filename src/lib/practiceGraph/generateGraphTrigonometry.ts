@@ -95,6 +95,25 @@ function ratioLatex(name: 'sin' | 'cos' | 'tan' | 'cot' | 'sec' | 'csc') {
   }
 }
 
+function trigPow(name: 'sin' | 'cos' | 'tan' | 'cot' | 'sec' | 'csc', exp: number) {
+  const base = ratioLatex(name);
+  if (exp === 0) return '';
+  if (exp === 1) return String.raw`${base}\theta`;
+  return String.raw`${base}^{${exp}}\theta`;
+}
+
+function trigPowValue(name: 'sin' | 'cos' | 'tan' | 'cot' | 'sec' | 'csc', exp: number) {
+  if (exp === 0) return String.raw`1`;
+  return trigPow(name, exp);
+}
+
+function trigProduct(items: Array<{ fn: 'sin' | 'cos' | 'tan' | 'cot' | 'sec' | 'csc'; exp: number }>) {
+  const parts = items.map((it) => trigPow(it.fn, it.exp)).filter(Boolean);
+  if (!parts.length) return String.raw`1`;
+  if (parts.length === 1) return parts[0]!;
+  return parts.join(String.raw`\,`);
+}
+
 function signsFromQuadrant(quadrant: 1 | 2 | 3 | 4) {
   const sinSign = quadrant === 3 || quadrant === 4 ? -1 : 1;
   const cosSign = quadrant === 2 || quadrant === 3 ? -1 : 1;
@@ -224,33 +243,43 @@ export function generateGraphTrigonometryMcq(input: {
     }> = [
       () => {
         const p = rng.int(1, 8);
-        const lhs = String.raw`\frac{\sin^{${p}}\theta}{\csc\theta}`;
-        const rhs = fmtTrigPow('sin', p + 1);
-        const wrong = [String.raw`\sin^{${p}}\theta`, String.raw`\sin^{${p - 1 < 0 ? 0 : p - 1}}\theta`, String.raw`\csc^{${p + 1}}\theta`].filter((x) => x !== rhs);
+        const sinP = trigPow('sin', p);
+        const lhs = String.raw`\frac{${sinP}}{\csc\theta}`;
+        const rhs = trigPowValue('sin', p + 1);
+        const wrong = [
+          trigPowValue('sin', p),
+          trigPowValue('sin', Math.max(0, p - 1)),
+          trigPowValue('csc', p + 1),
+        ].filter((x) => x !== rhs);
         const steps = [
-          { katex: String.raw`\text{Goal: simplify }\frac{\sin^{${p}}\theta}{\csc\theta}.`, text: 'We will rewrite everything using basic trig identities.' },
+          { katex: String.raw`\text{Goal: simplify }${lhs}.`, text: 'We will rewrite everything using basic trig identities.' },
           { katex: String.raw`\csc\theta = \frac{1}{\sin\theta}`, text: 'Use the reciprocal identity for cosecant.' },
-          { katex: String.raw`\frac{\sin^{${p}}\theta}{\csc\theta}=\frac{\sin^{${p}}\theta}{\frac{1}{\sin\theta}}`, text: 'Substitute cscθ into the expression.' },
+          { katex: String.raw`${lhs}=\frac{${sinP}}{\frac{1}{\sin\theta}}`, text: 'Substitute cscθ into the expression.' },
           { katex: String.raw`\frac{1}{\frac{1}{\sin\theta}}=\sin\theta`, text: 'Dividing by a fraction means multiplying by its reciprocal.' },
-          { katex: String.raw`\frac{\sin^{${p}}\theta}{\frac{1}{\sin\theta}}=\sin^{${p}}\theta\cdot\sin\theta`, text: 'Rewrite as a product.' },
-          { katex: String.raw`\sin^{${p}}\theta\cdot\sin\theta=\sin^{${p + 1}}\theta`, text: 'Multiply same-base powers: add exponents.' },
-          { katex: String.raw`\boxed{\frac{\sin^{${p}}\theta}{\csc\theta}=${rhs}}`, text: 'So this is the simplified form.' },
+          { katex: String.raw`\frac{${sinP}}{\frac{1}{\sin\theta}}=${sinP}\cdot\sin\theta`, text: 'Rewrite as a product.' },
+          { katex: String.raw`${sinP}\cdot\sin\theta=\sin^{${p + 1}}\theta`, text: 'Multiply same-base powers: add exponents.' },
+          { katex: String.raw`\boxed{${lhs}=${rhs}}`, text: 'So this is the simplified form.' },
         ];
         return { lhs, rhs, steps, wrong };
       },
       () => {
         const p = rng.int(1, 8);
-        const lhs = String.raw`\frac{\cos^{${p}}\theta}{\sec\theta}`;
-        const rhs = fmtTrigPow('cos', p + 1);
-        const wrong = [String.raw`\cos^{${p}}\theta`, String.raw`\cos^{${p - 1 < 0 ? 0 : p - 1}}\theta`, String.raw`\sec^{${p + 1}}\theta`].filter((x) => x !== rhs);
+        const cosP = trigPow('cos', p);
+        const lhs = String.raw`\frac{${cosP}}{\sec\theta}`;
+        const rhs = trigPowValue('cos', p + 1);
+        const wrong = [
+          trigPowValue('cos', p),
+          trigPowValue('cos', Math.max(0, p - 1)),
+          trigPowValue('sec', p + 1),
+        ].filter((x) => x !== rhs);
         const steps = [
-          { katex: String.raw`\text{Goal: simplify }\frac{\cos^{${p}}\theta}{\sec\theta}.`, text: 'We will rewrite everything using basic trig identities.' },
+          { katex: String.raw`\text{Goal: simplify }${lhs}.`, text: 'We will rewrite everything using basic trig identities.' },
           { katex: String.raw`\sec\theta = \frac{1}{\cos\theta}`, text: 'Use the reciprocal identity for secant.' },
-          { katex: String.raw`\frac{\cos^{${p}}\theta}{\sec\theta}=\frac{\cos^{${p}}\theta}{\frac{1}{\cos\theta}}`, text: 'Substitute secθ into the expression.' },
+          { katex: String.raw`${lhs}=\frac{${cosP}}{\frac{1}{\cos\theta}}`, text: 'Substitute secθ into the expression.' },
           { katex: String.raw`\frac{1}{\frac{1}{\cos\theta}}=\cos\theta`, text: 'Dividing by a fraction means multiplying by its reciprocal.' },
-          { katex: String.raw`\frac{\cos^{${p}}\theta}{\frac{1}{\cos\theta}}=\cos^{${p}}\theta\cdot\cos\theta`, text: 'Rewrite as a product.' },
-          { katex: String.raw`\cos^{${p}}\theta\cdot\cos\theta=\cos^{${p + 1}}\theta`, text: 'Multiply same-base powers: add exponents.' },
-          { katex: String.raw`\boxed{\frac{\cos^{${p}}\theta}{\sec\theta}=${rhs}}`, text: 'So this is the simplified form.' },
+          { katex: String.raw`\frac{${cosP}}{\frac{1}{\cos\theta}}=${cosP}\cdot\cos\theta`, text: 'Rewrite as a product.' },
+          { katex: String.raw`${cosP}\cdot\cos\theta=\cos^{${p + 1}}\theta`, text: 'Multiply same-base powers: add exponents.' },
+          { katex: String.raw`\boxed{${lhs}=${rhs}}`, text: 'So this is the simplified form.' },
         ];
         return { lhs, rhs, steps, wrong };
       },
@@ -304,37 +333,41 @@ export function generateGraphTrigonometryMcq(input: {
       },
       () => {
         const p = rng.int(1, 6);
-        const lhs = String.raw`\frac{\tan^{${p}}\theta}{\sec^{${p}}\theta}`;
-        const rhs = fmtTrigPow('sin', p);
-        const wrong = [String.raw`\cos^{${p}}\theta`, String.raw`\tan^{${p}}\theta`, String.raw`\sec^{${p}}\theta`].filter((x) => x !== rhs);
+        const tanP = trigPow('tan', p);
+        const secP = trigPow('sec', p);
+        const lhs = String.raw`\frac{${tanP}}{${secP}}`;
+        const rhs = trigPow('sin', p);
+        const wrong = [trigPow('cos', p), trigPow('tan', p), trigPow('sec', p)].filter((x) => x !== rhs);
         const steps = [
-          { katex: String.raw`\text{Goal: simplify }\frac{\tan^{${p}}\theta}{\sec^{${p}}\theta}.`, text: 'Rewrite tan and sec using sin and cos, then simplify.' },
+          { katex: String.raw`\text{Goal: simplify }${lhs}.`, text: 'Rewrite tan and sec using sin and cos, then simplify.' },
           { katex: String.raw`\tan\theta=\frac{\sin\theta}{\cos\theta}`, text: 'Use the quotient identity for tangent.' },
           { katex: String.raw`\sec\theta=\frac{1}{\cos\theta}`, text: 'Use the reciprocal identity for secant.' },
           { katex: String.raw`\tan^{${p}}\theta=\left(\frac{\sin\theta}{\cos\theta}\right)^{${p}}`, text: 'Raise both sides to the power p.' },
           { katex: String.raw`\sec^{${p}}\theta=\left(\frac{1}{\cos\theta}\right)^{${p}}`, text: 'Raise both sides to the power p.' },
-          { katex: String.raw`\frac{\tan^{${p}}\theta}{\sec^{${p}}\theta}=\frac{\left(\frac{\sin\theta}{\cos\theta}\right)^{${p}}}{\left(\frac{1}{\cos\theta}\right)^{${p}}}`, text: 'Substitute into the original expression.' },
+          { katex: String.raw`${lhs}=\frac{\left(\frac{\sin\theta}{\cos\theta}\right)^{${p}}}{\left(\frac{1}{\cos\theta}\right)^{${p}}}`, text: 'Substitute into the original expression.' },
           { katex: String.raw`=\left(\frac{\sin\theta}{\cos\theta}\right)^{${p}}\cdot\left(\cos\theta\right)^{${p}}`, text: 'Dividing by (1/cosθ)^p is multiplying by (cosθ)^p.' },
-          { katex: String.raw`=\sin^{${p}}\theta`, text: 'The cos^p factors cancel, leaving sin^pθ.' },
-          { katex: String.raw`\boxed{\frac{\tan^{${p}}\theta}{\sec^{${p}}\theta}=${rhs}}`, text: 'So this is the simplified form.' },
+          { katex: String.raw`=${trigPowValue('sin', p)}`, text: 'The cos^p factors cancel, leaving sin^pθ.' },
+          { katex: String.raw`\boxed{${lhs}=${rhs}}`, text: 'So this is the simplified form.' },
         ];
         return { lhs, rhs, steps, wrong };
       },
       () => {
         const p = rng.int(1, 6);
-        const lhs = String.raw`\frac{\cot^{${p}}\theta}{\csc^{${p}}\theta}`;
-        const rhs = fmtTrigPow('cos', p);
-        const wrong = [String.raw`\sin^{${p}}\theta`, String.raw`\cot^{${p}}\theta`, String.raw`\csc^{${p}}\theta`].filter((x) => x !== rhs);
+        const cotP = trigPow('cot', p);
+        const cscP = trigPow('csc', p);
+        const lhs = String.raw`\frac{${cotP}}{${cscP}}`;
+        const rhs = trigPow('cos', p);
+        const wrong = [trigPow('sin', p), trigPow('cot', p), trigPow('csc', p)].filter((x) => x !== rhs);
         const steps = [
-          { katex: String.raw`\text{Goal: simplify }\frac{\cot^{${p}}\theta}{\csc^{${p}}\theta}.`, text: 'Rewrite cot and csc using sin and cos, then simplify.' },
+          { katex: String.raw`\text{Goal: simplify }${lhs}.`, text: 'Rewrite cot and csc using sin and cos, then simplify.' },
           { katex: String.raw`\cot\theta=\frac{\cos\theta}{\sin\theta}`, text: 'Use the quotient identity for cotangent.' },
           { katex: String.raw`\csc\theta=\frac{1}{\sin\theta}`, text: 'Use the reciprocal identity for cosecant.' },
           { katex: String.raw`\cot^{${p}}\theta=\left(\frac{\cos\theta}{\sin\theta}\right)^{${p}}`, text: 'Raise both sides to the power p.' },
           { katex: String.raw`\csc^{${p}}\theta=\left(\frac{1}{\sin\theta}\right)^{${p}}`, text: 'Raise both sides to the power p.' },
-          { katex: String.raw`\frac{\cot^{${p}}\theta}{\csc^{${p}}\theta}=\frac{\left(\frac{\cos\theta}{\sin\theta}\right)^{${p}}}{\left(\frac{1}{\sin\theta}\right)^{${p}}}`, text: 'Substitute into the original expression.' },
+          { katex: String.raw`${lhs}=\frac{\left(\frac{\cos\theta}{\sin\theta}\right)^{${p}}}{\left(\frac{1}{\sin\theta}\right)^{${p}}}`, text: 'Substitute into the original expression.' },
           { katex: String.raw`=\left(\frac{\cos\theta}{\sin\theta}\right)^{${p}}\cdot\left(\sin\theta\right)^{${p}}`, text: 'Dividing by (1/sinθ)^p is multiplying by (sinθ)^p.' },
-          { katex: String.raw`=\cos^{${p}}\theta`, text: 'The sin^p factors cancel, leaving cos^pθ.' },
-          { katex: String.raw`\boxed{\frac{\cot^{${p}}\theta}{\csc^{${p}}\theta}=${rhs}}`, text: 'So this is the simplified form.' },
+          { katex: String.raw`=${trigPowValue('cos', p)}`, text: 'The sin^p factors cancel, leaving cos^pθ.' },
+          { katex: String.raw`\boxed{${lhs}=${rhs}}`, text: 'So this is the simplified form.' },
         ];
         return { lhs, rhs, steps, wrong };
       },
@@ -346,11 +379,14 @@ export function generateGraphTrigonometryMcq(input: {
         const lhs = String.raw`\frac{\sin^{${a}}\theta\,\cos^{${b}}\theta}{\sin^{${c}}\theta\,\cos^{${d}}\theta}`;
         const sExp = a - c;
         const cExp = b - d;
-        const rhs = joinFactors([fmtTrigPow('sin', sExp), fmtTrigPow('cos', cExp)]);
+        const rhs = trigProduct([
+          { fn: 'sin', exp: sExp },
+          { fn: 'cos', exp: cExp },
+        ]);
         const wrong = [
-          String.raw`\sin^{${a - c}}\theta\,\cos^{${b + d}}\theta`,
-          String.raw`\sin^{${a + c}}\theta\,\cos^{${b - d}}\theta`,
-          String.raw`\sin^{${a - c}}\theta\,\cos^{${b - d - 1}}\theta`,
+          trigProduct([{ fn: 'sin', exp: a - c }, { fn: 'cos', exp: b + d }]),
+          trigProduct([{ fn: 'sin', exp: a + c }, { fn: 'cos', exp: b - d }]),
+          trigProduct([{ fn: 'sin', exp: a - c }, { fn: 'cos', exp: b - d - 1 }]),
         ].filter((x) => x !== rhs);
         const steps = [
           { katex: String.raw`\text{Goal: simplify }\frac{\sin^{${a}}\theta\,\cos^{${b}}\theta}{\sin^{${c}}\theta\,\cos^{${d}}\theta}.`, text: 'We will simplify by canceling common factors using index rules.' },
@@ -438,19 +474,22 @@ export function generateGraphTrigonometryMcq(input: {
       },
       () => {
         const p = rng.int(1, 5);
+        const twoP = 2 * p;
         const lhs = String.raw`\frac{(1+\tan^2\theta)^{${p}}}{\sec^{2${p}}\theta}`;
         const rhs = String.raw`1`;
-        const wrong = [String.raw`0`, String.raw`\sec^{2${p}}\theta`, String.raw`\tan^{2${p}}\theta`];
+        const lhsFixed = String.raw`\frac{(1+\tan^2\theta)^{${p}}}{\sec^{${twoP}}\theta}`;
+        const wrong = [String.raw`0`, String.raw`\sec^{${twoP}}\theta`, String.raw`\tan^{${twoP}}\theta`];
         const steps = [
-          { katex: String.raw`\text{Goal: simplify }\frac{(1+\tan^2\theta)^{${p}}}{\sec^{2${p}}\theta}.`, text: 'We will convert the bracket using a trig identity, then simplify indices.' },
+          { katex: String.raw`\text{Goal: simplify }${lhsFixed}.`, text: 'We will convert the bracket using a trig identity, then simplify indices.' },
           { katex: String.raw`1+\tan^2\theta=\sec^2\theta`, text: 'Use the Pythagorean identity linking tan and sec.' },
           { katex: String.raw`(1+\tan^2\theta)^{${p}}=(\sec^2\theta)^{${p}}`, text: 'Raise both sides to the power p.' },
-          { katex: String.raw`(\sec^2\theta)^{${p}}=\sec^{2${p}}\theta`, text: 'Power of a power: (a^2)^p=a^{2p}.' },
-          { katex: String.raw`\frac{(1+\tan^2\theta)^{${p}}}{\sec^{2${p}}\theta}=\frac{\sec^{2${p}}\theta}{\sec^{2${p}}\theta}`, text: 'Substitute the simplified numerator.' },
+          { katex: String.raw`(\sec^2\theta)^{${p}}=\sec^{2${p}}\theta`, text: 'Power of a power: (a^{2})^{p}=a^{2p}.' },
+          { katex: String.raw`(\sec^2\theta)^{${p}}=\sec^{${twoP}}\theta`, text: 'Here, the exponent becomes 2p.' },
+          { katex: String.raw`${lhsFixed}=\frac{\sec^{${twoP}}\theta}{\sec^{${twoP}}\theta}`, text: 'Substitute the simplified numerator.' },
           { katex: String.raw`=1`, text: 'Any nonzero expression divided by itself equals 1.' },
-          { katex: String.raw`\boxed{\frac{(1+\tan^2\theta)^{${p}}}{\sec^{2${p}}\theta}=1}`, text: 'So the simplified form is 1.' },
+          { katex: String.raw`\boxed{${lhsFixed}=1}`, text: 'So the simplified form is 1.' },
         ];
-        return { lhs, rhs, steps, wrong };
+        return { lhs: lhsFixed, rhs, steps, wrong };
       },
       () => {
         const which = rng.int(0, 2);

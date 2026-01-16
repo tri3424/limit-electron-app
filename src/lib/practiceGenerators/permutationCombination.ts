@@ -55,6 +55,18 @@ function nPrBig(n: number, r: number): bigint {
   return out;
 }
 
+function pickDistinctDigits(rng: Rng, pool: number[], count: number): number[] {
+  const src = pool.slice();
+  const out: number[] = [];
+  const n = Math.min(count, src.length);
+  for (let i = 0; i < n; i++) {
+    const idx = rng.int(0, src.length - 1);
+    out.push(src[idx]!);
+    src.splice(idx, 1);
+  }
+  return out;
+}
+
 function toSafeNumber(x: bigint): number {
   const max = BigInt(Number.MAX_SAFE_INTEGER);
   if (x > max) return Number.MAX_SAFE_INTEGER;
@@ -226,28 +238,36 @@ export function generatePermutationCombinationQuestion(input: {
   }
 
   if (variantId === 'digits_even_unique') {
-    const digits = 10;
-    const len = rng.int(5, 7);
+    const len = rng.int(input.difficulty === 'easy' ? 4 : 5, input.difficulty === 'hard' ? 9 : 8);
+    const extraMax = Math.min(2, Math.max(0, 9 - len));
+    const digitCount = len + rng.int(0, extraMax);
 
-    // Must not start with 0, all digits distinct, and even.
-    // We'll count by last digit cases.
-    // Case A: last digit is 0.
-    // Case B: last digit is one of {2,4,6,8}.
+    // Build a digit pool sized to the question, not always 0-9.
+    // Keep 0 in the set so the “cannot start with 0” condition stays meaningful.
+    const pool = [0, ...pickDistinctDigits(rng, [1, 2, 3, 4, 5, 6, 7, 8, 9], digitCount - 1)].sort((a, b) => a - b);
+    const m = pool.length;
+    const hasZero = pool.includes(0);
+    const evenDigits = pool.filter((d) => d % 2 === 0);
 
-    const caseA = nPrBig(9, len - 1); // first digit: 1-9 then choose remaining len-2 from remaining 8? Actually last fixed 0.
-    // Let's compute precisely using permutations with exclusions.
-    // If last digit 0: first digit can be 1-9 => 9 choices.
-    // Remaining (len-2) middle digits choose from remaining 8 digits (1-9 except first used): permutations 8P(len-2).
-    const caseAExact = BigInt(9) * nPrBig(8, len - 2);
+    // Count: last digit must be even and all digits distinct.
+    // For each possible last digit, count allowed first digit choices (not 0) then permutations for middle.
+    const middleCount = nPrBig(m - 2, len - 2);
+    let caseLast0 = 0n;
+    let caseLastEvenNonZero = 0n;
+    if (evenDigits.includes(0)) {
+      const firstChoices = BigInt(m - 1);
+      caseLast0 = firstChoices * middleCount;
+    }
+    const evenNonZeroCount = evenDigits.filter((d) => d !== 0).length;
+    if (evenNonZeroCount > 0) {
+      const firstChoicesPerLast = BigInt(hasZero ? (m - 2) : (m - 1));
+      caseLastEvenNonZero = BigInt(evenNonZeroCount) * firstChoicesPerLast * middleCount;
+    }
 
-    // If last digit in {2,4,6,8}: 4 choices for last digit.
-    // First digit: can be 1-9 excluding last digit if last digit !=0 (still 8 choices).
-    // Remaining (len-2) middle digits: choose from remaining 8 digits (including 0) minus used two => 8 digits -> 8P(len-2)?
-    const caseBExact = BigInt(4) * BigInt(8) * nPrBig(8, len - 2);
+    const ans = caseLast0 + caseLastEvenNonZero;
 
-    const ans = caseAExact + caseBExact;
-
-    const q = String.raw`\text{A ${len}-digit number is to be formed using the digits 0,1,2,3,4,5,6,7,8,9.\\The number cannot start with 0 and all digits must be different.\\How many such ${len}-digit numbers are even?}`;
+    const digitsList = pool.join(',');
+    const q = String.raw`\text{A ${len}-digit number is to be formed using the digits ${digitsList}.\\The number cannot start with 0 and all digits must be different.\\How many such ${len}-digit numbers are even?}`;
 
     const expl: KatexExplanationBlock[] = [
       { kind: 'text', content: 'Step 1: Understand the restrictions.' },
@@ -256,30 +276,30 @@ export function generatePermutationCombinationQuestion(input: {
       { kind: 'text', content: 'All digits must be different, so once a digit is used it cannot be used again.' },
       { kind: 'text', content: 'Because we are forming a number (a sequence of digits), order matters, so we use permutations.' },
 
-      { kind: 'text', content: 'Step 2: Use casework on the last digit (because “even” depends only on the last digit).' },
-
+      { kind: 'text', content: 'Step 2: Count by the last digit.' },
+      { kind: 'text', content: `There are ${m} available digits: {${digitsList}}.` },
       { kind: 'text', content: 'Reminder:' },
       { kind: 'math', content: String.raw`{}^nP_r = n(n-1)(n-2)\cdots (n-r+1)`, displayMode: true },
 
       { kind: 'text', content: 'Case A: last digit is 0.' },
-      { kind: 'text', content: 'Then the first digit can be any of 1–9 (9 choices), because it cannot be 0.' },
-      { kind: 'text', content: `After fixing first digit and last digit, there are 8 digits left for the remaining ${len - 2} middle positions.` },
-      { kind: 'text', content: `Those middle positions are filled by arranging ${len - 2} digits from the 8 remaining digits.` },
-      { kind: 'math', content: String.raw`\text{Case A} = 9\times {}^{8}P_{${len - 2}} = 9\times \frac{8!}{(${10 - len})!} = ${caseAExact.toString()}`, displayMode: true },
+      { kind: 'text', content: `Then the first digit can be any of the remaining non-zero digits: ${m - 1} choices.` },
+      { kind: 'text', content: `After fixing first and last, there are ${m - 2} digits left for the remaining ${len - 2} middle positions.` },
+      { kind: 'math', content: String.raw`\text{Case A} = (${m - 1})\times {}^{${m - 2}}P_{${len - 2}} = ${caseLast0.toString()}`, displayMode: true },
 
-      { kind: 'text', content: 'Case B: last digit is one of 2,4,6,8.' },
-      { kind: 'text', content: 'There are 4 choices for the last digit.' },
-      { kind: 'text', content: 'Now the first digit can be any of 1–9 except the chosen last digit (8 choices).' },
-      { kind: 'text', content: `After fixing first and last, there are again 8 digits left for the remaining ${len - 2} middle positions.` },
-      { kind: 'text', content: 'Again, fill the middle using permutations of the remaining digits.' },
-      { kind: 'math', content: String.raw`\text{Case B} = 4\times 8\times {}^{8}P_{${len - 2}} = ${caseBExact.toString()}`, displayMode: true },
+      { kind: 'text', content: 'Case B: last digit is an even non-zero digit.' },
+      { kind: 'text', content: `There are ${evenNonZeroCount} choices for the last digit.` },
+      { kind: 'text', content: hasZero
+        ? `Then the first digit can be any digit except 0 and the chosen last digit: ${Math.max(0, m - 2)} choices.`
+        : `Then the first digit can be any digit except the chosen last digit: ${Math.max(0, m - 1)} choices.` },
+      { kind: 'text', content: `After fixing first and last, there are ${m - 2} digits left for the remaining ${len - 2} middle positions.` },
+      { kind: 'math', content: String.raw`\text{Case B} = (${evenNonZeroCount})\times (${hasZero ? (m - 2) : (m - 1)})\times {}^{${m - 2}}P_{${len - 2}} = ${caseLastEvenNonZero.toString()}`, displayMode: true },
 
       { kind: 'text', content: 'Step 3: Add the cases (they do not overlap).' },
-      { kind: 'math', content: String.raw`${caseAExact.toString()}+${caseBExact.toString()}=${ans.toString()}`, displayMode: true },
+      { kind: 'math', content: String.raw`${caseLast0.toString()}+${caseLastEvenNonZero.toString()}=${ans.toString()}`, displayMode: true },
       { kind: 'text', content: `Final answer: ${ans.toString()} even ${len}-digit numbers.` },
     ];
 
-    return mk({ idSuffix: `digits-even-${len}`, katexQuestion: q, katexExplanation: expl, expectedNumber: toSafeNumber(ans) });
+    return mk({ idSuffix: `digits-even-${len}-${m}`, katexQuestion: q, katexExplanation: expl, expectedNumber: toSafeNumber(ans) });
   }
 
   if (variantId === 'arrange_together') {

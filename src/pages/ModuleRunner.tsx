@@ -2115,11 +2115,13 @@ function ExamSession({
 													onClick={() => {
 														if (showFeedback) return;
 														if (multi) {
-															const current = Array.isArray(answers[currentQuestion.id])
+															const selectedIds = Array.isArray(answers[currentQuestion.id])
 																? [...(answers[currentQuestion.id] as string[])]
 																: [];
-															const exists = current.includes(opt.id);
-															const next = exists ? current.filter((id) => id !== opt.id) : Array.from(new Set([...current, opt.id]));
+															const exists = selectedIds.includes(opt.id);
+															const next = exists
+																? selectedIds.filter((id) => id !== opt.id)
+																: Array.from(new Set([...selectedIds, opt.id]));
 															handleAnswerChange(next);
 														} else {
 															handleAnswerChange(opt.id);
@@ -2146,8 +2148,7 @@ function ExamSession({
 												(currentQuestion.correctAnswers ?? []).some((a) => (a ?? '').includes('^') || (a ?? '').includes('_'))
 											}
 											disabled={showFeedback}
-											placeholder="Type Your Answer Here..."
-											className="h-12 px-3 text-lg border-2 border-border rounded-none"
+											className="h-12 px-3 text-3xl border-2 border-border rounded-none"
 										/>
 									</div>
 								)}
@@ -3419,11 +3420,13 @@ function PracticeRunner({ moduleData, baseQuestions, onExit, glossaryEntries, gl
 											onClick={() => {
 												if (showFeedback) return;
 												if (multi) {
-													const current = Array.isArray(answers[current.id])
+													const selectedIds = Array.isArray(answers[current.id])
 														? [...(answers[current.id] as string[])]
 														: [];
-													const exists = current.includes(opt.id);
-													const next = exists ? current.filter((id) => id !== opt.id) : Array.from(new Set([...current, opt.id]));
+													const exists = selectedIds.includes(opt.id);
+													const next = exists
+														? selectedIds.filter((id) => id !== opt.id)
+														: Array.from(new Set([...selectedIds, opt.id]));
 													handleAnswerChange(next);
 												} else {
 													handleAnswerChange(opt.id);
@@ -3450,8 +3453,7 @@ function PracticeRunner({ moduleData, baseQuestions, onExit, glossaryEntries, gl
 											(current.correctAnswers ?? []).some((a) => (a ?? '').includes('^') || (a ?? '').includes('_'))
 										}
 										disabled={showFeedback}
-										placeholder="Type Your Answer Here..."
-										className="h-12 px-3 text-lg border-2 border-border rounded-none"
+										className="h-12 px-3 text-3xl border-2 border-border rounded-none"
 									/>
 								</div>
 							)}

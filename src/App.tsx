@@ -28,6 +28,10 @@ import SongModulesAdmin from "./pages/SongModulesAdmin";
 import SongModuleRunner from "./pages/SongModuleRunner";
 import SongRecognition from "./pages/SongRecognition";
 import Practice from "./pages/Practice";
+import SettingsPracticeAdmin from "./pages/SettingsPracticeAdmin";
+import SettingsPracticeAdminFrequency from "./pages/SettingsPracticeAdminFrequency";
+import SettingsPracticeAdminTopicLocks from "./pages/SettingsPracticeAdminTopicLocks";
+import SettingsPracticeAdminMixedModules from "./pages/SettingsPracticeAdminMixedModules";
  
 
 const queryClient = new QueryClient();
@@ -213,6 +217,46 @@ const App = () => {
         <ProtectedRoute requireAdmin>
           <Layout>
             <Settings />
+          </Layout>
+        </ProtectedRoute>
+      ),
+    },
+    {
+      path: "/settings/practice-admin",
+      element: (
+        <ProtectedRoute requireAdmin>
+          <Layout>
+            <SettingsPracticeAdmin />
+          </Layout>
+        </ProtectedRoute>
+      ),
+    },
+    {
+      path: "/settings/practice-admin/frequency",
+      element: (
+        <ProtectedRoute requireAdmin>
+          <Layout>
+            <SettingsPracticeAdminFrequency />
+          </Layout>
+        </ProtectedRoute>
+      ),
+    },
+    {
+      path: "/settings/practice-admin/topic-locks",
+      element: (
+        <ProtectedRoute requireAdmin>
+          <Layout>
+            <SettingsPracticeAdminTopicLocks />
+          </Layout>
+        </ProtectedRoute>
+      ),
+    },
+    {
+      path: "/settings/practice-admin/mixed-modules",
+      element: (
+        <ProtectedRoute requireAdmin>
+          <Layout>
+            <SettingsPracticeAdminMixedModules />
           </Layout>
         </ProtectedRoute>
       ),

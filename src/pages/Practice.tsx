@@ -565,6 +565,11 @@ export default function Practice() {
     const topicVariantWeights = (freq?.topicVariantWeights ?? {}) as Record<string, Record<string, number>>;
     const mixedModuleItemWeights = (freq?.mixedModuleItemWeights ?? {}) as Record<string, Record<number, number>>;
 
+    const hasConfiguredWeights = (w: unknown) => {
+      if (!w || typeof w !== 'object') return false;
+      return Object.keys(w as any).length > 0;
+    };
+
     const weightedPickIndex = (weightsByIndex: Record<number, number>, n: number, seed: number) => {
       const rng = (() => {
         let t = (seed ^ 0x5bd1e995) >>> 0;
@@ -592,13 +597,14 @@ export default function Practice() {
     const recentSet = new Set(recentQuestionIds);
     const tryGenerate = (
       fn: (seed: number) => QuadraticFactorizationQuestion | PracticeQuestion,
-      accept?: (q: QuadraticFactorizationQuestion | PracticeQuestion) => boolean
+      accept?: (q: QuadraticFactorizationQuestion | PracticeQuestion) => boolean,
+      opts?: { strict?: boolean }
     ) => {
       for (let attempt = 0; attempt < 50; attempt++) {
         const seed = seedValue + attempt;
         const q = fn(seed);
-        if (recentSet.has(q.id)) continue;
-        if (accept && !accept(q)) continue;
+        if (!opts?.strict && recentSet.has(q.id)) continue;
+        if (!opts?.strict && accept && !accept(q)) continue;
         return q;
       }
       return fn(seedValue);
@@ -616,28 +622,41 @@ export default function Practice() {
       if (!selectedMixedModule || !selectedMixedModule.items?.length) return;
       const items = selectedMixedModule.items;
       const weights = mixedModuleItemWeights?.[selectedMixedModule.id];
+      const strictMixed = hasConfiguredWeights(weights);
       const weightedIdx = weights ? weightedPickIndex(weights as any, items.length, seedValue) : null;
       const idx = typeof weightedIdx === 'number' ? weightedIdx : (mixedCursor % items.length);
       const item = items[idx];
       if (!item) return;
 
       if (item.topicId === 'quadratics') {
-        const q = tryGenerate((seed) => generateQuadraticByFactorisation({ seed, difficulty: item.difficulty }));
+        const q = tryGenerate(
+          (seed) => generateQuadraticByFactorisation({ seed, difficulty: item.difficulty }),
+          undefined,
+          { strict: strictMixed }
+        );
         setQuestion(q);
         rememberQuestionId(q.id);
       } else {
-        const avoidVariantId = item.topicId === 'word_problems'
+        const weightsForTopic = topicVariantWeights?.[item.topicId] as any;
+        const strictTopic = hasConfiguredWeights(weightsForTopic);
+        const strict = strictMixed || strictTopic;
+
+        const avoidVariantId = !strict && item.topicId === 'word_problems'
           ? (lastVariantByTopic.word_problems as string | undefined)
           : undefined;
-        const q = tryGenerate((seed) =>
-          generatePracticeQuestion({
-            topicId: item.topicId,
-            difficulty: item.difficulty,
-            seed,
-            avoidVariantId,
-            variantWeights: topicVariantWeights?.[item.topicId] as any,
-          })
-        , item.topicId === 'word_problems' ? acceptWordProblem : undefined);
+
+        const q = tryGenerate(
+          (seed) =>
+            generatePracticeQuestion({
+              topicId: item.topicId,
+              difficulty: item.difficulty,
+              seed,
+              avoidVariantId,
+              variantWeights: weightsForTopic,
+            }),
+          item.topicId === 'word_problems' ? acceptWordProblem : undefined,
+          { strict }
+        );
         setQuestion(q);
         rememberQuestionId(q.id);
         if (item.topicId === 'word_problems') {
@@ -658,10 +677,15 @@ export default function Practice() {
       resetAttemptState();
       return;
     }
-    const avoidVariantId = lastVariantByTopic[topicId] as string | undefined;
+
+    const weightsForTopic = topicVariantWeights?.[topicId] as any;
+    const strict = hasConfiguredWeights(weightsForTopic);
+    const avoidVariantId = !strict ? (lastVariantByTopic[topicId] as string | undefined) : undefined;
+
     const q = tryGenerate(
-      (seed) => generatePracticeQuestion({ topicId, difficulty, seed, avoidVariantId, variantWeights: topicVariantWeights?.[topicId] as any }),
-      topicId === 'word_problems' ? acceptWordProblem : undefined
+      (seed) => generatePracticeQuestion({ topicId, difficulty, seed, avoidVariantId, variantWeights: weightsForTopic }),
+      topicId === 'word_problems' ? acceptWordProblem : undefined,
+      { strict }
     );
     setQuestion(q);
     rememberQuestionId(q.id);
@@ -964,6 +988,31 @@ export default function Practice() {
       }
       case 'calculus': {
         const cq = q as any;
+
+        // Stationary-points questions can have multiple x-values.
+        if (cq.topicId === 'differentiation' && Array.isArray(cq.expectedParts) && cq.expectedParts.length > 0) {
+          const normalizeSingle = (raw: string) => {
+            const cleaned = String(raw ?? '')
+              .trim()
+              .replace(/[−–]/g, '-')
+              .replace(/\u200b/g, '')
+              .replace(/^x\s*=/i, '')
+              .replace(/^x\s*:/i, '')
+              .replace(/\s+/g, '')
+              .replace(/\{|\}/g, '')
+              .replace(/\[|\]/g, '')
+              .replace(/\(|\)/g, '');
+            // If user typed a comma-separated list, keep only the first token.
+            return cleaned.split(',').filter(Boolean)[0] ?? '';
+          };
+
+          const expected = cq.expectedParts.map((p: string) => normalizeSingle(p)).filter(Boolean);
+          const inputs = [answer1, answer2, answer3].map((a) => normalizeSingle(a)).filter(Boolean);
+          if (inputs.length !== expected.length) return false;
+          const a = [...inputs].sort();
+          const b = [...expected].sort();
+          return a.every((v, i) => v === b[i]);
+        }
 
         // Definite integrals should accept numeric fractions/decimals like -2/3.
         if (cq.topicId === 'integration' && isDefiniteIntegralQuestion(cq)) {
@@ -1768,7 +1817,7 @@ export default function Practice() {
                           onChange={setAnswer1}
                           placeholder=""
                           disabled={submitted}
-                          className="text-2xl font-normal text-left"
+                          className="text-4xl font-normal text-left tk-expr-input"
                         />
                       ) : (
                         <Input
@@ -1861,7 +1910,7 @@ export default function Practice() {
                               placeholder=""
                               disabled={submitted}
                               enableScripts
-                              className={'text-2xl font-normal text-center'}
+                              className={'text-3xl font-normal text-center'}
                             />
                           </div>
                           <div className="text-2xl select-none">)</div>
@@ -1878,7 +1927,7 @@ export default function Practice() {
                               placeholder=""
                               disabled={submitted}
                               enableScripts
-                              className={'text-2xl font-normal text-center'}
+                              className={'text-3xl font-normal text-center'}
                             />
                           </div>
                           <div className="text-2xl select-none">)</div>
@@ -1896,7 +1945,7 @@ export default function Practice() {
                                 placeholder=""
                                 disabled={submitted}
                                 enableScripts
-                                className={'text-2xl font-normal text-center'}
+                                className={'text-3xl font-normal text-center'}
                               />
                             </div>
                             <div className="text-2xl select-none">)</div>
@@ -1916,14 +1965,44 @@ export default function Practice() {
                       className="h-12 text-2xl font-normal text-center py-1 overflow-hidden text-ellipsis whitespace-nowrap"
                     />
                   ) : (question as PracticeQuestion).kind === 'calculus' ? (
-                    <TypingAnswerMathInput
-                      value={answer1}
-                      onChange={setAnswer1}
-                      placeholder=""
-                      disabled={submitted}
-                      enableScripts
-                      className={'text-2xl font-normal text-left'}
-                    />
+                    (() => {
+                      const cq = question as any;
+                      const parts = Array.isArray(cq.expectedParts) ? (cq.expectedParts as string[]) : [];
+                      const isStationary = cq.topicId === 'differentiation' && parts.length > 0;
+
+                      if (isStationary) {
+                        const count = Math.max(1, Math.min(3, parts.length));
+                        const labels = Array.from({ length: count }, (_, i) => `x${count === 1 ? '' : ` ${i + 1}`}`);
+                        const setters = [setAnswer1, setAnswer2, setAnswer3] as const;
+                        const values = [answer1, answer2, answer3];
+                        const grid = count === 1 ? 'grid grid-cols-1 gap-3 max-w-sm mx-auto' : count === 2 ? 'grid grid-cols-2 gap-3 max-w-md mx-auto' : 'grid grid-cols-3 gap-3 max-w-2xl mx-auto';
+                        return (
+                          <div className={grid}>
+                            {labels.map((label, idx) => (
+                              <div key={idx} className="space-y-1">
+                                <Input
+                                  value={values[idx] ?? ''}
+                                  inputMode="decimal"
+                                  onChange={(e) => setters[idx](sanitizeRationalInput(e.target.value))}
+                                  disabled={submitted}
+                                  className="h-12 text-2xl font-normal text-center py-1"
+                                />
+                              </div>
+                            ))}
+                          </div>
+                        );
+                      }
+
+                      return (
+                        <TypingAnswerMathInput
+                          value={answer1}
+                          onChange={setAnswer1}
+                          disabled={submitted}
+                          enableScripts
+                          className={'text-4xl font-normal text-left tk-expr-input'}
+                        />
+                      );
+                    })()
                   ) : (
                     (question as PracticeQuestion).kind === 'word_problem'
                       && (question as any).answerKind === 'rational'

@@ -308,7 +308,7 @@ export function generatePracticeQuestion(input: {
         ? Math.max(0, weights.identity_simplify)
         : (input.difficulty === 'hard' ? 35 : 0);
 
-      const total = unitCircleWeight + ratioQuadrantWeight;
+      const total = unitCircleWeight + ratioQuadrantWeight + identitySimplifyWeight;
       const pick = total <= 0 ? 0 : rng.next() * total;
 
       if (pick < unitCircleWeight) {
@@ -316,6 +316,18 @@ export function generatePracticeQuestion(input: {
           topicId: 'graph_trigonometry',
           difficulty: input.difficulty,
           seed: input.seed,
+        });
+      }
+
+      if (pick < unitCircleWeight + identitySimplifyWeight) {
+        return generateGraphTrigonometryMcq({
+          topicId: 'graph_trigonometry',
+          difficulty: input.difficulty,
+          seed: input.seed,
+          variantWeights: {
+            ratio_quadrant: ratioQuadrantWeight,
+            identity_simplify: identitySimplifyWeight,
+          },
         });
       }
 
@@ -355,7 +367,11 @@ export function generatePracticeQuestion(input: {
         katexQuestion: q.katexQuestion,
         katexExplanation: q.katexExplanation,
         expectedNormalized: q.expectedNormalized,
-      };
+        expectedNormalizedNote: undefined,
+        expectedLatex: q.expectedLatex,
+        expectedParts: (q as any).expectedParts,
+        normalize: q.normalize,
+      } as any;
     }
     case 'integration': {
       const q = generateIntegrationQuestion({ seed: input.seed, difficulty: input.difficulty, variantWeights: input.variantWeights });

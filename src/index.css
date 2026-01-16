@@ -611,6 +611,21 @@ All colors MUST be HSL.
     display: inline-flex;
   }
 
+  .tk-expr-input {
+    font-family: 'DejanireText', ui-serif, Georgia, Cambria, 'Times New Roman', Times, serif;
+    font-style: italic;
+  }
+
+  *::selection {
+    background: transparent;
+    color: inherit;
+  }
+
+  *::-moz-selection {
+    background: transparent;
+    color: inherit;
+  }
+
   /* Visual hint + hit area for the resize "button" in the editor:
      clicking and dragging the bottom-right corner of an image resizes it. */
   .prose img {

@@ -152,6 +152,7 @@ export type DifferentiationQuestion = {
   katexExplanation: Array<{ kind: 'text'; content: string } | { kind: 'math'; content: string; displayMode?: boolean }>;
   expectedNormalized: string[];
   expectedLatex: string;
+  expectedParts?: string[];
   normalize: (raw: string) => string;
 };
 
@@ -338,6 +339,7 @@ export function generateDifferentiationQuestion(input: { seed: number; difficult
       katexExplanation: explanation,
       expectedNormalized,
       expectedLatex: expectedRawList,
+      expectedParts: [firstRaw, secondRaw],
       normalize: normalizeStationaryXList,
     };
   }

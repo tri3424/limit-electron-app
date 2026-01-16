@@ -384,6 +384,7 @@ export function renderTypingAnswerMathToHtml(raw: string, opts?: { enableScripts
 export default function TypingAnswerMathInput({ value, onChange, placeholder, className, disabled, enableScripts }: Props) {
   const ref = useRef<HTMLDivElement>(null);
   const [caretMode, setCaretMode] = useState<'normal' | 'sup' | 'sub'>('normal');
+  const [isFocused, setIsFocused] = useState(false);
 
   const scriptsEnabled = enableScripts !== false;
 
@@ -483,10 +484,12 @@ export default function TypingAnswerMathInput({ value, onChange, placeholder, cl
     <div
       ref={ref}
       data-caret-mode={caretMode}
-      className={`min-h-[48px] w-full rounded-md border px-3 py-2 text-base focus:outline-none focus:ring-2 focus:ring-ring ${
+      data-empty={(value ?? '') === '' ? '1' : '0'}
+      data-focused={isFocused ? '1' : '0'}
+      className={`min-h-[48px] w-full rounded-md border px-3 py-2 focus:outline-none focus:ring-2 focus:ring-ring ${
         caretMode === 'sup' ? 'ring-1 ring-sky-500/40' : caretMode === 'sub' ? 'ring-1 ring-violet-500/40' : ''
       } ${className || ''}`}
-      style={{ fontFamily: 'inherit', fontSize: 'inherit', lineHeight: 1.35 }}
+      style={{ fontSize: 'inherit', lineHeight: 1.35 }}
       contentEditable={!disabled}
       spellCheck={false}
       autoCorrect="off"
@@ -495,7 +498,11 @@ export default function TypingAnswerMathInput({ value, onChange, placeholder, cl
       suppressContentEditableWarning
       onFocus={() => {
         if (disabled) return;
+        setIsFocused(true);
         ensureCaretInEditor();
+      }}
+      onBlur={() => {
+        setIsFocused(false);
       }}
       onPaste={(e) => {
         if (disabled) return;
