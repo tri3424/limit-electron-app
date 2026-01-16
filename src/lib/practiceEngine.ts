@@ -259,6 +259,35 @@ function generateArithmetic(input: {
   const rng = mulberry32((input.seed ^ 0x243f6a88) >>> 0);
   const range = difficultyRange(input.difficulty);
 
+  const bounds = (() => {
+    // More aggressive scaling ("hard" should feel like an ultimate level).
+    if (input.difficulty === 'easy') {
+      return {
+        addSubMax: 99,
+        mulA: 12,
+        mulB: 12,
+        divB: 9,
+        divQ: 12,
+      };
+    }
+    if (input.difficulty === 'medium') {
+      return {
+        addSubMax: 999,
+        mulA: 99,
+        mulB: 99,
+        divB: 12,
+        divQ: 99,
+      };
+    }
+    return {
+      addSubMax: 9999,
+      mulA: 999,
+      mulB: 99,
+      divB: 25,
+      divQ: 999,
+    };
+  })();
+
   const place = (n: number) => {
     const abs = Math.abs(n);
     const ones = abs % 10;
@@ -277,6 +306,16 @@ function generateArithmetic(input: {
     if (p.ones || !terms.length) terms.push(String(p.ones));
     const base = terms.join(' + ');
     return p.sign < 0 ? `-${base}` : base;
+  };
+
+  const decomposeParts = (n: number) => {
+    const p = place(n);
+    const parts: Array<{ label: 'thousands' | 'hundreds' | 'tens' | 'ones'; value: number }> = [];
+    if (p.thousands) parts.push({ label: 'thousands', value: p.thousands * 1000 });
+    if (p.hundreds) parts.push({ label: 'hundreds', value: p.hundreds * 100 });
+    if (p.tens) parts.push({ label: 'tens', value: p.tens * 10 });
+    if (p.ones || !parts.length) parts.push({ label: 'ones', value: p.ones });
+    return parts;
   };
 
   const renderColumn = (top: string, bottom: string, op: '+' | '-', result?: string) => {
@@ -348,6 +387,10 @@ function generateArithmetic(input: {
           blocks.push({ kind: 'math', content: `${a} = ${decomposeLatex(a)}`, displayMode: true });
           blocks.push({ kind: 'math', content: `${b} = ${decomposeLatex(b)}`, displayMode: true });
 
+          if (pa.thousands || pb.thousands) {
+            blocks.push({ kind: 'text', content: 'Because these numbers have thousands, we continue the same process into the thousands place.' });
+          }
+
           blocks.push({ kind: 'text', content: 'Add the ones first.' });
           const onesSum = pa.ones + pb.ones;
           const carry1 = Math.floor(onesSum / 10);
@@ -363,10 +406,24 @@ function generateArithmetic(input: {
           blocks.push({ kind: 'math', content: `${tensA} + ${tensB}${carry1 ? ` + ${carry1}` : ''} = ${tensSum} = ${tensRes}${carry2 ? ` \\text{ with carry }${carry2}` : ''}`, displayMode: true });
 
           blocks.push({ kind: 'text', content: 'Finally add the hundreds (including any carry from the tens).' });
-          const hundredsA = pa.hundreds + pa.thousands * 10;
-          const hundredsB = pb.hundreds + pb.thousands * 10;
-          const hundredsSum = hundredsA + hundredsB + carry2;
-          blocks.push({ kind: 'math', content: `${hundredsA} + ${hundredsB}${carry2 ? ` + ${carry2}` : ''} = ${hundredsSum}`, displayMode: true });
+          const hundredsA = pa.hundreds;
+          const hundredsB = pb.hundreds;
+          const hundredsSum0 = hundredsA + hundredsB + carry2;
+          const carry3 = Math.floor(hundredsSum0 / 10);
+          const hundredsRes = hundredsSum0 % 10;
+          blocks.push({
+            kind: 'math',
+            content: `${hundredsA} + ${hundredsB}${carry2 ? ` + ${carry2}` : ''} = ${hundredsSum0} = ${hundredsRes}${carry3 ? ` \\text{ with carry }${carry3}` : ''}`,
+            displayMode: true,
+          });
+
+          if (pa.thousands || pb.thousands || carry3) {
+            blocks.push({ kind: 'text', content: 'Now add the thousands (including any carry from the hundreds).' });
+            const thousandsA = pa.thousands;
+            const thousandsB = pb.thousands;
+            const thousandsSum = thousandsA + thousandsB + carry3;
+            blocks.push({ kind: 'math', content: `${thousandsA} + ${thousandsB}${carry3 ? ` + ${carry3}` : ''} = ${thousandsSum}`, displayMode: true });
+          }
 
           blocks.push({ kind: 'text', content: 'Combine the hundreds, tens, and ones to get the final answer.' });
           blocks.push({ kind: 'math', content: `${a} + ${b} = ${expectedNumber}`, displayMode: true });
@@ -381,6 +438,10 @@ function generateArithmetic(input: {
           blocks.push({ kind: 'text', content: 'Break each number into hundreds, tens, and ones.' });
           blocks.push({ kind: 'math', content: `${a} = ${decomposeLatex(a)}`, displayMode: true });
           blocks.push({ kind: 'math', content: `${b} = ${decomposeLatex(b)}`, displayMode: true });
+
+          if (pa.thousands || pb.thousands) {
+            blocks.push({ kind: 'text', content: 'Because these numbers have thousands, borrowing can also move across hundreds into thousands if needed.' });
+          }
 
           blocks.push({ kind: 'text', content: 'Subtract the ones first. If you cannot, borrow 1 ten (which is 10 ones).' });
           const onesA0 = pa.ones;
@@ -418,6 +479,16 @@ function generateArithmetic(input: {
           const hundredsDiff = hundredsAAdj - hundredsB0;
           blocks.push({ kind: 'math', content: `${hundredsAAdj} - ${hundredsB0} = ${hundredsDiff}`, displayMode: true });
 
+          if (pa.thousands || pb.thousands) {
+            blocks.push({ kind: 'text', content: 'Thousands place (if applicable): subtract the thousands after any borrowing.' });
+            const thousandsA = pa.thousands;
+            const thousandsB = pb.thousands;
+            // If we borrowed a hundred from thousands, hundredsA0 already included thousands*10.
+            // Keep a simple direct statement for the final result.
+            blocks.push({ kind: 'math', content: `${a} - ${b} = ${expectedNumber}`, displayMode: true });
+            return blocks;
+          }
+
           blocks.push({ kind: 'text', content: 'Combine the hundreds, tens, and ones to get the final answer.' });
           blocks.push({ kind: 'math', content: `${a} - ${b} = ${expectedNumber}`, displayMode: true });
           return blocks;
@@ -432,41 +503,59 @@ function generateArithmetic(input: {
             const base = Math.max(a, b);
             blocks.push({ kind: 'text', content: 'Use times tables / repeated addition.' });
             blocks.push({ kind: 'math', content: `${a} \\times ${b}`, displayMode: true });
+            if (reps <= 0) {
+              blocks.push({ kind: 'text', content: 'Because one factor is 0, the product is 0.' });
+              blocks.push({ kind: 'math', content: `${a} \\times ${b} = ${expectedNumber}`, displayMode: true });
+              return blocks;
+            }
             blocks.push({ kind: 'text', content: `This means add ${base} a total of ${reps} times.` });
             const sumExpr = Array.from({ length: reps }, () => String(base)).join(' + ');
-            blocks.push({ kind: 'math', content: `${a} \\times ${b} = ${sumExpr} = ${expectedNumber}`, displayMode: true });
+            blocks.push({ kind: 'math', content: `${a} \\times ${b} = ${sumExpr}`, displayMode: true });
+            blocks.push({ kind: 'math', content: `= ${expectedNumber}`, displayMode: true });
             return blocks;
           }
 
           // Partial products: multiply by ones/tens/hundreds and add.
-          const pb = place(b);
-          const bOnes = pb.ones;
-          const bTens = pb.tens * 10;
-          const bHundreds = (pb.hundreds + pb.thousands * 10) * 100;
-
-          const parts = [
-            { label: 'hundreds', value: bHundreds },
-            { label: 'tens', value: bTens },
-            { label: 'ones', value: bOnes },
-          ].filter((p) => p.value !== 0);
-
-          blocks.push({ kind: 'text', content: 'Use partial products: multiply by each place value, then add the results.' });
+          const aParts = decomposeParts(a);
+          const bParts = decomposeParts(b);
+          blocks.push({ kind: 'text', content: 'Use the distributive law with place values. We will split BOTH numbers and multiply every part.' });
           blocks.push({ kind: 'math', content: `${a} \\times ${b}`, displayMode: true });
-          blocks.push({ kind: 'text', content: `Split ${b} into place values (ignoring zeros):` });
-          blocks.push({ kind: 'math', content: `${b} = ${parts.map((p) => String(p.value)).join(' + ')}`, displayMode: true });
+          blocks.push({ kind: 'text', content: `Split ${a} into place values:` });
+          blocks.push({ kind: 'math', content: `${a} = ${aParts.map((p) => String(p.value)).join(' + ')}`, displayMode: true });
+          blocks.push({ kind: 'text', content: `Split ${b} into place values:` });
+          blocks.push({ kind: 'math', content: `${b} = ${bParts.map((p) => String(p.value)).join(' + ')}`, displayMode: true });
 
-          const products = parts.map((p) => ({ part: p.value, product: a * p.value }));
-          for (const pr of products) {
-            blocks.push({ kind: 'text', content: `Multiply by the ${pr.part >= 100 ? 'hundreds' : pr.part >= 10 ? 'tens' : 'ones'} part:` });
-            blocks.push({ kind: 'math', content: `${a} \\times ${pr.part} = ${pr.product}`, displayMode: true });
+          blocks.push({ kind: 'text', content: 'Now multiply each part from the first number by each part from the second number.' });
+          const termProducts: number[] = [];
+          for (const ap of aParts) {
+            for (const bp of bParts) {
+              const prod = ap.value * bp.value;
+              termProducts.push(prod);
+              blocks.push({
+                kind: 'math',
+                content: `${ap.value} \\times ${bp.value} = ${prod}`,
+                displayMode: true,
+              });
+            }
           }
 
-          blocks.push({ kind: 'text', content: 'Add the partial products to get the final answer.' });
-          blocks.push({
-            kind: 'math',
-            content: `${products.map((x) => String(x.product)).join(' + ')} = ${expectedNumber}`,
-            displayMode: true,
-          });
+          blocks.push({ kind: 'text', content: 'Add ALL the products together (no steps skipped).' });
+          // Sum step-by-step to avoid skipping.
+          let running = 0;
+          for (let i = 0; i < termProducts.length; i++) {
+            const v = termProducts[i] ?? 0;
+            if (i === 0) {
+              running = v;
+              blocks.push({ kind: 'math', content: `${v}`, displayMode: true });
+              continue;
+            }
+            const prev = running;
+            running = prev + v;
+            blocks.push({ kind: 'math', content: `${prev} + ${v} = ${running}`, displayMode: true });
+          }
+
+          blocks.push({ kind: 'text', content: 'So the final answer is:' });
+          blocks.push({ kind: 'math', content: `${a} \\times ${b} = ${expectedNumber}`, displayMode: true });
           return blocks;
         }
 
@@ -488,28 +577,32 @@ function generateArithmetic(input: {
   };
 
   if (input.topicId === 'addition') {
-    const a = rng.int(0, range * 10);
-    const b = rng.int(0, range * 10);
+    const a = rng.int(0, bounds.addSubMax);
+    const b = rng.int(0, bounds.addSubMax);
     return make(a, b, '+', a + b, 'add');
   }
 
   if (input.topicId === 'subtraction') {
-    const a = rng.int(0, range * 10);
-    const b = rng.int(0, range * 10);
+    const a = rng.int(0, bounds.addSubMax);
+    const b = rng.int(0, bounds.addSubMax);
+    if (input.difficulty === 'hard') {
+      // Allow negative results at the highest level.
+      return make(a, b, '-', a - b, 'sub');
+    }
     const hi = Math.max(a, b);
     const lo = Math.min(a, b);
     return make(hi, lo, '-', hi - lo, 'sub');
   }
 
   if (input.topicId === 'multiplication') {
-    const a = rng.int(0, range);
-    const b = rng.int(0, range);
+    const a = rng.int(0, bounds.mulA);
+    const b = rng.int(0, bounds.mulB);
     return make(a, b, '\\times', a * b, 'mul');
   }
 
   // division: always integer results
-  const b = rng.int(1, Math.max(2, range));
-  const q = rng.int(0, range);
+  const b = rng.int(2, bounds.divB);
+  const q = rng.int(0, bounds.divQ);
   const a = b * q;
   return make(a, b, '\\div', q, 'div');
 }
