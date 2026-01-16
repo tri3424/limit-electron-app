@@ -45,6 +45,10 @@ export type PracticeTopicId =
   | 'quadratics'
   | 'linear_equations'
   | 'algebraic_factorisation'
+  | 'addition'
+  | 'subtraction'
+  | 'multiplication'
+  | 'division'
   | 'fractions'
   | 'indices'
   | 'permutation_combination'
@@ -112,6 +116,14 @@ export type IndicesQuestion = {
   exponent: number;
 } & PracticeQuestionBase;
 
+export type ArithmeticQuestion = {
+  kind: 'arithmetic';
+  a: number;
+  b: number;
+  operator: '+' | '-' | '\\times' | '\\div';
+  expectedNumber: number;
+} & PracticeQuestionBase;
+
 export type FactorisationQuestion = {
   kind: 'factorisation';
   // simple pattern: ax + ay
@@ -172,6 +184,7 @@ export type GraphPracticeQuestion = {
 export type PracticeQuestion =
   | QuadraticQuestion
   | LinearQuestion
+  | ArithmeticQuestion
   | FractionsQuestion
   | SimultaneousQuestion
   | IndicesQuestion
@@ -223,6 +236,61 @@ function difficultyRange(difficulty: PracticeDifficulty) {
   return 10;
 }
 
+function generateArithmetic(input: {
+  topicId: PracticeTopicId;
+  difficulty: PracticeDifficulty;
+  seed: number;
+}): ArithmeticQuestion {
+  const rng = mulberry32((input.seed ^ 0x243f6a88) >>> 0);
+  const range = difficultyRange(input.difficulty);
+
+  const make = (a: number, b: number, operator: ArithmeticQuestion['operator'], expectedNumber: number, idSuffix: string): ArithmeticQuestion => {
+    const opForKatex = operator;
+    return {
+      kind: 'arithmetic',
+      id: stableId('arith', input.seed, idSuffix),
+      topicId: input.topicId,
+      difficulty: input.difficulty,
+      seed: input.seed,
+      a,
+      b,
+      operator,
+      expectedNumber,
+      katexQuestion: `${a} ${opForKatex} ${b}`,
+      katexExplanation: [
+        { kind: 'text', content: 'Compute the value.' },
+        { kind: 'math', content: `${a} ${opForKatex} ${b} = ${expectedNumber}`, displayMode: true },
+      ],
+    };
+  };
+
+  if (input.topicId === 'addition') {
+    const a = rng.int(0, range * 10);
+    const b = rng.int(0, range * 10);
+    return make(a, b, '+', a + b, 'add');
+  }
+
+  if (input.topicId === 'subtraction') {
+    const a = rng.int(0, range * 10);
+    const b = rng.int(0, range * 10);
+    const hi = Math.max(a, b);
+    const lo = Math.min(a, b);
+    return make(hi, lo, '-', hi - lo, 'sub');
+  }
+
+  if (input.topicId === 'multiplication') {
+    const a = rng.int(0, range);
+    const b = rng.int(0, range);
+    return make(a, b, '\\times', a * b, 'mul');
+  }
+
+  // division: always integer results
+  const b = rng.int(1, Math.max(2, range));
+  const q = rng.int(0, range);
+  const a = b * q;
+  return make(a, b, '\\div', q, 'div');
+}
+
 export function generatePracticeQuestion(input: {
   topicId: PracticeTopicId;
   difficulty: PracticeDifficulty;
@@ -233,6 +301,11 @@ export function generatePracticeQuestion(input: {
   switch (input.topicId) {
     case 'linear_equations':
       return generateLinear(input);
+    case 'addition':
+    case 'subtraction':
+    case 'multiplication':
+    case 'division':
+      return generateArithmetic({ topicId: input.topicId, difficulty: input.difficulty, seed: input.seed });
     case 'fractions':
       return generateFractions({
         topicId: 'fractions',

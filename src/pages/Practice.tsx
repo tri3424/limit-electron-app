@@ -2523,9 +2523,11 @@ export default function Practice() {
                 </div>
               </div>
               <div className="flex items-center gap-2">
-                <Button type="button" variant="outline" size="sm" onClick={() => setCommandModalOpen(true)} className="bg-white">
-                  Search / Filters
-                </Button>
+                {isAdmin ? (
+                  <Button type="button" variant="outline" size="sm" onClick={() => setCommandModalOpen(true)} className="bg-white">
+                    Search / Filters
+                  </Button>
+                ) : null}
                 <Button
                   type="button"
                   variant="outline"
@@ -2578,15 +2580,17 @@ export default function Practice() {
                 </div>
               </div>
               <div className="flex items-center gap-2">
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setCommandModalOpen(true)}
-                  className="bg-white"
-                >
-                  Search / Filters
-                </Button>
+                {isAdmin ? (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setCommandModalOpen(true)}
+                    className="bg-white"
+                  >
+                    Search / Filters
+                  </Button>
+                ) : null}
                 <Button
                   variant="outline"
                   size="sm"
@@ -2623,88 +2627,73 @@ export default function Practice() {
             ) : null}
           </Card>
 
-          <Dialog open={commandModalOpen} onOpenChange={setCommandModalOpen}>
-            <DialogContent className="max-w-2xl">
-              <DialogHeader>
-                <DialogTitle>Search / Filters</DialogTitle>
-                <DialogDescription>
-                  Type a keyword to filter questions. Admins can also use /only and /clear. Optionally select multiple question types.
-                </DialogDescription>
-              </DialogHeader>
+          {isAdmin ? (
+            <Dialog open={commandModalOpen} onOpenChange={setCommandModalOpen}>
+              <DialogContent className="max-w-2xl">
+                <DialogHeader>
+                  <DialogTitle>Search / Filters</DialogTitle>
+                  <DialogDescription>
+                    Type a keyword to filter questions. Admins can also use /only and /clear. Optionally select multiple question types.
+                  </DialogDescription>
+                </DialogHeader>
 
-              <div className="space-y-4">
-                <div className="space-y-2">
-                  <Label>Keyword / Command</Label>
-                  <Input
-                    value={commandText}
-                    onChange={(e) => setCommandText(e.target.value)}
-                    placeholder={isAdmin ? '/only <keyword> or /only <topicId>:<variantId> or /clear' : 'Type a keyword (e.g. temperature)'}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') {
-                        e.preventDefault();
-                        applyCommandFromModal();
-                        setCommandModalOpen(false);
-                      }
-                    }}
-                  />
-                  <div className="text-xs text-muted-foreground">
-                    Scope: {currentTopicForSearchScope ? <span className="font-mono">{currentTopicForSearchScope}</span> : 'current topic'}
-                  </div>
-                </div>
-
-                {availableVariantsForPicker.length ? (
+                <div className="space-y-4">
                   <div className="space-y-2">
-                    <div className="flex items-center justify-between gap-2">
-                      <Label>Question types (optional)</Label>
-                      {selectedVariantIdsForPicker.length ? (
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          onClick={() => setVariantMultiOverride(null)}
-                        >
-                          Clear types
-                        </Button>
-                      ) : null}
-                    </div>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                      {availableVariantsForPicker.map((v) => {
-                        const checked = selectedVariantIdsForPicker.includes(v);
-                        return (
-                          <label key={v} className="flex items-start gap-2 rounded-md border px-3 py-2 min-w-0">
-                            <Checkbox checked={checked} onCheckedChange={() => toggleVariantForPicker(v)} className="mt-0.5" />
-                            <span className="font-mono text-sm min-w-0 whitespace-normal break-all">{v}</span>
-                          </label>
-                        );
-                      })}
-                    </div>
+                    <Label>Keyword / Command</Label>
+                    <Input
+                      value={commandText}
+                      onChange={(e) => setCommandText(e.target.value)}
+                      placeholder={isAdmin ? '/only <keyword> or /only <topicId>:<variantId> or /clear' : 'Type a keyword (e.g. temperature)'}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          applyCommandFromModal();
+                          setCommandModalOpen(false);
+                        }
+                      }}
+                    />
                     <div className="text-xs text-muted-foreground">
-                      Selected types are applied only within the current topic.
+                      Scope: {currentTopicForSearchScope ? <span className="font-mono">{currentTopicForSearchScope}</span> : 'current topic'}
                     </div>
                   </div>
-                ) : null}
 
-                {onlyQuestionTextQuery.trim() || variantMultiOverride || variantOverride ? (
-                  <div className="rounded-md border p-3 text-sm">
-                    <div className="font-medium">Active</div>
-                    <div className="mt-1 space-y-1 text-muted-foreground">
-                      {onlyQuestionTextQuery.trim() ? (
-                        <div>Text filter: <span className="text-foreground">{onlyQuestionTextQuery.trim()}</span></div>
-                      ) : null}
-                      {variantMultiOverride?.topicId ? (
-                        <div>
-                          Types: <span className="font-mono text-foreground">{variantMultiOverride.variantIds.join(', ') || '(none)'}</span>
-                        </div>
-                      ) : null}
+                  {availableVariantsForPicker.length ? (
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <Label>Question types (optional)</Label>
+                        {selectedVariantIdsForPicker.length ? (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={() => setVariantMultiOverride(null)}
+                          >
+                            Clear types
+                          </Button>
+                        ) : null}
+                      </div>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                        {availableVariantsForPicker.map((v) => {
+                          const checked = selectedVariantIdsForPicker.includes(v);
+                          return (
+                            <label key={v} className="flex items-start gap-2 rounded-md border px-3 py-2 min-w-0">
+                              <Checkbox checked={checked} onCheckedChange={() => toggleVariantForPicker(v)} className="mt-0.5" />
+                              <span className="font-mono text-sm min-w-0 whitespace-normal break-all">{v}</span>
+                            </label>
+                          );
+                        })}
+                      </div>
+                      <div className="text-xs text-muted-foreground">
+                        Selected types are applied only within the current topic.
+                      </div>
                       {isAdmin && variantOverride ? (
                         <div>
                           Forced variant: <span className="font-mono text-foreground">{variantOverride.topicId}:{variantOverride.variantId}</span>
                         </div>
                       ) : null}
                     </div>
-                  </div>
-                ) : null}
-              </div>
+                  ) : null}
+                </div>
 
               <DialogFooter>
                 <Button
@@ -2732,7 +2721,8 @@ export default function Practice() {
                 </Button>
               </DialogFooter>
             </DialogContent>
-          </Dialog>
+            </Dialog>
+          ) : null}
 
           <Dialog open={reportHelpOpen} onOpenChange={setReportHelpOpen}>
             <DialogContent className="max-w-2xl">

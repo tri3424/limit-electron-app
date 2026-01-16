@@ -4,6 +4,10 @@ export type PracticeTopicId =
   | 'quadratics'
   | 'linear_equations'
   | 'algebraic_factorisation'
+  | 'addition'
+  | 'subtraction'
+  | 'multiplication'
+  | 'division'
   | 'fractions'
   | 'indices'
   | 'permutation_combination'
@@ -44,6 +48,34 @@ export const PRACTICE_TOPICS: PracticeTopic[] = [
     id: 'algebraic_factorisation',
     title: 'Algebraic Factorisation',
     description: 'Factorise the expression.',
+    enabled: true,
+    difficulties: ['easy', 'medium', 'hard'],
+  },
+  {
+    id: 'addition',
+    title: 'Addition',
+    description: 'Add two numbers.',
+    enabled: true,
+    difficulties: ['easy', 'medium', 'hard'],
+  },
+  {
+    id: 'subtraction',
+    title: 'Subtraction',
+    description: 'Subtract two numbers.',
+    enabled: true,
+    difficulties: ['easy', 'medium', 'hard'],
+  },
+  {
+    id: 'multiplication',
+    title: 'Multiplication',
+    description: 'Multiply two numbers.',
+    enabled: true,
+    difficulties: ['easy', 'medium', 'hard'],
+  },
+  {
+    id: 'division',
+    title: 'Division',
+    description: 'Divide two numbers.',
     enabled: true,
     difficulties: ['easy', 'medium', 'hard'],
   },
