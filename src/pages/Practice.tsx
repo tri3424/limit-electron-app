@@ -2009,22 +2009,34 @@ export default function Practice() {
     if (trimmed === '-' || trimmed === '.' || trimmed === '-.') return trimmed;
 
     const n = Number(trimmed);
-    if (Number.isNaN(n)) return trimmed;
+    if (!Number.isFinite(n)) return trimmed;
     return n.toFixed(2);
   };
 
   const checkSessionAnswer = () => {
-    if (!question) return false;
+    const q = question as any;
+    if (!q || !q.kind) return false;
 
     if ((question as any).metadata?.topic === 'quadratics') {
       const q = question as QuadraticFactorizationQuestion;
       return checkQuadraticAnswers(q.solutions, answer1, answer2);
     }
 
-    const q = question as PracticeQuestion;
     switch (q.kind) {
+      case 'arithmetic': {
+        const aq = q as any;
+        const raw = String(answer1 ?? '').trim();
+        if (!raw) return false;
+        if (!/^-?\d+$/.test(raw)) return false;
+        return Number(raw) === Number(aq.expectedNumber);
+      }
       case 'linear':
         return checkSingleFractionAnswer(q.solution, answer1);
+      case 'linear_intersection': {
+        const xOk = checkSingleFractionAnswer(q.solutionX, answer1);
+        const yOk = checkSingleFractionAnswer(q.solutionY, answer2);
+        return xOk && yOk;
+      }
       case 'fractions':
         return checkSingleFractionAnswer(q.solution, answer1, {
           requireSimplest: q.variantId === 'simplify_fraction' || q.variantId === 'add_sub_fractions',
@@ -2320,8 +2332,12 @@ export default function Practice() {
 
     const q = question as PracticeQuestion;
     switch (q.kind) {
+      case 'arithmetic':
+        return 'Enter your answer as an integer.';
       case 'linear':
         return 'Solve for x. Enter x as a simplified integer or fraction.';
+      case 'linear_intersection':
+        return 'Find the intersection point. Enter x and y as simplified integers or fractions.';
       case 'fractions':
         return 'Calculate the result and enter your answer as a simplified fraction (or integer).';
       case 'indices':
@@ -3219,6 +3235,29 @@ export default function Practice() {
                     <Input
                       value={answer2}
                       onChange={(e) => setAnswer2(e.target.value)}
+                      disabled={submitted}
+                      className="h-12 text-2xl font-normal text-center py-1"
+                    />
+                  </div>
+                </div>
+              ) : (question as PracticeQuestion).kind === 'linear_intersection' ? (
+                <div className="grid grid-cols-2 gap-3 max-w-md mx-auto">
+                  <div className="space-y-1">
+                    <Label className="text-xs text-muted-foreground">x</Label>
+                    <Input
+                      value={answer1}
+                      inputMode="decimal"
+                      onChange={(e) => setAnswer1(sanitizeRationalInput(e.target.value))}
+                      disabled={submitted}
+                      className="h-12 text-2xl font-normal text-center py-1"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs text-muted-foreground">y</Label>
+                    <Input
+                      value={answer2}
+                      inputMode="decimal"
+                      onChange={(e) => setAnswer2(sanitizeRationalInput(e.target.value))}
                       disabled={submitted}
                       className="h-12 text-2xl font-normal text-center py-1"
                     />

@@ -81,8 +81,22 @@ export type QuadraticQuestion = {
 
 export type LinearQuestion = {
   kind: 'linear';
+  variantId: 'solve_x';
   solution: Fraction;
   solutionLatex: string;
+} & PracticeQuestionBase;
+
+export type LinearIntersectionQuestion = {
+  kind: 'linear_intersection';
+  variantId: 'intersection';
+  m1: number;
+  c1: number;
+  m2: number;
+  c2: number;
+  solutionX: Fraction;
+  solutionY: Fraction;
+  solutionLatexX: string;
+  solutionLatexY: string;
 } & PracticeQuestionBase;
 
 export type FractionsQuestion = {
@@ -184,6 +198,7 @@ export type GraphPracticeQuestion = {
 export type PracticeQuestion =
   | QuadraticQuestion
   | LinearQuestion
+  | LinearIntersectionQuestion
   | ArithmeticQuestion
   | FractionsQuestion
   | SimultaneousQuestion
@@ -244,6 +259,70 @@ function generateArithmetic(input: {
   const rng = mulberry32((input.seed ^ 0x243f6a88) >>> 0);
   const range = difficultyRange(input.difficulty);
 
+  const place = (n: number) => {
+    const abs = Math.abs(n);
+    const ones = abs % 10;
+    const tens = Math.floor(abs / 10) % 10;
+    const hundreds = Math.floor(abs / 100) % 10;
+    const thousands = Math.floor(abs / 1000) % 10;
+    return { abs, ones, tens, hundreds, thousands, sign: n < 0 ? -1 : 1 };
+  };
+
+  const decomposeLatex = (n: number) => {
+    const p = place(n);
+    const terms: string[] = [];
+    if (p.thousands) terms.push(String(p.thousands * 1000));
+    if (p.hundreds) terms.push(String(p.hundreds * 100));
+    if (p.tens) terms.push(String(p.tens * 10));
+    if (p.ones || !terms.length) terms.push(String(p.ones));
+    const base = terms.join(' + ');
+    return p.sign < 0 ? `-${base}` : base;
+  };
+
+  const renderColumn = (top: string, bottom: string, op: '+' | '-', result?: string) => {
+    const w = Math.max(top.length, bottom.length, result?.length ?? 0);
+    const pad = (s: string) => s.padStart(w, ' ');
+    const topP = pad(top);
+    const bottomP = pad(bottom);
+    const resP = result ? pad(result) : '';
+    const line = '\\hline';
+    const body = result
+      ? `${topP}\\\\${op}${bottomP}\\\\${line}\\\\${resP}`
+      : `${topP}\\\\${op}${bottomP}\\\\${line}`;
+    return String.raw`\begin{array}{r}${body}\end{array}`;
+  };
+
+  const longDivisionSteps = (dividend: number, divisor: number) => {
+    const digits = String(Math.abs(dividend)).split('').map((d) => Number(d));
+    let rem = 0;
+    const qDigits: number[] = [];
+    const steps: Array<{ subLatex: string; remainderLatex: string }> = [];
+    let started = false;
+
+    for (let i = 0; i < digits.length; i++) {
+      const d = digits[i] ?? 0;
+      const cur = rem * 10 + d;
+      const qd = Math.floor(cur / divisor);
+      rem = cur - qd * divisor;
+      qDigits.push(qd);
+
+      // Skip leading 0-quotient steps until we actually start dividing (unless it's the last digit).
+      if (!started && qd === 0 && i < digits.length - 1) {
+        continue;
+      }
+      started = true;
+
+      const sub = qd * divisor;
+      const nextDigit = i < digits.length - 1 ? String(digits[i + 1] ?? '') : '';
+      const remainderLatex = i < digits.length - 1 ? `${rem}${nextDigit}` : `${rem}`;
+      steps.push({ subLatex: String(sub), remainderLatex });
+    }
+
+    const qStr = qDigits.join('').replace(/^0+(?=\d)/, '');
+    const q = Number(qStr || '0');
+    return { q, qStr: qStr || '0', remainder: rem, steps };
+  };
+
   const make = (a: number, b: number, operator: ArithmeticQuestion['operator'], expectedNumber: number, idSuffix: string): ArithmeticQuestion => {
     const opForKatex = operator;
     return {
@@ -257,10 +336,154 @@ function generateArithmetic(input: {
       operator,
       expectedNumber,
       katexQuestion: `${a} ${opForKatex} ${b}`,
-      katexExplanation: [
-        { kind: 'text', content: 'Compute the value.' },
-        { kind: 'math', content: `${a} ${opForKatex} ${b} = ${expectedNumber}`, displayMode: true },
-      ],
+      katexExplanation: (() => {
+        const blocks: KatexExplanationBlock[] = [];
+
+        if (operator === '+') {
+          const pa = place(a);
+          const pb = place(b);
+          blocks.push({ kind: 'text', content: 'Column addition: add ones, then tens, then hundreds, carrying when needed.' });
+          blocks.push({ kind: 'math', content: renderColumn(String(a), String(b), '+', String(expectedNumber)), displayMode: true });
+          blocks.push({ kind: 'text', content: 'Break each number into hundreds, tens, and ones.' });
+          blocks.push({ kind: 'math', content: `${a} = ${decomposeLatex(a)}`, displayMode: true });
+          blocks.push({ kind: 'math', content: `${b} = ${decomposeLatex(b)}`, displayMode: true });
+
+          blocks.push({ kind: 'text', content: 'Add the ones first.' });
+          const onesSum = pa.ones + pb.ones;
+          const carry1 = Math.floor(onesSum / 10);
+          const onesRes = onesSum % 10;
+          blocks.push({ kind: 'math', content: `${pa.ones} + ${pb.ones} = ${onesSum} = ${onesRes}${carry1 ? ` \\text{ with carry }${carry1}` : ''}`, displayMode: true });
+
+          blocks.push({ kind: 'text', content: 'Now add the tens (including any carry from the ones).' });
+          const tensA = pa.tens;
+          const tensB = pb.tens;
+          const tensSum = tensA + tensB + carry1;
+          const carry2 = Math.floor(tensSum / 10);
+          const tensRes = tensSum % 10;
+          blocks.push({ kind: 'math', content: `${tensA} + ${tensB}${carry1 ? ` + ${carry1}` : ''} = ${tensSum} = ${tensRes}${carry2 ? ` \\text{ with carry }${carry2}` : ''}`, displayMode: true });
+
+          blocks.push({ kind: 'text', content: 'Finally add the hundreds (including any carry from the tens).' });
+          const hundredsA = pa.hundreds + pa.thousands * 10;
+          const hundredsB = pb.hundreds + pb.thousands * 10;
+          const hundredsSum = hundredsA + hundredsB + carry2;
+          blocks.push({ kind: 'math', content: `${hundredsA} + ${hundredsB}${carry2 ? ` + ${carry2}` : ''} = ${hundredsSum}`, displayMode: true });
+
+          blocks.push({ kind: 'text', content: 'Combine the hundreds, tens, and ones to get the final answer.' });
+          blocks.push({ kind: 'math', content: `${a} + ${b} = ${expectedNumber}`, displayMode: true });
+          return blocks;
+        }
+
+        if (operator === '-') {
+          const pa = place(a);
+          const pb = place(b);
+          blocks.push({ kind: 'text', content: 'Column subtraction: subtract ones, then tens, then hundreds, borrowing when needed.' });
+          blocks.push({ kind: 'math', content: renderColumn(String(a), String(b), '-', String(expectedNumber)), displayMode: true });
+          blocks.push({ kind: 'text', content: 'Break each number into hundreds, tens, and ones.' });
+          blocks.push({ kind: 'math', content: `${a} = ${decomposeLatex(a)}`, displayMode: true });
+          blocks.push({ kind: 'math', content: `${b} = ${decomposeLatex(b)}`, displayMode: true });
+
+          blocks.push({ kind: 'text', content: 'Subtract the ones first. If you cannot, borrow 1 ten (which is 10 ones).' });
+          const onesA0 = pa.ones;
+          const onesB0 = pb.ones;
+          const needBorrow1 = onesA0 < onesB0;
+          const onesA = needBorrow1 ? onesA0 + 10 : onesA0;
+          const onesDiff = onesA - onesB0;
+          blocks.push({
+            kind: 'math',
+            content: needBorrow1
+              ? `${onesA0} - ${onesB0} \\text{ (borrow 1 ten)}: (${onesA0}+10) - ${onesB0} = ${onesDiff}`
+              : `${onesA0} - ${onesB0} = ${onesDiff}`,
+            displayMode: true,
+          });
+
+          blocks.push({ kind: 'text', content: 'Now subtract the tens (remember the borrow decreases the tens by 1).' });
+          const tensA0 = pa.tens;
+          const tensB0 = pb.tens;
+          const tensAAdj0 = tensA0 - (needBorrow1 ? 1 : 0);
+          const needBorrow2 = tensAAdj0 < tensB0;
+          const tensAAdj = needBorrow2 ? tensAAdj0 + 10 : tensAAdj0;
+          const tensDiff = tensAAdj - tensB0;
+          blocks.push({
+            kind: 'math',
+            content: needBorrow2
+              ? `${tensAAdj0} - ${tensB0} \\text{ (borrow 1 hundred)}: (${tensAAdj0}+10) - ${tensB0} = ${tensDiff}`
+              : `${tensAAdj0} - ${tensB0} = ${tensDiff}`,
+            displayMode: true,
+          });
+
+          blocks.push({ kind: 'text', content: 'Finally subtract the hundreds (borrowing from hundreds reduces it by 1).' });
+          const hundredsA0 = pa.hundreds + pa.thousands * 10;
+          const hundredsB0 = pb.hundreds + pb.thousands * 10;
+          const hundredsAAdj = hundredsA0 - (needBorrow2 ? 1 : 0);
+          const hundredsDiff = hundredsAAdj - hundredsB0;
+          blocks.push({ kind: 'math', content: `${hundredsAAdj} - ${hundredsB0} = ${hundredsDiff}`, displayMode: true });
+
+          blocks.push({ kind: 'text', content: 'Combine the hundreds, tens, and ones to get the final answer.' });
+          blocks.push({ kind: 'math', content: `${a} - ${b} = ${expectedNumber}`, displayMode: true });
+          return blocks;
+        }
+
+        if (operator === '\\times') {
+          // Use different explanation styles based on size.
+          const small = a <= 12 && b <= 12;
+
+          if (small) {
+            const reps = Math.min(a, b);
+            const base = Math.max(a, b);
+            blocks.push({ kind: 'text', content: 'Use times tables / repeated addition.' });
+            blocks.push({ kind: 'math', content: `${a} \\times ${b}`, displayMode: true });
+            blocks.push({ kind: 'text', content: `This means add ${base} a total of ${reps} times.` });
+            const sumExpr = Array.from({ length: reps }, () => String(base)).join(' + ');
+            blocks.push({ kind: 'math', content: `${a} \\times ${b} = ${sumExpr} = ${expectedNumber}`, displayMode: true });
+            return blocks;
+          }
+
+          // Partial products: multiply by ones/tens/hundreds and add.
+          const pb = place(b);
+          const bOnes = pb.ones;
+          const bTens = pb.tens * 10;
+          const bHundreds = (pb.hundreds + pb.thousands * 10) * 100;
+
+          const parts = [
+            { label: 'hundreds', value: bHundreds },
+            { label: 'tens', value: bTens },
+            { label: 'ones', value: bOnes },
+          ].filter((p) => p.value !== 0);
+
+          blocks.push({ kind: 'text', content: 'Use partial products: multiply by each place value, then add the results.' });
+          blocks.push({ kind: 'math', content: `${a} \\times ${b}`, displayMode: true });
+          blocks.push({ kind: 'text', content: `Split ${b} into place values (ignoring zeros):` });
+          blocks.push({ kind: 'math', content: `${b} = ${parts.map((p) => String(p.value)).join(' + ')}`, displayMode: true });
+
+          const products = parts.map((p) => ({ part: p.value, product: a * p.value }));
+          for (const pr of products) {
+            blocks.push({ kind: 'text', content: `Multiply by the ${pr.part >= 100 ? 'hundreds' : pr.part >= 10 ? 'tens' : 'ones'} part:` });
+            blocks.push({ kind: 'math', content: `${a} \\times ${pr.part} = ${pr.product}`, displayMode: true });
+          }
+
+          blocks.push({ kind: 'text', content: 'Add the partial products to get the final answer.' });
+          blocks.push({
+            kind: 'math',
+            content: `${products.map((x) => String(x.product)).join(' + ')} = ${expectedNumber}`,
+            displayMode: true,
+          });
+          return blocks;
+        }
+
+        // division
+        blocks.push({ kind: 'text', content: 'Use long division: divide from left to right, subtract, then bring down the next digit.' });
+        const { q, qStr, remainder, steps } = longDivisionSteps(a, b);
+        blocks.push({
+          kind: 'long_division',
+          divisorLatex: String(b),
+          dividendLatex: String(a),
+          quotientLatex: String(qStr),
+          steps,
+        });
+        blocks.push({ kind: 'text', content: remainder === 0 ? 'The remainder is 0, so the quotient is the final answer.' : 'There is a remainder.' });
+        blocks.push({ kind: 'math', content: `${a} \\div ${b} = ${q}`, displayMode: true });
+        return blocks;
+      })(),
     };
   };
 
@@ -300,7 +523,7 @@ export function generatePracticeQuestion(input: {
 }): PracticeQuestion {
   switch (input.topicId) {
     case 'linear_equations':
-      return generateLinear(input);
+      return generateLinear({ topicId: input.topicId, difficulty: input.difficulty, seed: input.seed, variantWeights: input.variantWeights });
     case 'addition':
     case 'subtraction':
     case 'multiplication':
@@ -819,9 +1042,185 @@ function generateCircularMeasureGraphQuestion(input: {
   };
 }
 
-function generateLinear(input: { topicId: PracticeTopicId; difficulty: PracticeDifficulty; seed: number }): LinearQuestion {
+function generateLinear(input: { topicId: PracticeTopicId; difficulty: PracticeDifficulty; seed: number; variantWeights?: Record<string, number> }): LinearQuestion | LinearIntersectionQuestion {
   const rng = mulberry32(input.seed);
   const R = difficultyRange(input.difficulty);
+
+  const pickVariant = (): 'solve_x' | 'intersection' => {
+    if (input.difficulty === 'easy') return 'solve_x';
+
+    const w = input.variantWeights ?? {};
+    const wSolve = typeof w.solve_x === 'number' ? Math.max(0, Number(w.solve_x)) : 50;
+    const wInter = typeof w.intersection === 'number' ? Math.max(0, Number(w.intersection)) : 50;
+
+    const total = wSolve + wInter;
+    if (!(total > 0)) return 'solve_x';
+    const r = rng.next() * total;
+    return r < wInter ? 'intersection' : 'solve_x';
+  };
+
+  const variant = pickVariant();
+
+  // Medium/Hard: sometimes generate intersection-of-two-lines questions.
+  if (variant === 'intersection') {
+    const slopeMax = input.difficulty === 'hard' ? 10 : 7;
+    const interceptMax = input.difficulty === 'hard' ? 18 : 12;
+
+    // Choose an integer intersection point so answers are clean.
+    const x0 = rng.int(-R, R);
+    const y0 = rng.int(-R * 2, R * 2);
+
+    const pickSlope = (avoid?: number) => {
+      let m = 0;
+      let tries = 0;
+      while (tries < 200) {
+        tries += 1;
+        m = rng.int(-slopeMax, slopeMax);
+        if (m === 0) continue;
+        if (typeof avoid === 'number' && m === avoid) continue;
+        return m;
+      }
+      return avoid === 2 ? 3 : 2;
+    };
+
+    const m1 = pickSlope();
+    const m2 = pickSlope(m1);
+    const c1 = y0 - m1 * x0;
+    const c2 = y0 - m2 * x0;
+
+    // Keep intercepts in a friendly range; otherwise retry by shifting y0.
+    const c1ok = Math.abs(c1) <= interceptMax;
+    const c2ok = Math.abs(c2) <= interceptMax;
+    if (!(c1ok && c2ok)) {
+      // Force within range with a deterministic adjustment.
+      const y1 = rng.int(-interceptMax, interceptMax);
+      const y2 = rng.int(-interceptMax, interceptMax);
+      const adjX0 = x0;
+      const adjY0 = rng.next() < 0.5 ? y1 : y2;
+      const cc1 = adjY0 - m1 * adjX0;
+      const cc2 = adjY0 - m2 * adjX0;
+      const solX = frac(adjX0, 1);
+      const solY = frac(adjY0, 1);
+
+      const eq1 = `y = ${m1}x ${cc1 < 0 ? '-' : '+'} ${Math.abs(cc1)}`;
+      const eq2 = `y = ${m2}x ${cc2 < 0 ? '-' : '+'} ${Math.abs(cc2)}`;
+      const systemLatex = String.raw`\begin{aligned}${eq1}\\\\${eq2}\end{aligned}`;
+
+      const xMin = adjX0 - (input.difficulty === 'hard' ? 10 : 7);
+      const xMax = adjX0 + (input.difficulty === 'hard' ? 10 : 7);
+      const yMin = adjY0 - (input.difficulty === 'hard' ? 10 : 7);
+      const yMax = adjY0 + (input.difficulty === 'hard' ? 10 : 7);
+      const graphSpec: PracticeGraphSpec = {
+        width: 520,
+        height: 420,
+        window: { xMin, xMax, yMin, yMax },
+        equalAspect: false,
+        axisLabelX: 'x',
+        axisLabelY: 'y',
+        plot: [
+          { kind: 'function', fn: (x: number) => m1 * x + cc1, stroke: '#2563eb', strokeWidth: 2 },
+          { kind: 'function', fn: (x: number) => m2 * x + cc2, stroke: '#16a34a', strokeWidth: 2 },
+          { kind: 'point', at: { x: adjX0, y: adjY0 }, r: 4, fill: '#dc2626' },
+          { kind: 'label', at: { x: adjX0 + 0.4, y: adjY0 + 0.4 }, text: `(${adjX0}, ${adjY0})`, fill: '#dc2626', fontSize: 14 },
+        ],
+      };
+
+      const explanation: KatexExplanationBlock[] = [
+        { kind: 'text', content: 'We have two lines. The intersection point is where both equations have the same (x, y).' },
+        { kind: 'math', content: systemLatex, displayMode: true },
+        { kind: 'text', content: 'At the intersection, the y-values are equal, so set the right-hand sides equal.' },
+        { kind: 'math', content: `${m1}x ${cc1 < 0 ? '-' : '+'} ${Math.abs(cc1)} = ${m2}x ${cc2 < 0 ? '-' : '+'} ${Math.abs(cc2)}`, displayMode: true },
+        { kind: 'text', content: 'Collect x terms on one side and constants on the other.' },
+        { kind: 'math', content: `${m1}x - ${m2}x = ${cc2} - ${cc1}`, displayMode: true },
+        { kind: 'math', content: `${m1 - m2}x = ${cc2 - cc1}`, displayMode: true },
+        { kind: 'text', content: 'Solve for x by dividing both sides.' },
+        { kind: 'math', content: String.raw`x = \frac{${cc2 - cc1}}{${m1 - m2}} = ${fractionToLatex(solX)}`, displayMode: true },
+        { kind: 'text', content: 'Substitute x back into either equation to find y.' },
+        { kind: 'math', content: `y = ${m1}(${fractionToLatex(solX)}) ${cc1 < 0 ? '-' : '+'} ${Math.abs(cc1)} = ${fractionToLatex(solY)}`, displayMode: true },
+        { kind: 'text', content: `So the intersection point is (${adjX0}, ${adjY0}). It is marked on the graph below.` },
+        { kind: 'graph', graphSpec, altText: `Two straight lines intersecting at (${adjX0}, ${adjY0}).` },
+      ];
+
+      return {
+        kind: 'linear_intersection',
+        variantId: 'intersection',
+        id: stableId('linear-intersection', input.seed, `${m1}-${cc1}-${m2}-${cc2}-${adjX0}-${adjY0}`),
+        topicId: 'linear_equations',
+        difficulty: input.difficulty,
+        seed: input.seed,
+        katexQuestion: systemLatex,
+        katexExplanation: explanation,
+        m1,
+        c1: cc1,
+        m2,
+        c2: cc2,
+        solutionX: solX,
+        solutionY: solY,
+        solutionLatexX: fractionToLatex(solX),
+        solutionLatexY: fractionToLatex(solY),
+      };
+    }
+
+    const solX = frac(x0, 1);
+    const solY = frac(y0, 1);
+    const eq1 = `y = ${m1}x ${c1 < 0 ? '-' : '+'} ${Math.abs(c1)}`;
+    const eq2 = `y = ${m2}x ${c2 < 0 ? '-' : '+'} ${Math.abs(c2)}`;
+    const systemLatex = String.raw`\begin{aligned}${eq1}\\\\${eq2}\end{aligned}`;
+
+    const xMin = x0 - (input.difficulty === 'hard' ? 10 : 7);
+    const xMax = x0 + (input.difficulty === 'hard' ? 10 : 7);
+    const yMin = y0 - (input.difficulty === 'hard' ? 10 : 7);
+    const yMax = y0 + (input.difficulty === 'hard' ? 10 : 7);
+    const graphSpec: PracticeGraphSpec = {
+      width: 520,
+      height: 420,
+      window: { xMin, xMax, yMin, yMax },
+      equalAspect: false,
+      axisLabelX: 'x',
+      axisLabelY: 'y',
+      plot: [
+        { kind: 'function', fn: (x: number) => m1 * x + c1, stroke: '#2563eb', strokeWidth: 2 },
+        { kind: 'function', fn: (x: number) => m2 * x + c2, stroke: '#16a34a', strokeWidth: 2 },
+        { kind: 'point', at: { x: x0, y: y0 }, r: 4, fill: '#dc2626' },
+        { kind: 'label', at: { x: x0 + 0.4, y: y0 + 0.4 }, text: `(${x0}, ${y0})`, fill: '#dc2626', fontSize: 14 },
+      ],
+    };
+
+    const explanation: KatexExplanationBlock[] = [
+      { kind: 'text', content: 'We have two lines. The intersection point is where both equations have the same (x, y).' },
+      { kind: 'math', content: systemLatex, displayMode: true },
+      { kind: 'text', content: 'At the intersection, the y-values are equal, so set the right-hand sides equal.' },
+      { kind: 'math', content: `${m1}x ${c1 < 0 ? '-' : '+'} ${Math.abs(c1)} = ${m2}x ${c2 < 0 ? '-' : '+'} ${Math.abs(c2)}`, displayMode: true },
+      { kind: 'text', content: 'Collect x terms on one side and constants on the other.' },
+      { kind: 'math', content: `${m1}x - ${m2}x = ${c2} - ${c1}`, displayMode: true },
+      { kind: 'math', content: `${m1 - m2}x = ${c2 - c1}`, displayMode: true },
+      { kind: 'text', content: 'Solve for x by dividing both sides.' },
+      { kind: 'math', content: String.raw`x = \frac{${c2 - c1}}{${m1 - m2}} = ${fractionToLatex(solX)}`, displayMode: true },
+      { kind: 'text', content: 'Substitute x back into either equation to find y.' },
+      { kind: 'math', content: `y = ${m1}(${fractionToLatex(solX)}) ${c1 < 0 ? '-' : '+'} ${Math.abs(c1)} = ${fractionToLatex(solY)}`, displayMode: true },
+      { kind: 'text', content: `So the intersection point is (${x0}, ${y0}). It is marked on the graph below.` },
+      { kind: 'graph', graphSpec, altText: `Two straight lines intersecting at (${x0}, ${y0}).` },
+    ];
+
+    return {
+      kind: 'linear_intersection',
+      variantId: 'intersection',
+      id: stableId('linear-intersection', input.seed, `${m1}-${c1}-${m2}-${c2}-${x0}-${y0}`),
+      topicId: 'linear_equations',
+      difficulty: input.difficulty,
+      seed: input.seed,
+      katexQuestion: systemLatex,
+      katexExplanation: explanation,
+      m1,
+      c1,
+      m2,
+      c2,
+      solutionX: solX,
+      solutionY: solY,
+      solutionLatexX: fractionToLatex(solX),
+      solutionLatexY: fractionToLatex(solY),
+    };
+  }
 
   // Generate: ax + b = c with integer solution.
   const a = nonZeroInt(rng, 1, input.difficulty === 'hard' ? 9 : 5);
@@ -847,6 +1246,7 @@ function generateLinear(input: { topicId: PracticeTopicId; difficulty: PracticeD
 
   return {
     kind: 'linear',
+    variantId: 'solve_x',
     id: stableId('linear', input.seed, `${a}-${b}-${c}`),
     topicId: 'linear_equations',
     difficulty: input.difficulty,

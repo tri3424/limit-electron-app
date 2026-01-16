@@ -118,6 +118,16 @@ export default function SettingsPracticeAdminFrequency() {
           };
         }
 
+        if (t.id === 'linear_equations') {
+          return {
+            ...base,
+            variants: [
+              { key: 'solve_x', label: 'Solve for x', defaultValue: 60 },
+              { key: 'intersection', label: 'Intersection (two lines)', defaultValue: 40 },
+            ],
+          };
+        }
+
         if (t.id === 'permutation_combination') {
           return {
             ...base,
