@@ -29,9 +29,71 @@ function normalizeExprForCompare(raw: string) {
   return raw
     .trim()
     .toLowerCase()
+    .replace(/\\dfrac/g, '\\frac')
+    .replace(/\\tfrac/g, '\\frac')
+    .replace(/\s+/g, '')
+    .replace(/\\mathit\{c\}/g, 'c')
+    .replace(/\\mathrm\{c\}/g, 'c')
+    .replace(/\\[ ,;!:]/g, '')
+    .replace(/\\cdot/g, '')
+    .replace(/\*/g, '')
+    .replace(/\{x\}/g, 'x')
+    // KaTeX/LaTeX can also emit compact fractions without braces: \\frac52
+    .replace(/-\\frac(\d{1,3})(\d{1,3})/g, '-$1/$2')
+    .replace(/\\frac(\d{1,3})(\d{1,3})/g, '$1/$2')
+    .replace(/-\\frac\{(\d+)\}\{(\d+)\}/g, '-$1/$2')
+    .replace(/\\frac\{(-?\d+)\}\{(\d+)\}/g, '$1/$2')
+    .replace(/\\left/g, '')
+    .replace(/\\right/g, '')
+    // Normalize scripts: MathLive may emit x^{6} while users might type x^6
+    .replace(/\^\{([^}]+)\}/g, '^$1')
+    .replace(/_\{([^}]+)\}/g, '_$1')
+    // MathLive can also output division-style forms instead of \frac{...}{...}:
+    // e.g. x^6/3, 5x^4/4, -x/7.
+    .replace(/-(\d+)x\^(\d+)\/(\d+)/g, '-$1/$3x^$2')
+    .replace(/(\d+)x\^(\d+)\/(\d+)/g, '$1/$3x^$2')
+    .replace(/-x\^(\d+)\/(\d+)/g, '-1/$2x^$1')
+    .replace(/x\^(\d+)\/(\d+)/g, '1/$2x^$1')
+    .replace(/-(\d+)x\/(\d+)/g, '-$1/$2x')
+    .replace(/(\d+)x\/(\d+)/g, '$1/$2x')
+    .replace(/-x\/(\d+)/g, '-1/$1x')
+    .replace(/x\/(\d+)/g, '1/$1x')
+    // Some MathLive forms keep extra braces inside the numerator: \frac{5{x}^4}{4}, \frac{{x}^6}{3}
+    .replace(/-\\frac\{(\d+)\{?x\}?\^(\d+)\}\{(\d+)\}/g, '-$1/$3x^$2')
+    .replace(/\\frac\{(-?\d+)\{?x\}?\^(\d+)\}\{(\d+)\}/g, '$1/$3x^$2')
+    .replace(/-\\frac\{\{?x\}?\^(\d+)\}\{(\d+)\}/g, '-1/$2x^$1')
+    .replace(/\\frac\{\{?x\}?\^(\d+)\}\{(\d+)\}/g, '1/$2x^$1')
+    .replace(/-\\frac\{(\d+)\{?x\}?\}\{(\d+)\}/g, '-$1/$2x')
+    .replace(/\\frac\{(-?\d+)\{?x\}?\}\{(\d+)\}/g, '$1/$2x')
+    .replace(/-\\frac\{\{?x\}?\}\{(\d+)\}/g, '-1/$1x')
+    .replace(/\\frac\{\{?x\}?\}\{(\d+)\}/g, '1/$1x')
+    // MathLive can emit fractions like \\frac{2x^6}{3} instead of \\frac{2}{3}x^6
+    // Sometimes the denominator braces are already stripped (e.g. \\frac{2x^6}3); accept that too.
+    .replace(/-\\frac\{(\d+)x\^(\d+)\}\{?(\d+)\}?/g, '-$1/$3x^$2')
+    .replace(/\\frac\{(-?\d+)x\^(\d+)\}\{?(\d+)\}?/g, '$1/$3x^$2')
+    .replace(/-\\frac\{(\d+)x\}\{?(\d+)\}?/g, '-$1/$2x')
+    .replace(/\\frac\{(-?\d+)x\}\{?(\d+)\}?/g, '$1/$2x')
+    .replace(/-\\frac\{(\d+)x\^(\d+)\}\{(\d+)\}/g, '-$1/$3x^$2')
+    .replace(/\\frac\{(-?\d+)x\^(\d+)\}\{(\d+)\}/g, '$1/$3x^$2')
+    .replace(/-\\frac\{(\d+)x\}\{(\d+)\}/g, '-$1/$2x')
+    .replace(/\\frac\{(-?\d+)x\}\{(\d+)\}/g, '$1/$2x')
+    // Some MathLive inputs put the minus sign inside the numerator: \\frac{-2x^7}{7}
+    .replace(/\\frac\{-(\d+)x\^(\d+)\}\{(\d+)\}/g, '-$1/$3x^$2')
+    .replace(/\\frac\{-(\d+)x\}\{(\d+)\}/g, '-$1/$2x')
+    // Also allow variable-only numerators with an internal minus: \\frac{-x^n}{d}, \\frac{-x}{d}
+    .replace(/\\frac\{-x\^(\d+)\}\{(\d+)\}/g, '-1/$2x^$1')
+    .replace(/\\frac\{-x\}\{(\d+)\}/g, '-1/$1x')
+    // Also allow \\frac{x^n}{d} and \\frac{x}{d} (MathLive can prefer putting x in the numerator)
+    .replace(/-\\frac\{x\^(\d+)\}\{(\d+)\}/g, '-1/$2x^$1')
+    .replace(/\\frac\{x\^(\d+)\}\{(\d+)\}/g, '1/$2x^$1')
+    .replace(/-\\frac\{x\}\{(\d+)\}/g, '-1/$1x')
+    .replace(/\\frac\{x\}\{(\d+)\}/g, '1/$1x')
+    // Strip common LaTeX spacing commands MathLive can emit
+    .replace(/\\[ ,;!:]/g, '')
     .replace(/\s+/g, '')
     .replace(/\\cdot/g, '')
     .replace(/\*/g, '')
+    .replace(/\{(\d+)\}/g, '$1')
     .replace(/\+c/g, '+c')
     .replace(/\(\)/g, '');
 }
@@ -92,7 +154,12 @@ function antiderivativeLatex(terms: Term[]) {
     const g = fracGcd(num, den);
     const nn = num / g;
     const dd = den / g;
-    const coeff = dd === 1 ? String(nn) : (nn < 0 ? `-\\frac{${Math.abs(nn)}}{${dd}}` : `\\frac{${nn}}{${dd}}`);
+    const coeff = (() => {
+      if (dd !== 1) return nn < 0 ? `-\\frac{${Math.abs(nn)}}{${dd}}` : `\\frac{${nn}}{${dd}}`;
+      if (nn === 1) return '';
+      if (nn === -1) return '-';
+      return String(nn);
+    })();
     if (n2 === 1) out.push(`${coeff}x`);
     else out.push(`${coeff}x^{${n2}}`);
   }
@@ -169,7 +236,12 @@ function antiderivativeTermCoeffFrac(t: Term) {
 function antiderivativeTermLatex(t: Term) {
   const n2 = t.n + 1;
   const coeff = antiderivativeTermCoeffFrac(t);
-  const coeffLatex = fmtCoeffFracLatex(coeff);
+  const coeffLatex = (() => {
+    if (coeff.den !== 1) return fmtCoeffFracLatex(coeff);
+    if (coeff.num === 1) return '';
+    if (coeff.num === -1) return '-';
+    return String(coeff.num);
+  })();
   if (n2 === 1) return `${coeffLatex}x`;
   return `${coeffLatex}x^{${n2}}`;
 }
@@ -243,7 +315,10 @@ export function generateIntegrationQuestion(input: { seed: number; difficulty: P
     const b = isDefinite ? bBound : 2;
     const lo = Math.min(a, b);
     const hi = Math.max(a, b);
-    const pad = Math.max(12, Math.ceil((hi - lo) * 6));
+    // Keep the view focused near the interval so the shaded region is visible.
+    // Too much padding makes high-degree polynomials explode (y becomes enormous) and the shading disappears visually.
+    const interval = hi - lo;
+    const pad = Math.min(6, Math.max(2, Math.ceil(interval * 1.25)));
     const xMin = lo - pad;
     const xMax = hi + pad;
     const sample = (x: number) => {

@@ -9,14 +9,15 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Alert } from '@/components/ui/alert';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Textarea } from '@/components/ui/textarea';
 import { Katex } from '@/components/Katex';
 import { PolynomialLongDivision } from '@/components/PolynomialLongDivision';
 import { ArrowLeft, Bug, CircleHelp } from 'lucide-react';
-import TypingAnswerMathInput from '@/components/TypingAnswerMathInput';
+import MathLiveInput from '@/components/MathLiveInput';
 import InteractiveGraph from '@/components/InteractiveGraph';
 import { PRACTICE_TOPICS, PracticeTopicId } from '@/lib/practiceTopics';
-import { Fraction, fractionsEqual, parseFraction } from '@/lib/fraction';
+import { Fraction, fractionToDisplay, fractionsEqual, normalizeFraction, parseFraction } from '@/lib/fraction';
 import { db } from '@/lib/db';
 import { generateQuadraticByFactorisation, PracticeDifficulty, QuadraticFactorizationQuestion } from '@/lib/practiceGenerators/quadraticFactorization';
 import { generatePracticeQuestion, PracticeQuestion, GraphPracticeQuestion } from '@/lib/practiceEngine';
@@ -27,6 +28,11 @@ import { HOME_ROUTE } from '@/constants/routes';
 type PracticeVariantOverride = {
   topicId: PracticeTopicId;
   variantId: string;
+} | null;
+
+type PracticeVariantMultiOverride = {
+  topicId: PracticeTopicId;
+  variantIds: string[];
 } | null;
 
 const PRACTICE_VARIANTS: Partial<Record<PracticeTopicId, string[]>> = {
@@ -74,6 +80,8 @@ const PRACTICE_VARIANTS: Partial<Record<PracticeTopicId, string[]>> = {
     'segment_area_forward',
     'segment_area_inverse_radius',
     'segment_area_inverse_theta',
+    'diameter_endpoints_equation',
+    'diameter_endpoints_center',
   ],
   differentiation: ['basic_polynomial', 'stationary_points'],
   integration: ['indefinite', 'definite'],
@@ -85,6 +93,18 @@ function buildForcedVariantWeights(topicId: PracticeTopicId, variantId: string):
   if (!variants.includes(variantId)) return null;
   const out: Record<string, number> = {};
   for (const v of variants) out[v] = v === variantId ? 1 : 0;
+  return out;
+}
+
+function buildMultiVariantWeights(topicId: PracticeTopicId, variantIds: string[]): Record<string, number> | null {
+  const variants = PRACTICE_VARIANTS[topicId];
+  if (!variants || variants.length === 0) return null;
+  const picked = (variantIds ?? []).map(String).map((s) => s.trim()).filter(Boolean);
+  if (!picked.length) return null;
+  const valid = picked.filter((v) => variants.includes(v));
+  if (!valid.length) return null;
+  const out: Record<string, number> = {};
+  for (const v of variants) out[v] = valid.includes(v) ? 1 : 0;
   return out;
 }
 
@@ -258,8 +278,12 @@ export default function Practice() {
   const [isSubmittingReport, setIsSubmittingReport] = useState(false);
   const [reportCaptureMode, setReportCaptureMode] = useState<'practice_full' | 'screen'>('practice_full');
 
-  const [adminCommand, setAdminCommand] = useState('');
+  const [commandModalOpen, setCommandModalOpen] = useState(false);
+  const [commandText, setCommandText] = useState('');
   const [variantOverride, setVariantOverride] = useState<PracticeVariantOverride>(null);
+  const [variantMultiOverride, setVariantMultiOverride] = useState<PracticeVariantMultiOverride>(null);
+  const [onlyQuestionTextQuery, setOnlyQuestionTextQuery] = useState<string>('');
+  const [onlyQuestionTextTopicScope, setOnlyQuestionTextTopicScope] = useState<PracticeTopicId | null>(null);
 
   const activePracticeEventIdRef = useRef<string | null>(null);
   const activePracticeEventQuestionIdRef = useRef<string | null>(null);
@@ -837,9 +861,19 @@ export default function Practice() {
     const topicVariantWeights = (freq?.topicVariantWeights ?? {}) as Record<string, Record<string, number>>;
     const mixedModuleItemWeights = (freq?.mixedModuleItemWeights ?? {}) as Record<string, Record<number, number>>;
 
+    const adminFilterOverridesFrequencies = Boolean(isAdmin && activeTopicScope);
+
     const hasConfiguredWeights = (w: unknown) => {
       if (!w || typeof w !== 'object') return false;
-      return Object.keys(w as any).length > 0;
+      const obj = w as Record<string, unknown>;
+      const keys = Object.keys(obj);
+      if (!keys.length) return false;
+      // Only treat as configured when it has at least one positive weight.
+      for (const k of keys) {
+        const v = Number((obj as any)[k]);
+        if (Number.isFinite(v) && v > 0) return true;
+      }
+      return false;
     };
 
     const weightedPickIndex = (weightsByIndex: Record<number, number>, n: number, seed: number) => {
@@ -918,13 +952,28 @@ export default function Practice() {
       accept?: (q: QuadraticFactorizationQuestion | PracticeQuestion) => boolean,
       opts?: { strict?: boolean }
     ) => {
+      const hasTextFilter = Boolean(onlyQuestionTextQuery.trim());
       for (let attempt = 0; attempt < 50; attempt++) {
         const seed = seedValue + attempt;
         const q = fn(seed);
-        if (!opts?.strict && recentSet.has(q.id)) continue;
+        if (!opts?.strict && !hasTextFilter && recentSet.has(q.id)) continue;
         if (!opts?.strict && accept && !accept(q)) continue;
+        if (hasTextFilter) {
+          const hay = getQuestionSearchText(q).toLowerCase();
+          const needles = onlyQuestionTextQuery
+            .split(';')
+            .map((s) => s.trim().toLowerCase())
+            .filter(Boolean);
+          if (!needles.length) continue;
+          const ok = needles.some((needle) => hay.includes(needle));
+          if (!ok) continue;
+        }
         return q;
       }
+
+      // If a keyword filter is active and we couldn't find a match, don't fall back
+      // to a random question (that defeats the purpose of /only).
+      if (onlyQuestionTextQuery.trim()) return null;
       return fn(seedValue);
     };
 
@@ -947,13 +996,19 @@ export default function Practice() {
           difficulty?: PracticeDifficulty;
           difficultyWeights?: Partial<Record<PracticeDifficulty, number>>;
         }>;
-        const unlocked = pool.filter((p) => p?.topicId && !isTopicLocked(p.topicId));
+        const unlocked0 = pool.filter((p) => p?.topicId && !isTopicLocked(p.topicId));
+        const unlocked = activeTopicScope
+          ? unlocked0.filter((p) => p.topicId === activeTopicScope)
+          : unlocked0;
         if (!unlocked.length) return;
 
-        const picked =
-          weightedPick(unlocked, (p) => Number(p.weight ?? 0), seedValue) ??
-          unlocked[((seedValue >>> 0) % unlocked.length) as number] ??
-          null;
+        const picked = adminFilterOverridesFrequencies
+          ? (unlocked[((seedValue >>> 0) % unlocked.length) as number] ?? null)
+          : (
+              weightedPick(unlocked, (p) => Number(p.weight ?? 0), seedValue) ??
+              unlocked[((seedValue >>> 0) % unlocked.length) as number] ??
+              null
+            );
         if (!picked) return;
 
         const pickedDifficulty: PracticeDifficulty = (() => {
@@ -970,14 +1025,34 @@ export default function Practice() {
         const item = { topicId: picked.topicId, difficulty: pickedDifficulty };
 
         if (item.topicId === 'quadratics') {
-          const q = tryGenerate((seed) => generateQuadraticByFactorisation({ seed, difficulty: item.difficulty }));
+          const forced = variantOverride?.topicId === item.topicId
+            ? buildForcedVariantWeights(item.topicId, variantOverride.variantId)
+            : null;
+          const multi = variantMultiOverride?.topicId === item.topicId
+            ? buildMultiVariantWeights(item.topicId, variantMultiOverride.variantIds)
+            : null;
+          const weightsForTopic = (forced ?? multi) as any;
+          const strictTopic = !!forced || !!multi;
+          const q = tryGenerate(
+            (seed) => generateQuadraticByFactorisation({ seed, difficulty: item.difficulty, variantWeights: weightsForTopic }),
+            undefined,
+            { strict: strictTopic }
+          );
+          if (!q) {
+            toast.error(`No matching question found for filter: "${onlyQuestionTextQuery.trim()}"`);
+            return;
+          }
           setQuestion(q);
           rememberQuestionId(q.id);
         } else {
           const forced =
             variantOverride?.topicId === item.topicId ? buildForcedVariantWeights(item.topicId, variantOverride.variantId) : null;
+          const multi = variantMultiOverride?.topicId === item.topicId
+            ? buildMultiVariantWeights(item.topicId, variantMultiOverride.variantIds)
+            : null;
           const weightsForTopic = (forced ?? (topicVariantWeights?.[item.topicId] as any)) as any;
-          const strictTopic = !!forced || hasConfiguredWeights(weightsForTopic);
+          const effectiveWeightsForTopic = (forced ?? multi ?? weightsForTopic) as any;
+          const strictTopic = !!forced || !!multi || hasConfiguredWeights(effectiveWeightsForTopic);
 
           const avoidVariantId = !strictTopic && item.topicId === 'word_problems'
             ? (lastVariantByTopic.word_problems as string | undefined)
@@ -990,11 +1065,16 @@ export default function Practice() {
                 difficulty: item.difficulty,
                 seed,
                 avoidVariantId,
-                variantWeights: weightsForTopic,
+                variantWeights: effectiveWeightsForTopic,
               }),
             item.topicId === 'word_problems' ? acceptWordProblem : undefined,
             { strict: strictTopic }
           );
+
+          if (!q) {
+            toast.error(`No matching question found for filter: "${onlyQuestionTextQuery.trim()}"`);
+            return;
+          }
 
           setQuestion(q);
           rememberQuestionId(q.id);
@@ -1016,39 +1096,57 @@ export default function Practice() {
       const items = (selectedMixedModule as any).items as Array<{ topicId: PracticeTopicId; difficulty: PracticeDifficulty }>;
       const weights = mixedModuleItemWeights?.[(selectedMixedModule as any).id];
       const strictMixed = hasConfiguredWeights(weights);
-      const weightedIdx = weights ? weightedPickIndex(weights as any, items.length, seedValue) : null;
-      const idx0 = typeof weightedIdx === 'number' ? weightedIdx : (mixedCursor % items.length);
+      const candidates0 = items.filter((it) => it?.topicId && !isTopicLocked(it.topicId));
+      const candidates = activeTopicScope
+        ? candidates0.filter((it) => it.topicId === activeTopicScope)
+        : candidates0;
+      if (!candidates.length) return;
+      const weightedIdx = (!adminFilterOverridesFrequencies && weights)
+        ? weightedPickIndex(weights as any, candidates.length, seedValue)
+        : null;
+      const idx0 = typeof weightedIdx === 'number' ? weightedIdx : (mixedCursor % candidates.length);
 
       let item: (typeof items)[number] | undefined;
-      for (let i = 0; i < items.length; i++) {
-        const idx = (idx0 + i) % items.length;
-        const candidate = items[idx];
+      for (let i = 0; i < candidates.length; i++) {
+        const idx = (idx0 + i) % candidates.length;
+        const candidate = candidates[idx];
         if (!candidate) continue;
-        if (isTopicLocked(candidate.topicId)) continue;
         item = candidate;
         break;
       }
       if (!item) return;
 
       if (item.topicId === 'quadratics') {
+        const forced = variantOverride?.topicId === item.topicId
+          ? buildForcedVariantWeights(item.topicId, variantOverride.variantId)
+          : null;
+        const multi = variantMultiOverride?.topicId === item.topicId
+          ? buildMultiVariantWeights(item.topicId, variantMultiOverride.variantIds)
+          : null;
+        const weightsForTopic = (forced ?? multi) as any;
+        const strictTopic = !!forced || !!multi;
         const q = tryGenerate(
-          (seed) => generateQuadraticByFactorisation({ seed, difficulty: item.difficulty }),
+          (seed) => generateQuadraticByFactorisation({ seed, difficulty: item.difficulty, variantWeights: weightsForTopic }),
           undefined,
-          { strict: strictMixed }
+          { strict: strictMixed || strictTopic }
         );
+        if (!q) {
+          toast.error(`No matching question found for filter: "${onlyQuestionTextQuery.trim()}"`);
+          return;
+        }
         setQuestion(q);
         rememberQuestionId(q.id);
       } else {
         const forced = variantOverride?.topicId === item.topicId
           ? buildForcedVariantWeights(item.topicId, variantOverride.variantId)
           : null;
+        const multi = variantMultiOverride?.topicId === item.topicId
+          ? buildMultiVariantWeights(item.topicId, variantMultiOverride.variantIds)
+          : null;
         const weightsForTopic = (forced ?? (topicVariantWeights?.[item.topicId] as any)) as any;
-        const strictTopic = !!forced || hasConfiguredWeights(weightsForTopic);
-        const strict = strictMixed || strictTopic;
-
-        const avoidVariantId = !strict && item.topicId === 'word_problems'
-          ? (lastVariantByTopic.word_problems as string | undefined)
-          : undefined;
+        const effectiveWeightsForTopic = (forced ?? multi ?? weightsForTopic) as any;
+        const strictTopic = !!forced || !!multi || hasConfiguredWeights(effectiveWeightsForTopic);
+        const avoidVariantId = !strictTopic ? (lastVariantByTopic[item.topicId] as string | undefined) : undefined;
 
         const q = tryGenerate(
           (seed) =>
@@ -1057,11 +1155,15 @@ export default function Practice() {
               difficulty: item.difficulty,
               seed,
               avoidVariantId,
-              variantWeights: weightsForTopic,
+              variantWeights: effectiveWeightsForTopic,
             }),
           item.topicId === 'word_problems' ? acceptWordProblem : undefined,
-          { strict }
+          { strict: strictMixed || strictTopic }
         );
+        if (!q) {
+          toast.error(`No matching question found for filter: "${onlyQuestionTextQuery.trim()}"`);
+          return;
+        }
         setQuestion(q);
         rememberQuestionId(q.id);
         if (item.topicId === 'word_problems') {
@@ -1077,13 +1179,19 @@ export default function Practice() {
     if (!topicId) return;
     if (topicId === 'quadratics') {
       const forced = variantOverride?.topicId === topicId ? buildForcedVariantWeights(topicId, variantOverride.variantId) : null;
+      const multi = variantMultiOverride?.topicId === topicId ? buildMultiVariantWeights(topicId, variantMultiOverride.variantIds) : null;
+      const weightsForTopic = (forced ?? multi) as any;
       const q = tryGenerate((seed) =>
         generateQuadraticByFactorisation({
           seed,
           difficulty,
-          variantWeights: forced ?? undefined,
+          variantWeights: weightsForTopic,
         })
       );
+      if (!q) {
+        toast.error(`No matching question found for filter: "${onlyQuestionTextQuery.trim()}"`);
+        return;
+      }
       setQuestion(q);
       rememberQuestionId(q.id);
       resetAttemptState();
@@ -1092,8 +1200,9 @@ export default function Practice() {
 
     const weightsForTopic = topicVariantWeights?.[topicId] as any;
     const forced = variantOverride?.topicId === topicId ? buildForcedVariantWeights(topicId, variantOverride.variantId) : null;
-    const effectiveWeightsForTopic = (forced ?? weightsForTopic) as any;
-    const strict = !!forced || hasConfiguredWeights(effectiveWeightsForTopic);
+    const multi = variantMultiOverride?.topicId === topicId ? buildMultiVariantWeights(topicId, variantMultiOverride.variantIds) : null;
+    const effectiveWeightsForTopic = (forced ?? multi ?? weightsForTopic) as any;
+    const strict = !!forced || !!multi || hasConfiguredWeights(effectiveWeightsForTopic);
     const avoidVariantId = !strict ? (lastVariantByTopic[topicId] as string | undefined) : undefined;
 
     const q = tryGenerate(
@@ -1108,6 +1217,10 @@ export default function Practice() {
       topicId === 'word_problems' ? acceptWordProblem : undefined,
       { strict }
     );
+    if (!q) {
+      toast.error(`No matching question found for filter: "${onlyQuestionTextQuery.trim()}"`);
+      return;
+    }
     setQuestion(q);
     rememberQuestionId(q.id);
     // Record last variant id (if present) so the next question avoids it.
@@ -1343,18 +1456,104 @@ export default function Practice() {
     return tid ?? null;
   }, [question]);
 
-  const applyAdminCommand = useCallback(() => {
-    if (!isAdmin) return;
-    const raw = (adminCommand ?? '').trim();
+  const currentTopicForSearchScope = useMemo(() => {
+    if (mode === 'individual') return topicId;
+    const q: any = question as any;
+    const tid = (q?.topicId ?? q?.metadata?.topic) as PracticeTopicId | undefined;
+    return tid ?? null;
+  }, [mode, question, topicId]);
+
+  const activeTopicScope = useMemo(() => {
+    // If any "filter" implies a topic (keyword scope, multi-variant selection, or forced variant),
+    // then mixed-mode generation should stay within that topic.
+    return (
+      onlyQuestionTextTopicScope ??
+      variantMultiOverride?.topicId ??
+      variantOverride?.topicId ??
+      null
+    );
+  }, [onlyQuestionTextTopicScope, variantMultiOverride?.topicId, variantOverride?.topicId]);
+
+  const currentTopicForVariantPicker = useMemo(() => {
+    return mode === 'individual' ? topicId : (currentTopicForSearchScope ?? null);
+  }, [currentTopicForSearchScope, mode, topicId]);
+
+  const availableVariantsForPicker = useMemo(() => {
+    if (!currentTopicForVariantPicker) return [];
+    return PRACTICE_VARIANTS[currentTopicForVariantPicker] ?? [];
+  }, [currentTopicForVariantPicker]);
+
+  const selectedVariantIdsForPicker = useMemo(() => {
+    if (!currentTopicForVariantPicker) return [];
+    if (variantMultiOverride?.topicId !== currentTopicForVariantPicker) return [];
+    return variantMultiOverride.variantIds ?? [];
+  }, [currentTopicForVariantPicker, variantMultiOverride]);
+
+  const toggleVariantForPicker = useCallback((variantId: string) => {
+    if (!currentTopicForVariantPicker) return;
+    setVariantMultiOverride((prev) => {
+      const base: PracticeVariantMultiOverride = prev?.topicId === currentTopicForVariantPicker
+        ? prev
+        : { topicId: currentTopicForVariantPicker, variantIds: [] };
+      const cur = new Set((base?.variantIds ?? []).map(String));
+      if (cur.has(variantId)) cur.delete(variantId);
+      else cur.add(variantId);
+      return { topicId: currentTopicForVariantPicker, variantIds: Array.from(cur) };
+    });
+  }, [currentTopicForVariantPicker]);
+
+  const applyCommandFromModal = useCallback(() => {
+    const raw = (commandText ?? '').trim();
     if (!raw) {
+      // If the user only used the checkbox picker (no typed command), keep the selected
+      // variants active. Clearing is handled by the explicit "Clear all" button.
+      if (variantMultiOverride?.topicId && (variantMultiOverride.variantIds ?? []).length) {
+        setVariantOverride(null);
+        setOnlyQuestionTextQuery('');
+        setOnlyQuestionTextTopicScope(variantMultiOverride.topicId);
+        toast.success('Applied selected question types');
+        return;
+      }
+      if (variantOverride?.topicId && variantOverride?.variantId) {
+        setVariantMultiOverride(null);
+        setOnlyQuestionTextQuery('');
+        setOnlyQuestionTextTopicScope(variantOverride.topicId);
+        toast.success('Applied forced variant');
+        return;
+      }
       setVariantOverride(null);
+      setVariantMultiOverride(null);
+      setOnlyQuestionTextQuery('');
+      setOnlyQuestionTextTopicScope(null);
       return;
     }
+
+    // Non-admin: treat as keyword filter unless they try to use a slash command.
+    if (!isAdmin && raw.startsWith('/')) {
+      toast.error('Commands are admin-only. Type a keyword to filter questions.');
+      return;
+    }
+
+    // Shortcut: allow typing a plain keyword (without /only) to set text filter quickly.
+    if (!raw.startsWith('/')) {
+      setVariantOverride(null);
+      setOnlyQuestionTextQuery(raw);
+      setOnlyQuestionTextTopicScope(currentTopicForSearchScope);
+      toast.success(`Filtering questions by text: "${raw}"`);
+      return;
+    }
+
+    if (!isAdmin) return;
+
     if (/^\/?clear\b/i.test(raw)) {
       setVariantOverride(null);
+      setVariantMultiOverride(null);
+      setOnlyQuestionTextQuery('');
+      setOnlyQuestionTextTopicScope(null);
       toast.success('Cleared forced variant');
       return;
     }
+
     const onlyMatch = raw.match(/^\/?only\s+(.+)$/i);
     if (!onlyMatch) {
       toast.error('Invalid command. Use "/only <variantId>" or "/only <topicId>:<variantId>" or "/clear"');
@@ -1369,6 +1568,63 @@ export default function Practice() {
     const rawTopicId = parts.length >= 2 ? parts[0] : null;
     const rawVariantId = parts.length >= 2 ? parts.slice(1).join(':') : parts[0];
 
+    const normalizeVariantToken = (s: string) => normalizeCommandToken(String(s ?? '').trim());
+
+    const resolveTopicIdForMulti = (rawTid: string | null): PracticeTopicId | null => {
+      if (rawTid) {
+        const candidates = PRACTICE_TOPICS.map((t) => t.id);
+        const hit = candidates.find((c) => normalizeCommandToken(c) === normalizeCommandToken(rawTid));
+        return (hit ?? null) as any;
+      }
+      return (currentTopicForAdminCommand ?? currentTopicForSearchScope ?? null) as any;
+    };
+
+    const maybeVariantTokens = rawVariantId.split(';').map((s) => s.trim()).filter(Boolean);
+    if (maybeVariantTokens.length >= 2) {
+      const topic = resolveTopicIdForMulti(rawTopicId);
+      if (!topic) {
+        toast.error('Cannot infer topic for multi-type /only. Use "/only <topicId>:a;b"');
+        return;
+      }
+      const allowed = PRACTICE_VARIANTS[topic] ?? [];
+      if (!allowed.length) {
+        // No variants for this topic; treat it as a keyword filter instead.
+        const q = payload.trim();
+        setVariantOverride(null);
+        setVariantMultiOverride(null);
+        setOnlyQuestionTextQuery(q);
+        setOnlyQuestionTextTopicScope(currentTopicForSearchScope);
+        toast.success(`Filtering questions by text: "${q}"`);
+        return;
+      }
+      const wanted = maybeVariantTokens.map(normalizeVariantToken);
+      const valid = allowed.filter((v) => wanted.includes(normalizeCommandToken(v)));
+
+      // Only interpret ';' as multi-variant when it clearly matches known variant IDs,
+      // or when the user explicitly provided a topicId.
+      if (rawTopicId || valid.length) {
+        if (!valid.length) {
+          toast.error(`No valid variants found. Allowed: ${allowed.join(', ')}`);
+          return;
+        }
+        setVariantOverride(null);
+        setVariantMultiOverride({ topicId: topic, variantIds: valid });
+        setOnlyQuestionTextQuery('');
+        setOnlyQuestionTextTopicScope(topic);
+        toast.success(`Forced ${topic} types: ${valid.join(', ')}`);
+        return;
+      }
+
+      // Otherwise treat it as multiple keyword terms, e.g. "/only temperature; convert".
+      const q = payload.trim();
+      setVariantOverride(null);
+      setVariantMultiOverride(null);
+      setOnlyQuestionTextQuery(q);
+      setOnlyQuestionTextTopicScope(currentTopicForSearchScope);
+      toast.success(`Filtering questions by text: "${q}"`);
+      return;
+    }
+
     const resolved = resolveTopicAndVariant({
       rawTopicId,
       rawVariantId,
@@ -1376,7 +1632,12 @@ export default function Practice() {
     });
 
     if (!resolved) {
-      toast.error('Could not match command to any topic/variant. Try a more specific keyword.');
+      // Fallback: treat payload as a keyword filter against rendered question text.
+      const q = payload.trim();
+      setVariantOverride(null);
+      setOnlyQuestionTextQuery(q);
+      setOnlyQuestionTextTopicScope(currentTopicForSearchScope);
+      toast.success(`Filtering questions by text: "${q}"`);
       return;
     }
 
@@ -1392,12 +1653,98 @@ export default function Practice() {
     }
 
     setVariantOverride({ topicId: resolved.topicId, variantId: resolved.variantId });
+    setVariantMultiOverride(null);
+    setOnlyQuestionTextQuery('');
+    // If you force a topic variant, keep generation in that topic.
+    setOnlyQuestionTextTopicScope(resolved.topicId);
     if (resolved.resolvedBy === 'exact') {
       toast.success(`Forced ${resolved.topicId}:${resolved.variantId}`);
     } else {
       toast.success(`Forced ${resolved.topicId}:${resolved.variantId} (matched from "${payload}")`);
     }
-  }, [adminCommand, currentTopicForAdminCommand, isAdmin]);
+  }, [commandText, currentTopicForAdminCommand, currentTopicForSearchScope, isAdmin, variantMultiOverride, variantOverride]);
+
+  const getQuestionSearchText = useCallback((q: QuadraticFactorizationQuestion | PracticeQuestion): string => {
+    const anyQ: any = q as any;
+    const out: string[] = [];
+    const seen = new Set<any>();
+    const MAX_STRINGS = 300;
+
+    const push = (s: unknown) => {
+      if (out.length >= MAX_STRINGS) return;
+      const v = typeof s === 'string' ? s : '';
+      const t = v.replace(/\s+/g, ' ').trim();
+      if (t) out.push(t);
+    };
+
+    const extract = (value: unknown, depth: number) => {
+      if (out.length >= MAX_STRINGS) return;
+      if (depth <= 0) return;
+      if (value == null) return;
+
+      if (typeof value === 'string') {
+        push(value);
+        return;
+      }
+
+      if (typeof value === 'number' || typeof value === 'boolean') return;
+
+      if (Array.isArray(value)) {
+        for (const it of value) extract(it, depth - 1);
+        return;
+      }
+
+      if (typeof value === 'object') {
+        if (seen.has(value)) return;
+        seen.add(value);
+
+        const obj = value as Record<string, unknown>;
+        for (const [k, v] of Object.entries(obj)) {
+          if (out.length >= MAX_STRINGS) break;
+          // Skip noisy keys.
+          if (
+            k === 'id' ||
+            k === 'seed' ||
+            k === 'createdAt' ||
+            k === 'updatedAt' ||
+            k === 'image' ||
+            k === 'imageUrl' ||
+            k === 'imageDataUrl' ||
+            k === 'attachments'
+          ) {
+            continue;
+          }
+          extract(v, depth - 1);
+        }
+      }
+    };
+
+    // Primary stems
+    extract(anyQ.katexQuestion, 2);
+    extract(anyQ.question, 2);
+    extract(anyQ.prompt, 2);
+    extract(anyQ.text, 2);
+    extract(anyQ.title, 2);
+
+    // Prompt blocks / structured content
+    extract(anyQ.promptBlocks, 4);
+    extract(anyQ.blocks, 4);
+
+    // Options / choices (support many shapes)
+    extract(anyQ.options, 4);
+    extract(anyQ.choices, 4);
+    extract(anyQ.answers, 4);
+    extract(anyQ.mcqOptions, 4);
+
+    // Metadata / tags
+    extract(anyQ.metadata, 3);
+    extract(anyQ.tags, 2);
+    extract(anyQ.topicId, 1);
+    extract(anyQ.difficulty, 1);
+    extract(anyQ.variantId, 1);
+
+    return out.join(' ').replace(/\s+/g, ' ').trim();
+  }, []);
 
   useEffect(() => {
     if (step !== 'session') return;
@@ -1444,9 +1791,81 @@ export default function Practice() {
     return direct || swapped;
   };
 
-  const checkSingleFractionAnswer = (expected: Fraction, raw: string) => {
+  const gcdInt = (a: number, b: number): number => {
+    let x = Math.abs(a);
+    let y = Math.abs(b);
+    while (y !== 0) {
+      const t = x % y;
+      x = y;
+      y = t;
+    }
+    return x;
+  };
+
+  const parseRawFractionInput = (raw: string): Fraction | null => {
+    const s0 = String(raw ?? '').trim();
+    if (!s0) return null;
+    const s = s0.replace(/[−–]/g, '-');
+    const cleaned = s.replace(/\s+/g, '');
+
+    if (/^-?\d+$/.test(cleaned)) {
+      return { n: Number(cleaned), d: 1 };
+    }
+
+    // Only accept explicit fractions for "simplified fraction" prompts.
+    // Do not accept decimals here.
+    const m = cleaned.match(/^(-?\d+)\/(\d+)$/);
+    if (m) {
+      const n = Number(m[1]);
+      const d = Number(m[2]);
+      if (!Number.isFinite(n) || !Number.isFinite(d) || d === 0) return null;
+      return { n, d };
+    }
+
+    const m3 = cleaned.match(/^\\frac\{(-?\d+)\}\{(\d+)\}$/);
+    if (m3) {
+      const n = Number(m3[1]);
+      const d = Number(m3[2]);
+      if (!Number.isFinite(n) || !Number.isFinite(d) || d === 0) return null;
+      return { n, d };
+    }
+
+    const m4 = cleaned.match(/^-\\frac\{(\d+)\}\{(\d+)\}$/);
+    if (m4) {
+      const n = -Number(m4[1]);
+      const d = Number(m4[2]);
+      if (!Number.isFinite(n) || !Number.isFinite(d) || d === 0) return null;
+      return { n, d };
+    }
+
+    return null;
+  };
+
+  const isSimplestFractionInput = (raw: string, expected: Fraction): boolean => {
+    const parsedRaw = parseRawFractionInput(raw);
+    if (!parsedRaw) return false;
+
+    const n = parsedRaw.n;
+    const d = parsedRaw.d;
+    if (!Number.isFinite(n) || !Number.isFinite(d) || d === 0) return false;
+
+    // If the expected answer is an integer, require the student's input to be an integer.
+    // (e.g. 6/3 should be marked wrong; student should enter 2)
+    const exp = normalizeFraction(expected);
+    const expIsInt = exp.d === 1;
+    if (expIsInt) return d === 1;
+
+    // Require positive denominator and reduced form.
+    if (d < 0) return false;
+    return gcdInt(n, d) === 1;
+  };
+
+  const checkSingleFractionAnswer = (expected: Fraction, raw: string, opts?: { requireSimplest?: boolean }) => {
     const parsed = parseFraction(raw);
     if (!parsed) return false;
+    if (opts?.requireSimplest) {
+      if (!isSimplestFractionInput(raw, expected)) return false;
+    }
     return fractionsEqual(parsed, expected);
   };
 
@@ -1607,7 +2026,9 @@ export default function Practice() {
       case 'linear':
         return checkSingleFractionAnswer(q.solution, answer1);
       case 'fractions':
-        return checkSingleFractionAnswer(q.solution, answer1);
+        return checkSingleFractionAnswer(q.solution, answer1, {
+          requireSimplest: q.variantId === 'simplify_fraction' || q.variantId === 'add_sub_fractions',
+        });
       case 'indices': {
         const trimmed = answer1.trim().replace(/\s+/g, '');
 
@@ -1647,7 +2068,13 @@ export default function Practice() {
           .replace(/[−–]/g, '-')
           .replace(/\u200b/g, '')
           .replace(/\s+/g, '')
-          // TypingAnswerMathInput can emit scripts as ^{3} / _{2}; normalize to ^3 / _2
+          // MathLive emits LaTeX; normalize it to our lightweight compare format.
+          .replace(/\\left/g, '')
+          .replace(/\\right/g, '')
+          .replace(/-\\frac\{(\d+)\}\{(\d+)\}/g, '-$1/$2')
+          .replace(/\\frac\{(-?\d+)\}\{(\d+)\}/g, '$1/$2')
+          .replace(/\\cdot/g, '')
+          .replace(/\*/g, '')
           .replace(/\^\{([^}]+)\}/g, '^$1')
           .replace(/_\{([^}]+)\}/g, '_$1')
           .toLowerCase();
@@ -1727,10 +2154,13 @@ export default function Practice() {
         }
 
         // Indefinite calculus answers are symbolic.
-        const normalized = typeof cq.normalize === 'function'
-          ? String(cq.normalize(String(answer1 ?? '')))
-          : String(answer1 ?? '').replace(/\s+/g, '').toLowerCase();
-        return (cq.expectedNormalized ?? []).includes(normalized);
+        const normalizeExpr = (raw: string) => typeof cq.normalize === 'function'
+          ? String(cq.normalize(String(raw ?? '')))
+          : String(raw ?? '').replace(/\s+/g, '').toLowerCase();
+
+        const normalized = normalizeExpr(String(answer1 ?? ''));
+        const expected = (cq.expectedNormalized ?? []).map((s: string) => normalizeExpr(String(s ?? '')));
+        return expected.includes(normalized);
       }
       case 'word_problem': {
         const wp = q as any;
@@ -1769,6 +2199,18 @@ export default function Practice() {
         }
 
         const gp = (gq.generatorParams ?? {}) as any;
+        if (Array.isArray(gp.expectedParts) && gp.expectedParts.length > 0) {
+          const parts = [answer1, answer2, answer3];
+          for (let i = 0; i < gp.expectedParts.length; i++) {
+            const expected = Number(gp.expectedParts[i]);
+            const raw = String(parts[i] ?? '').trim();
+            if (!raw) return false;
+            const user = Number(raw);
+            if (Number.isNaN(user)) return false;
+            if (Math.abs(user - expected) > 0.02) return false;
+          }
+          return true;
+        }
         if (typeof gp.expectedValue === 'number' && Number.isFinite(gp.expectedValue)) {
           const raw = answer1.trim();
           if (!raw) return false;
@@ -2049,6 +2491,61 @@ export default function Practice() {
             </div>
           </Card>
         </div>
+      ) : step === 'session' && !question ? (
+        <div className="w-full max-w-none mx-auto space-y-3 px-3 md:px-6">
+          <Card className="px-4 py-3">
+            <div className="flex items-center justify-between gap-3 min-h-12">
+              <div className="flex items-center gap-3 min-w-0">
+                <Button
+                  variant="outline"
+                  size="icon"
+                  onClick={() => {
+                    setStep('chooser');
+                    setQuestion(null);
+                    setSubmitted(false);
+                    setIsCorrect(null);
+                    setAnswer1('');
+                    setAnswer2('');
+                    setAnswer3('');
+                    setSelectedOptionIndex(null);
+                    setVariantOverride(null);
+                    setVariantMultiOverride(null);
+                    setOnlyQuestionTextQuery('');
+                    setOnlyQuestionTextTopicScope(null);
+                    setCommandText('');
+                  }}
+                >
+                  <ArrowLeft className="h-5 w-5" />
+                </Button>
+                <div className="min-w-0">
+                  <div className="text-lg font-semibold leading-tight text-foreground truncate">Practice</div>
+                  <div className="text-xs text-muted-foreground">No question available.</div>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <Button type="button" variant="outline" size="sm" onClick={() => setCommandModalOpen(true)} className="bg-white">
+                  Search / Filters
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    const nextSeed = Date.now();
+                    setSessionSeed(nextSeed);
+                    generateNext(nextSeed);
+                  }}
+                  className="bg-white"
+                >
+                  Retry
+                </Button>
+              </div>
+            </div>
+            <div className="mt-2 text-sm text-muted-foreground">
+              This can happen if the current filters/selected types don’t match any questions.
+            </div>
+          </Card>
+        </div>
       ) : null}
 
       {step === 'session' && question ? (
@@ -2068,7 +2565,10 @@ export default function Practice() {
                     setAnswer2('');
                     setAnswer3('');
                     setVariantOverride(null);
-                    setAdminCommand('');
+                    setVariantMultiOverride(null);
+                    setOnlyQuestionTextQuery('');
+                    setOnlyQuestionTextTopicScope(null);
+                    setCommandText('');
                   }}
                 >
                   <ArrowLeft className="h-5 w-5" />
@@ -2078,39 +2578,15 @@ export default function Practice() {
                 </div>
               </div>
               <div className="flex items-center gap-2">
-                {isAdmin ? (
-                  <div className="hidden md:flex items-center gap-2">
-                    <Input
-                      value={adminCommand}
-                      onChange={(e) => setAdminCommand(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') {
-                          e.preventDefault();
-                          applyAdminCommand();
-                        }
-                      }}
-                      placeholder="/only <variantId> or /only <topicId>:<variantId> or /clear"
-                      className="w-[420px] bg-white"
-                    />
-                    <Button variant="outline" size="sm" onClick={applyAdminCommand} className="bg-white">
-                      Apply
-                    </Button>
-                    {variantOverride ? (
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => {
-                          setVariantOverride(null);
-                          setAdminCommand('');
-                          toast.success('Cleared forced variant');
-                        }}
-                        className="bg-white"
-                      >
-                        Clear
-                      </Button>
-                    ) : null}
-                  </div>
-                ) : null}
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setCommandModalOpen(true)}
+                  className="bg-white"
+                >
+                  Search / Filters
+                </Button>
                 <Button
                   variant="outline"
                   size="sm"
@@ -2140,7 +2616,123 @@ export default function Practice() {
                 Forced variant: <span className="font-mono">{variantOverride.topicId}:{variantOverride.variantId}</span>
               </div>
             ) : null}
+            {onlyQuestionTextQuery.trim() ? (
+              <div className="mt-2 text-xs text-muted-foreground">
+                Active filter: <span className="font-medium text-foreground">{onlyQuestionTextQuery.trim()}</span>
+              </div>
+            ) : null}
           </Card>
+
+          <Dialog open={commandModalOpen} onOpenChange={setCommandModalOpen}>
+            <DialogContent className="max-w-2xl">
+              <DialogHeader>
+                <DialogTitle>Search / Filters</DialogTitle>
+                <DialogDescription>
+                  Type a keyword to filter questions. Admins can also use /only and /clear. Optionally select multiple question types.
+                </DialogDescription>
+              </DialogHeader>
+
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <Label>Keyword / Command</Label>
+                  <Input
+                    value={commandText}
+                    onChange={(e) => setCommandText(e.target.value)}
+                    placeholder={isAdmin ? '/only <keyword> or /only <topicId>:<variantId> or /clear' : 'Type a keyword (e.g. temperature)'}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        applyCommandFromModal();
+                        setCommandModalOpen(false);
+                      }
+                    }}
+                  />
+                  <div className="text-xs text-muted-foreground">
+                    Scope: {currentTopicForSearchScope ? <span className="font-mono">{currentTopicForSearchScope}</span> : 'current topic'}
+                  </div>
+                </div>
+
+                {availableVariantsForPicker.length ? (
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <Label>Question types (optional)</Label>
+                      {selectedVariantIdsForPicker.length ? (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setVariantMultiOverride(null)}
+                        >
+                          Clear types
+                        </Button>
+                      ) : null}
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                      {availableVariantsForPicker.map((v) => {
+                        const checked = selectedVariantIdsForPicker.includes(v);
+                        return (
+                          <label key={v} className="flex items-start gap-2 rounded-md border px-3 py-2 min-w-0">
+                            <Checkbox checked={checked} onCheckedChange={() => toggleVariantForPicker(v)} className="mt-0.5" />
+                            <span className="font-mono text-sm min-w-0 whitespace-normal break-all">{v}</span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                    <div className="text-xs text-muted-foreground">
+                      Selected types are applied only within the current topic.
+                    </div>
+                  </div>
+                ) : null}
+
+                {onlyQuestionTextQuery.trim() || variantMultiOverride || variantOverride ? (
+                  <div className="rounded-md border p-3 text-sm">
+                    <div className="font-medium">Active</div>
+                    <div className="mt-1 space-y-1 text-muted-foreground">
+                      {onlyQuestionTextQuery.trim() ? (
+                        <div>Text filter: <span className="text-foreground">{onlyQuestionTextQuery.trim()}</span></div>
+                      ) : null}
+                      {variantMultiOverride?.topicId ? (
+                        <div>
+                          Types: <span className="font-mono text-foreground">{variantMultiOverride.variantIds.join(', ') || '(none)'}</span>
+                        </div>
+                      ) : null}
+                      {isAdmin && variantOverride ? (
+                        <div>
+                          Forced variant: <span className="font-mono text-foreground">{variantOverride.topicId}:{variantOverride.variantId}</span>
+                        </div>
+                      ) : null}
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+
+              <DialogFooter>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => {
+                    setVariantOverride(null);
+                    setVariantMultiOverride(null);
+                    setOnlyQuestionTextQuery('');
+                    setOnlyQuestionTextTopicScope(null);
+                    setCommandText('');
+                    toast.success('Cleared filters');
+                  }}
+                >
+                  Clear all
+                </Button>
+                <Button
+                  type="button"
+                  onClick={() => {
+                    applyCommandFromModal();
+                    setCommandModalOpen(false);
+                  }}
+                >
+                  Apply
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
 
           <Dialog open={reportHelpOpen} onOpenChange={setReportHelpOpen}>
             <DialogContent className="max-w-2xl">
@@ -2202,7 +2794,8 @@ export default function Practice() {
 
             {(question as any).kind === 'graph'
               && (((question as GraphPracticeQuestion).graphSpec) || ((question as GraphPracticeQuestion).svgDataUrl))
-              && !(question as any).generatorParams?.unitCircle ? (
+              && !(question as any).generatorParams?.unitCircle
+              && ((question as any).topicId !== 'graph_unit_circle' || (question as any).generatorParams?.circularMeasure) ? (
                 <div className="mt-4 flex justify-center">
                   {(question as GraphPracticeQuestion).graphSpec ? (
                     <InteractiveGraph
@@ -2584,33 +3177,39 @@ export default function Practice() {
                 && !(question as GraphPracticeQuestion).katexOptions?.length
                 && (question as GraphPracticeQuestion).inputFields?.length ? (
                 <div className="max-w-sm mx-auto space-y-3">
-                  {(question as GraphPracticeQuestion).inputFields!.map((f) => (
-                    <div key={f.id} className="space-y-1">
-                      <Label className="text-xs text-muted-foreground">{f.label}</Label>
-                      {f.kind === 'text' ? (
-                        <TypingAnswerMathInput
-                          value={answer1}
-                          onChange={setAnswer1}
-                          placeholder=""
-                          disabled={submitted}
-                          className="text-4xl font-normal text-left tk-expr-input"
-                        />
-                      ) : (
-                        <Input
-                          value={answer1}
-                          inputMode="decimal"
-                          onChange={(e) => {
-                            const gp = ((question as GraphPracticeQuestion).generatorParams ?? {}) as any;
-                            const fixed2 = gp.expectedFormat === 'fixed2';
-                            const next = sanitizeNumericInput(e.target.value, { maxDecimals: fixed2 ? 2 : undefined });
-                            setAnswer1(next);
-                          }}
-                          disabled={submitted}
-                          className="h-12 text-2xl font-normal text-center py-1"
-                        />
-                      )}
-                    </div>
-                  ))}
+                  {(question as GraphPracticeQuestion).inputFields!.map((f, idx) => {
+                    const values = [answer1, answer2, answer3];
+                    const setters = [setAnswer1, setAnswer2, setAnswer3] as const;
+                    const value = values[idx] ?? '';
+                    const setValue = setters[idx] ?? setAnswer1;
+                    return (
+                      <div key={f.id} className="space-y-1">
+                        <Label className="text-xs text-muted-foreground">{f.label}</Label>
+                        {f.kind === 'text' ? (
+                          <MathLiveInput
+                            value={value}
+                            onChange={setValue as any}
+                            placeholder=""
+                            disabled={submitted}
+                            className="text-2xl font-normal text-left tk-expr-input"
+                          />
+                        ) : (
+                          <Input
+                            value={value}
+                            inputMode="decimal"
+                            onChange={(e) => {
+                              const gp = ((question as GraphPracticeQuestion).generatorParams ?? {}) as any;
+                              const fixed2 = gp.expectedFormat === 'fixed2';
+                              const next = sanitizeNumericInput(e.target.value, { maxDecimals: fixed2 ? 2 : undefined });
+                              (setValue as any)(next);
+                            }}
+                            disabled={submitted}
+                            className="h-12 text-2xl font-normal text-center py-1"
+                          />
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
               ) : null}
 
@@ -2680,12 +3279,11 @@ export default function Practice() {
                         <div className="flex items-center justify-center gap-2">
                           <div className="text-2xl select-none">(</div>
                           <div className="flex-1">
-                            <TypingAnswerMathInput
+                            <MathLiveInput
                               value={answer1}
                               onChange={setAnswer1}
                               placeholder=""
                               disabled={submitted}
-                              enableScripts
                               className={'text-3xl font-normal text-center'}
                             />
                           </div>
@@ -2697,12 +3295,11 @@ export default function Practice() {
                         <div className="flex items-center justify-center gap-2">
                           <div className="text-2xl select-none">(</div>
                           <div className="flex-1">
-                            <TypingAnswerMathInput
+                            <MathLiveInput
                               value={answer2}
                               onChange={setAnswer2}
                               placeholder=""
                               disabled={submitted}
-                              enableScripts
                               className={'text-3xl font-normal text-center'}
                             />
                           </div>
@@ -2715,12 +3312,11 @@ export default function Practice() {
                           <div className="flex items-center justify-center gap-2">
                             <div className="text-2xl select-none">(</div>
                             <div className="flex-1">
-                              <TypingAnswerMathInput
+                              <MathLiveInput
                                 value={answer3}
                                 onChange={setAnswer3}
                                 placeholder=""
                                 disabled={submitted}
-                                enableScripts
                                 className={'text-3xl font-normal text-center'}
                               />
                             </div>
@@ -2770,13 +3366,23 @@ export default function Practice() {
                       }
 
                       return (
-                        <TypingAnswerMathInput
-                          value={answer1}
-                          onChange={setAnswer1}
-                          disabled={submitted}
-                          enableScripts
-                          className={'text-4xl font-normal text-left tk-expr-input'}
-                        />
+                        <div className="space-y-1">
+                          <MathLiveInput
+                            value={answer1}
+                            onChange={setAnswer1}
+                            disabled={submitted}
+                            className={'text-2xl font-normal text-left tk-expr-input'}
+                          />
+                          {cq.topicId === 'integration' ? (
+                            <div className="text-xs text-muted-foreground">
+                              <span>Format: use fractions as a/b (e.g. </span>
+                              <span className="inline-block align-baseline mx-1">
+                                <Katex latex={String.raw`\frac{a}{b}x^n+\frac{c}{d}x^m+\cdots+C`} displayMode={false} />
+                              </span>
+                              <span>). Keep x outside the fraction. Include + C.</span>
+                            </div>
+                          ) : null}
+                        </div>
                       );
                     })()
                   ) : (
@@ -2868,6 +3474,23 @@ export default function Practice() {
                   )}
                 onClick={() => {
                   const ok = checkSessionAnswer();
+                  if (!ok) {
+                    const qAny = question as any;
+                    const raw = String(answer1 ?? '');
+                    const normalized = typeof qAny?.normalize === 'function'
+                      ? String(qAny.normalize(raw))
+                      : raw.replace(/\s+/g, '').toLowerCase();
+                    console.log('[practice][answer-debug]', {
+                      kind: qAny?.kind,
+                      topicId: qAny?.topicId,
+                      expectedNormalized: qAny?.expectedNormalized,
+                      expectedLatex: qAny?.expectedLatex,
+                      expectedRaw: qAny?.expected,
+                      userAnswerParts: [answer1, answer2, answer3],
+                      userAnswerRaw: raw,
+                      userAnswerNormalized: normalized,
+                    });
+                  }
                   setSubmitted(true);
                   setIsCorrect(ok);
                   void recordSubmitEvent({
@@ -2907,7 +3530,12 @@ export default function Practice() {
                       if (mode === 'mixed') {
                         setMixedCursor((c) => c + 1);
                       }
-                      setQuestion(null);
+                      setSubmitted(false);
+                      setIsCorrect(null);
+                      setAnswer1('');
+                      setAnswer2('');
+                      setAnswer3('');
+                      setSelectedOptionIndex(null);
                       generateNext(nextSeed);
                     }}
                   >
@@ -2918,6 +3546,26 @@ export default function Practice() {
                 <div className="rounded-md border bg-background p-4">
                   {(question as any).kind === 'graph' ? (
                     <div className="space-y-4">
+                      {(question as GraphPracticeQuestion).graphSpec && !(question as any).generatorParams?.unitCircle ? (
+                        <div className="flex justify-center">
+                          <InteractiveGraph
+                            spec={(question as GraphPracticeQuestion).graphSpec!}
+                            altText={(question as GraphPracticeQuestion).svgAltText}
+                            interactive={false}
+                          />
+                        </div>
+                      ) : null}
+
+                      {!!(question as any).generatorParams?.circularMeasure && (question as GraphPracticeQuestion).svgDataUrl ? (
+                        <div className="flex justify-center">
+                          <img
+                            src={(question as GraphPracticeQuestion).svgDataUrl}
+                            alt={(question as GraphPracticeQuestion).svgAltText}
+                            className="max-w-full h-auto"
+                          />
+                        </div>
+                      ) : null}
+
                       {!!(question as any).generatorParams?.unitCircle && (question as GraphPracticeQuestion).graphSpec ? (
                         (question as GraphPracticeQuestion).secondaryGraphSpec ? (
                           <div className="w-full grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -2982,7 +3630,23 @@ export default function Practice() {
                       <div className="pt-2 border-t">
                         <div className="text-base font-semibold text-foreground">Key Idea</div>
                         <div className="tk-wp-expl-text text-lg leading-relaxed text-foreground">
-                          {(question as GraphPracticeQuestion).katexExplanation.summary}
+                          {(() => {
+                            const s = String((question as GraphPracticeQuestion).katexExplanation.summary ?? '');
+                            const hasLatex = /\\frac\{|\^\{|\^\d|_\{|\\int\b|\\cdot\b|\\sqrt\b|\\left\b|\\right\b/.test(s);
+                            if (!hasLatex) return s;
+                            const parts = s.split(
+                              /(\\left\([\s\S]*?\\right\)|\\frac\{[^}]+\}\{[^}]+\}|\\cdot|\\int\b|\\sqrt\b|-?\d*x\^\{\d+\}|x\^\{\d+\}|-?\d*x\^\d+|x\^\d+)/g
+                            );
+                            return (
+                              <span>
+                                {parts.filter((p) => p.length > 0).map((p, i) => {
+                                  const isMath =
+                                    /^(\\left\([\s\S]*?\\right\)|\\frac\{[^}]+\}\{[^}]+\}|\\cdot|\\int\b|\\sqrt\b|-?\d*x\^\{\d+\}|x\^\{\d+\}|-?\d*x\^\d+|x\^\d+)$/.test(p);
+                                  return isMath ? <Katex key={i} latex={p} /> : <span key={i}>{p}</span>;
+                                })}
+                              </span>
+                            );
+                          })()}
                         </div>
                       </div>
 

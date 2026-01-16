@@ -3,6 +3,8 @@
 @import '@radix-ui/colors/red.css';
 @import '@radix-ui/colors/violet.css';
 @import 'katex/dist/katex.min.css';
+@import '../node_modules/mathlive/mathlive-static.css';
+@import '../node_modules/mathlive/mathlive-fonts.css';
 
 /* Ensure KaTeX matches surrounding text sizing without overriding KaTeX's own vertical metrics. */
 .katex,
@@ -120,6 +122,30 @@
   background: linear-gradient(to right, hsl(var(--background)) 0%, hsl(var(--background) / 0) 100%);
 }
 
+ .tk-frac {
+   display: inline-flex;
+   flex-direction: column;
+   align-items: center;
+   justify-content: center;
+   vertical-align: middle;
+   line-height: 1;
+   padding: 0 0.08em;
+ }
+
+ .tk-frac-num,
+ .tk-frac-den {
+   font-size: 0.85em;
+   line-height: 1;
+ }
+
+ .tk-frac-bar {
+   width: 100%;
+   height: 1px;
+   background: currentColor;
+   opacity: 0.9;
+   margin: 0.06em 0;
+ }
+
 .tk-math-scroll::after {
   right: 0;
   background: linear-gradient(to left, hsl(var(--background)) 0%, hsl(var(--background) / 0) 100%);
@@ -166,27 +192,13 @@
 All colors MUST be HSL.
 */
 
-/* Local font faces (place font files in public/fonts) */
-@font-face {
-  font-family: 'Inter';
-  src: url('/fonts/Inter-Variable.woff2') format('woff2-variations');
-  font-weight: 100 900;
-  font-style: normal;
-  font-display: swap;
-}
-@font-face {
-  font-family: 'Inter';
-  src: url('/fonts/Inter-Italic-Variable.woff2') format('woff2-variations');
-  font-weight: 100 900;
-  font-style: italic;
-  font-display: swap;
-}
-@font-face {
-  font-family: 'Roboto Slab';
-  src: url('/Roboto Slab.ttf') format('truetype');
-  font-weight: 100 900;
-  font-style: normal;
-  font-display: swap;
+ /* Local font faces (place font files in public/fonts) */
+ @font-face {
+   font-family: 'Roboto Slab';
+   src: url('/Roboto Slab.ttf') format('truetype');
+   font-weight: 100 900;
+   font-style: normal;
+   font-display: swap;
 }
 
 @font-face {
@@ -364,8 +376,9 @@ All colors MUST be HSL.
     scroll-behavior: smooth;
     height: 100%;
     min-height: 100%;
-    overflow: hidden;
-    overscroll-behavior-y: none;
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior-y: auto;
     margin: 0;
     padding: 0;
   }
@@ -616,6 +629,69 @@ All colors MUST be HSL.
     font-style: italic;
   }
 
+  math-field.tk-expr-input {
+    display: block;
+    width: 100%;
+    min-height: 48px;
+    padding: 8px 12px;
+    border: 1px solid hsl(var(--border));
+    border-radius: calc(var(--radius) - 2px);
+    background: hsl(var(--background));
+    color: hsl(var(--foreground));
+    caret-color: #000;
+    box-sizing: border-box;
+  }
+
+  math-field {
+    caret-color: #000;
+  }
+
+  math-field.tk-expr-input:focus-within {
+    outline: none;
+    box-shadow: 0 0 0 2px hsl(var(--ring));
+  }
+
+  math-field::part(virtual-keyboard-toggle),
+  math-field::part(menu-toggle) {
+    display: none;
+  }
+
+  math-field .ML__virtual-keyboard-toggle,
+  math-field .ML__menu-toggle,
+  math-field .ML__toggle {
+    display: none !important;
+  }
+
+  .ML__tooltip,
+  .ML__popover,
+  .ML__popover-content,
+  .ML__popover__content,
+  .ML__popover__container,
+  .ML__tooltip__content,
+  .ML__autocomplete,
+  .ML__autocomplete__menu,
+  .ML__suggestion,
+  .ML__suggestion-panel,
+  .ML__suggestions,
+  .ML__context-menu,
+  .ML__menu,
+  .ML__menu-content {
+    display: none !important;
+    visibility: hidden !important;
+    pointer-events: none !important;
+  }
+
+  [class^='ML__'][role='tooltip'],
+  [class*=' ML__'][role='tooltip'],
+  [class^='ML__'][role='menu'],
+  [class*=' ML__'][role='menu'],
+  [class^='ML__'][role='dialog'],
+  [class*=' ML__'][role='dialog'] {
+    display: none !important;
+    visibility: hidden !important;
+    pointer-events: none !important;
+  }
+
   *::selection {
     background: transparent;
     color: inherit;
@@ -623,6 +699,24 @@ All colors MUST be HSL.
 
   *::-moz-selection {
     background: transparent;
+    color: inherit;
+  }
+
+  .is-admin input::selection,
+  .is-admin textarea::selection,
+  .is-admin [contenteditable='true']::selection,
+  .is-admin .ProseMirror::selection,
+  .is-admin .ProseMirror *::selection {
+    background: rgba(59, 130, 246, 0.35);
+    color: inherit;
+  }
+
+  .is-admin input::-moz-selection,
+  .is-admin textarea::-moz-selection,
+  .is-admin [contenteditable='true']::-moz-selection,
+  .is-admin .ProseMirror::-moz-selection,
+  .is-admin .ProseMirror *::-moz-selection {
+    background: rgba(59, 130, 246, 0.35);
     color: inherit;
   }
 

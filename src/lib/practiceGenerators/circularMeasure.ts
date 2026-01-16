@@ -92,7 +92,7 @@ function fracToPlain(n: number, d: number): string {
 
 function piMultipleLatex(n: number, d: number): string {
   const s = simplifyFrac(n, d);
-  if (s.d === 1) return s.n === 1 ? String.raw`\pi` : `${s.n}\pi`;
+  if (s.d === 1) return s.n === 1 ? String.raw`\pi` : String.raw`${s.n}\pi`;
   if (s.n === 1) return String.raw`\frac{\pi}{${s.d}}`;
   return String.raw`\frac{${s.n}\pi}{${s.d}}`;
 }
@@ -111,7 +111,7 @@ function simplifyPiFrac(p: PiFraction): PiFraction {
 
 function piFracToLatex(p: PiFraction): string {
   const s = simplifyPiFrac(p);
-  if (s.d === 1) return s.n === 1 ? String.raw`\pi` : `${s.n}\pi`;
+  if (s.d === 1) return s.n === 1 ? String.raw`\pi` : String.raw`${s.n}\pi`;
   if (s.n === 1) return String.raw`\frac{\pi}{${s.d}}`;
   return String.raw`\frac{${s.n}\pi}{${s.d}}`;
 }

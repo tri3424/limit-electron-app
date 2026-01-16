@@ -25,6 +25,13 @@ export function Layout({ children }: LayoutProps) {
   const navigate = useNavigate();
   const { user, logout, isAdmin } = useAuth();
 
+	useEffect(() => {
+		if (typeof document === 'undefined') return;
+		const root = document.documentElement;
+		if (!root) return;
+		root.classList.toggle('is-admin', !!isAdmin);
+	}, [isAdmin]);
+
 	const [omniOpen, setOmniOpen] = useState(false);
 	const [omniQuery, setOmniQuery] = useState('');
 	const [omniLoading, setOmniLoading] = useState(false);
@@ -120,8 +127,8 @@ export function Layout({ children }: LayoutProps) {
   const isModuleRunner = location.pathname.startsWith('/module/');
   const isModuleEditor = location.pathname.includes('/modules/') && (location.pathname.includes('/edit') || location.pathname.includes('/new'));
   
-  return (
-    <div className={cn("flex flex-col h-[100dvh] overflow-hidden", isModuleRunner ? "bg-white" : "bg-background")}>
+  	return (
+		<div className={cn("flex flex-col min-h-[100dvh]", isModuleRunner ? "bg-white" : "bg-background")}>
       <CommandDialog
 			open={omniOpen}
 			onOpenChange={(open) => {
@@ -183,7 +190,7 @@ export function Layout({ children }: LayoutProps) {
 			</CommandList>
 		</CommandDialog>
       {/* Top Navigation */}
-      <header className="sticky top-0 z-40 border-b border-border/70 bg-gradient-to-r from-primary via-accent to-primary text-primary-foreground shadow-sm backdrop-blur supports-[backdrop-filter]:bg-opacity-90">
+      <header className="z-40 border-b border-border/70 bg-gradient-to-r from-primary via-accent to-primary text-primary-foreground shadow-sm backdrop-blur supports-[backdrop-filter]:bg-opacity-90">
         <div className="max-w-7xl mx-auto h-16 md:h-18 px-3 md:px-4 flex items-center justify-between">
           {/* Left: logo / brand */}
           <div className="flex items-center gap-2">
@@ -264,7 +271,7 @@ export function Layout({ children }: LayoutProps) {
       </header>
 
       {/* Page content */}
-      <main className={cn("flex-1 min-h-0 overflow-y-auto overscroll-contain show-scrollbar", isModuleRunner && "bg-white")}> 
+		<main className={cn("flex-1", isModuleRunner && "bg-white")}> 
         <div className={cn(
           "max-w-7xl mx-auto p-4 md:p-6 tk-fade-in",
           isModuleRunner && "bg-white",

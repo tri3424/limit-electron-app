@@ -224,6 +224,6 @@ export function buildCircularMeasureDiagramSvg(input: CircularMeasureDiagramInpu
   ${segmentLabel}
 </svg>`;
 
-  const altText = input.title ?? 'Circular measure diagram showing a circle, two radii, and a central angle.';
+  const altText = input.title ?? 'Circles diagram showing a circle, two radii, and a central angle.';
   return { svg, altText };
 }

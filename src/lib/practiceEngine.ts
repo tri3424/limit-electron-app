@@ -411,51 +411,337 @@ function generateCircularMeasureGraphQuestion(input: {
   avoidKind?: string;
   variantWeights?: Record<string, number>;
 }): GraphPracticeQuestion {
-  const p = generateCircularMeasureProblem({
-    seed: input.seed,
-    difficulty: input.difficulty,
-    avoidKind: input.avoidKind as any,
-    variantWeights: input.variantWeights,
-  });
-  const svgDataUrl = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(p.svg)}`;
-  const expectsNumber = typeof p.answerValue === 'number' && Number.isFinite(p.answerValue);
+  type CircularMeasureKind = import('@/lib/practiceGenerators/circularMeasure').CircularMeasureProblemKind;
+  type CirclesVariantId = CircularMeasureKind | 'diameter_endpoints_equation' | 'diameter_endpoints_center';
+  const rng = mulberry32((input.seed ^ 0x1f123bb5) >>> 0);
 
-  const expectedFormat = expectsNumber
-    ? (/^-?\d+\.\d{2}$/.test(String(p.answerLatex)) ? 'fixed2' : 'number')
-    : 'latex';
-  const expectedValue = expectsNumber && expectedFormat === 'fixed2' ? Number((p.answerValue as number).toFixed(2)) : p.answerValue;
+  const pickVariant = (): CirclesVariantId => {
+    const circularMeasureKinds: CircularMeasureKind[] = [
+      'arc_length_forward',
+      'arc_length_inverse_radius',
+      'arc_length_inverse_theta',
+      'sector_area_forward',
+      'sector_area_inverse_radius',
+      'sector_area_inverse_theta',
+      'sector_perimeter_forward',
+      'chord_length_forward',
+      'midpoint_shaded_area_forward',
+      'midpoint_shaded_area_inverse_radius',
+      'segment_area_forward',
+      'segment_area_inverse_radius',
+      'segment_area_inverse_theta',
+    ];
 
-  // Circular-measure questions should render as KaTeX-only prompts.
-  // We intentionally omit the separate plain-text prompt so the UI shows
-  // only promptKatex for this topic.
-  const promptText = '';
-  const promptKatex = expectedFormat === 'fixed2'
-    ? String.raw`${p.promptKatex}
+    const candidates: CirclesVariantId[] = input.difficulty === 'easy'
+      ? circularMeasureKinds
+      : [...circularMeasureKinds, 'diameter_endpoints_equation', 'diameter_endpoints_center'];
+    const pool = input.avoidKind ? candidates.filter((v) => v !== (input.avoidKind as any)) : candidates;
+    const list = pool.length ? pool : candidates;
+    const w = input.variantWeights ?? {};
+    const defaults: Partial<Record<CirclesVariantId, number>> = input.difficulty === 'easy'
+      ? {
+          arc_length_forward: 10,
+          arc_length_inverse_radius: 8,
+          arc_length_inverse_theta: 6,
+          sector_area_forward: 10,
+          sector_area_inverse_radius: 8,
+          sector_area_inverse_theta: 6,
+          sector_perimeter_forward: 7,
+          chord_length_forward: 7,
+          midpoint_shaded_area_forward: 6,
+          midpoint_shaded_area_inverse_radius: 4,
+          segment_area_forward: 6,
+          segment_area_inverse_radius: 5,
+          segment_area_inverse_theta: 4,
+        }
+      : {
+          arc_length_forward: 10,
+          arc_length_inverse_radius: 8,
+          arc_length_inverse_theta: 6,
+          sector_area_forward: 10,
+          sector_area_inverse_radius: 8,
+          sector_area_inverse_theta: 6,
+          sector_perimeter_forward: 7,
+          chord_length_forward: 7,
+          midpoint_shaded_area_forward: 6,
+          midpoint_shaded_area_inverse_radius: 4,
+          segment_area_forward: 6,
+          segment_area_inverse_radius: 5,
+          segment_area_inverse_theta: 4,
+          diameter_endpoints_equation: 8,
+          diameter_endpoints_center: 5,
+        };
+    const weights = list.map((k) => {
+      const raw = typeof w[k] === 'number' ? Number(w[k]) : (defaults as any)[k];
+      return Math.max(0, raw);
+    });
+    const total = weights.reduce((a, b) => a + b, 0);
+    if (!(total > 0)) return list[rng.int(0, list.length - 1)]!;
+    let r = rng.next() * total;
+    for (let i = 0; i < list.length; i++) {
+      r -= weights[i] ?? 0;
+      if (r <= 0) return list[i]!;
+    }
+    return list[list.length - 1]!;
+  };
+
+  const variantId = pickVariant();
+
+  if (variantId !== 'diameter_endpoints_equation' && variantId !== 'diameter_endpoints_center') {
+    const p = generateCircularMeasureProblem({
+      seed: input.seed,
+      difficulty: input.difficulty,
+      avoidKind: input.avoidKind as any,
+      variantWeights: { ...(input.variantWeights ?? {}), [variantId]: 1 },
+    });
+    const svgDataUrl = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(p.svg)}`;
+    const expectsNumber = typeof p.answerValue === 'number' && Number.isFinite(p.answerValue);
+
+    const expectedFormat = expectsNumber
+      ? (/^-?\d+\.\d{2}$/.test(String(p.answerLatex)) ? 'fixed2' : 'number')
+      : 'latex';
+    const expectedValue = expectsNumber && expectedFormat === 'fixed2' ? Number((p.answerValue as number).toFixed(2)) : p.answerValue;
+
+    // Circular-measure questions should render as KaTeX-only prompts.
+    // We intentionally omit the separate plain-text prompt so the UI shows
+    // only promptKatex for this topic.
+    const promptText = '';
+    const promptKatex = expectedFormat === 'fixed2'
+      ? String.raw`${p.promptKatex}
 \;\text{(Give your answer to 2 decimal places.)}`
-    : p.promptKatex;
+      : p.promptKatex;
 
+    return {
+      kind: 'graph',
+      id: p.id,
+      topicId: input.topicId,
+      difficulty: input.difficulty,
+      seed: input.seed,
+      generatorParams: {
+        circularMeasure: true,
+        expectedLatex: p.answerLatex,
+        expectedValue,
+        expectedFormat,
+        kind: p.kind,
+      },
+      promptText,
+      promptKatex,
+      katexQuestion: '',
+      inputFields: [{ id: 'ans', label: 'Answer', kind: expectsNumber ? 'number' : 'text' }],
+      svgDataUrl,
+      svgAltText: p.svgAltText,
+      katexExplanation: {
+        steps: p.steps,
+        summary: 'Use the correct circular-measure formula and rearrange if needed.',
+      },
+    };
+  }
+
+  const nonZeroInt = (min: number, max: number) => {
+    let v = 0;
+    while (v === 0) v = rng.int(min, max);
+    return v;
+  };
+
+  const coordRange = input.difficulty === 'medium' ? 9 : 13;
+  const Ax = nonZeroInt(-coordRange, coordRange);
+  const Ay = nonZeroInt(-coordRange, coordRange);
+  let Bx = nonZeroInt(-coordRange, coordRange);
+  let By = nonZeroInt(-coordRange, coordRange);
+  // Ensure A != B.
+  if (Ax === Bx && Ay === By) {
+    Bx = Ax + (Ax === coordRange ? -1 : 1);
+  }
+
+  const cxFrac = normalizeFraction({ n: Ax + Bx, d: 2 });
+  const cyFrac = normalizeFraction({ n: Ay + By, d: 2 });
+  const dx = Ax - Bx;
+  const dy = Ay - By;
+  const r2Frac = normalizeFraction({ n: dx * dx + dy * dy, d: 4 });
+
+  const fracLatex = (f: Fraction) => fractionToLatex(f);
+
+  const shiftLatex = (variable: 'x' | 'y', c: Fraction) => {
+    if (c.n === 0) return variable;
+    const sign = c.n < 0 ? '+' : '-';
+    const abs = normalizeFraction({ n: Math.abs(c.n), d: c.d });
+    return `${variable} ${sign} ${fracLatex(abs)}`;
+  };
+
+  const circleEquationLatex = String.raw`\left(${shiftLatex('x', cxFrac)}\right)^2 + \left(${shiftLatex('y', cyFrac)}\right)^2 = ${fracLatex(r2Frac)}`;
+
+  const centerX = cxFrac.n / cxFrac.d;
+  const centerY = cyFrac.n / cyFrac.d;
+  const r2 = r2Frac.n / r2Frac.d;
+  const r = Math.sqrt(r2);
+
+  const buildCircleGraphSpec = (opts: { showCenter: boolean }): PracticeGraphSpec => {
+    const steps = 140;
+    const pts = Array.from({ length: steps + 1 }, (_, i) => {
+      const t = (i / steps) * 2 * Math.PI;
+      return { x: centerX + r * Math.cos(t), y: centerY + r * Math.sin(t) };
+    });
+
+    const pad = Math.max(2, Math.ceil(r * 0.35));
+    const xMin = Math.floor(centerX - r - pad);
+    const xMax = Math.ceil(centerX + r + pad);
+    const yMin = Math.floor(centerY - r - pad);
+    const yMax = Math.ceil(centerY + r + pad);
+
+    const plot: PracticeGraphSpec['plot'] = [
+      { kind: 'polyline', points: pts, stroke: '#111827', strokeWidth: 2 },
+      { kind: 'point', at: { x: Ax, y: Ay }, r: 4, fill: '#2563eb' },
+      { kind: 'label', at: { x: Ax + 0.35, y: Ay + 0.35 }, text: `A(${Ax},${Ay})`, fill: '#2563eb', fontSize: 12, anchor: 'start' },
+      { kind: 'point', at: { x: Bx, y: By }, r: 4, fill: '#2563eb' },
+      { kind: 'label', at: { x: Bx + 0.35, y: By + 0.35 }, text: `B(${Bx},${By})`, fill: '#2563eb', fontSize: 12, anchor: 'start' },
+    ];
+
+    if (opts.showCenter) {
+      plot.push({ kind: 'point', at: { x: centerX, y: centerY }, r: 4, fill: '#dc2626' });
+      plot.push({ kind: 'label', at: { x: centerX + 0.35, y: centerY + 0.35 }, text: `C(${Number(centerX.toFixed(3))},${Number(centerY.toFixed(3))})`, fill: '#dc2626', fontSize: 12, anchor: 'start' });
+    }
+
+    return {
+      width: 520,
+      height: 360,
+      window: { xMin, xMax, yMin, yMax },
+      equalAspect: true,
+      axisLabelX: 'x',
+      axisLabelY: 'y',
+      plot,
+    };
+  };
+
+  if (variantId === 'diameter_endpoints_equation') {
+    const promptText = `Circle from diameter endpoints  The point A(${Ax}, ${Ay}) and the point B(${Bx}, ${By}) are endpoints of a diameter. Find the equation of the circle.`;
+
+    const wrongCenterX = normalizeFraction({ n: Ax - Bx, d: 2 });
+    const wrongCenterY = normalizeFraction({ n: Ay - By, d: 2 });
+    const wrongR2A = normalizeFraction({ n: dx * dx + dy * dy, d: 2 });
+    const wrongR2B = normalizeFraction({ n: dx * dx + dy * dy, d: 8 });
+
+    const wrongEqCenter = String.raw`\left(${shiftLatex('x', wrongCenterX)}\right)^2 + \left(${shiftLatex('y', wrongCenterY)}\right)^2 = ${fracLatex(r2Frac)}`;
+    const wrongEqR2A = String.raw`\left(${shiftLatex('x', cxFrac)}\right)^2 + \left(${shiftLatex('y', cyFrac)}\right)^2 = ${fracLatex(wrongR2A)}`;
+    const wrongEqR2B = String.raw`\left(${shiftLatex('x', cxFrac)}\right)^2 + \left(${shiftLatex('y', cyFrac)}\right)^2 = ${fracLatex(wrongR2B)}`;
+
+    // MCQ options (shuffle deterministically)
+    const options0 = [circleEquationLatex, wrongEqCenter, wrongEqR2A, wrongEqR2B];
+    const order = [0, 1, 2, 3];
+    for (let i = order.length - 1; i > 0; i--) {
+      const j = rng.int(0, i);
+      const tmp = order[i];
+      order[i] = order[j];
+      order[j] = tmp;
+    }
+    const katexOptions = order.map((idx) => options0[idx]!).slice(0, 4);
+    const correctIndex = katexOptions.indexOf(circleEquationLatex);
+    return {
+      kind: 'graph',
+      id: stableId('circles', input.seed, `diameter-eq-${Ax}-${Ay}-${Bx}-${By}`),
+      topicId: input.topicId,
+      difficulty: input.difficulty,
+      seed: input.seed,
+      generatorParams: {
+        kind: variantId,
+        expectedLatex: circleEquationLatex,
+        circle: { Ax, Ay, Bx, By, centerX, centerY, r2 },
+      },
+      promptText,
+      promptKatex: undefined,
+      katexQuestion: '',
+      katexOptions,
+      correctIndex,
+      inputFields: undefined,
+      graphSpec: buildCircleGraphSpec({ showCenter: false }),
+      svgDataUrl: '',
+      svgAltText: 'Circle with diameter endpoints A and B.',
+      katexExplanation: {
+        steps: [
+          {
+            katex: String.raw`A(${Ax},${Ay}),\;B(${Bx},${By})`,
+            text: 'Because AB is a diameter, the center of the circle is the midpoint of the segment AB.',
+          },
+          {
+            katex: String.raw`\text{Center }C\left(\frac{x_A+x_B}{2},\frac{y_A+y_B}{2}\right)`,
+            text: 'Use the midpoint formula for the center coordinates.',
+          },
+          {
+            katex: String.raw`C\left(\frac{${Ax}+${Bx}}{2},\frac{${Ay}+${By}}{2}\right)=\left(${fracLatex(cxFrac)},\;${fracLatex(cyFrac)}\right)`,
+            text: 'Substitute the coordinates of A and B to get the center exactly (sometimes a half-integer).',
+          },
+          {
+            katex: String.raw`r^2 = \left(\frac{AB}{2}\right)^2`,
+            text: 'The radius is half of the diameter, so we can compute r² using the distance AB.',
+          },
+          {
+            katex: String.raw`AB^2 = (${Ax}-${Bx})^2 + (${Ay}-${By})^2 = ${dx * dx + dy * dy}`,
+            text: 'First compute AB² to avoid square roots.',
+          },
+          {
+            katex: String.raw`r^2 = \frac{AB^2}{4} = \frac{${dx * dx + dy * dy}}{4} = ${fracLatex(r2Frac)}`,
+            text: 'Divide by 4 because r = AB/2.',
+          },
+          {
+            katex: String.raw`(x-h)^2+(y-k)^2=r^2`,
+            text: 'Use the standard form of a circle with center (h,k).',
+          },
+          {
+            katex: circleEquationLatex,
+            text: 'Substitute h, k and r² to get the required equation.',
+          },
+        ],
+        summary: 'If AB is a diameter, the center is the midpoint of A and B, and r² is one-quarter of AB². Then use (x−h)²+(y−k)²=r².',
+      },
+    };
+  }
+
+  // diameter_endpoints_center
+  const promptText = `Center from diameter endpoints  The point A(${Ax}, ${Ay}) and the point B(${Bx}, ${By}) are endpoints of a diameter. Find the x and y coordinates of the center.`;
   return {
     kind: 'graph',
-    id: p.id,
+    id: stableId('circles', input.seed, `diameter-center-${Ax}-${Ay}-${Bx}-${By}`),
     topicId: input.topicId,
     difficulty: input.difficulty,
     seed: input.seed,
     generatorParams: {
-      circularMeasure: true,
-      expectedLatex: p.answerLatex,
-      expectedValue,
-      expectedFormat,
-      kind: p.kind,
+      kind: variantId,
+      expectedParts: [centerX, centerY],
+      circle: { Ax, Ay, Bx, By, centerX, centerY, r2 },
     },
     promptText,
-    promptKatex,
+    promptKatex: undefined,
     katexQuestion: '',
-    inputFields: [{ id: 'ans', label: 'Answer', kind: expectsNumber ? 'number' : 'text' }],
-    svgDataUrl,
-    svgAltText: p.svgAltText,
+    inputFields: [
+      { id: 'x', label: 'Center x-coordinate', kind: 'number' },
+      { id: 'y', label: 'Center y-coordinate', kind: 'number' },
+    ],
+    graphSpec: buildCircleGraphSpec({ showCenter: true }),
+    svgDataUrl: '',
+    svgAltText: 'Circle with diameter endpoints A and B, and the center marked.',
     katexExplanation: {
-      steps: p.steps,
-      summary: 'Use the correct circular-measure formula and rearrange if needed.',
+      steps: [
+        {
+          katex: String.raw`A(${Ax},${Ay}),\;B(${Bx},${By})`,
+          text: 'The center of a circle is the midpoint of any diameter. Since AB is a diameter, the center is the midpoint of segment AB.',
+        },
+        {
+          katex: String.raw`\text{Midpoint formula: }\left(\frac{x_A+x_B}{2},\frac{y_A+y_B}{2}\right)`,
+          text: 'Average the x-coordinates to get the center x-coordinate, and average the y-coordinates to get the center y-coordinate.',
+        },
+        {
+          katex: String.raw`x_C = \frac{${Ax}+${Bx}}{2} = ${fracLatex(cxFrac)}`,
+          text: 'Compute the x-coordinate of the center.',
+        },
+        {
+          katex: String.raw`y_C = \frac{${Ay}+${By}}{2} = ${fracLatex(cyFrac)}`,
+          text: 'Compute the y-coordinate of the center.',
+        },
+        {
+          katex: String.raw`\text{Center }C\left(${fracLatex(cxFrac)},\;${fracLatex(cyFrac)}\right)`,
+          text: 'So the center is the midpoint shown as the red point on the graph.',
+        },
+      ],
+      summary: String.raw`For a diameter AB, the center is the midpoint: \left(\frac{x_A+x_B}{2},\frac{y_A+y_B}{2}\right). Enter x first, then y.`,
     },
   };
 }

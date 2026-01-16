@@ -2,8 +2,37 @@ export type NormalizeOcrTextOptions = {
   preserveSingleNewlines?: boolean;
 };
 
+function fixCommonJoinedWords(s: string): string {
+  let out = s;
+  out = out.replace(/\b(It)(is|was|were|are|has|have|had)\b/g, '$1 $2');
+  out = out.replace(/\b(There)(is|are|was|were)\b/g, '$1 $2');
+  out = out.replace(/\b(there)(is|are|was|were)\b/g, '$1 $2');
+  out = out.replace(/\b(Thatis)\b/g, 'That is');
+  out = out.replace(/\b(thatis)\b/g, 'that is');
+  out = out.replace(/\b(whatis)\b/g, 'what is');
+  out = out.replace(/\b(What)(is)\b/g, '$1 $2');
+  return out;
+}
+
+function stripOcrUnderscoreArtifacts(s: string): string {
+  let out = s;
+  out = out.replace(/(^|\s)_+(?=\S)/g, '$1');
+  out = out.replace(/_+(\s|$)/g, '$1');
+  out = out.replace(/\s_{2,}\s/g, ' ');
+  return out;
+}
+
+export function normalizeOcrLineArtifacts(line: string): string {
+  const cleaned = String(line || '').replace(/\u00A0/g, ' ');
+  const noUnderscores = stripOcrUnderscoreArtifacts(cleaned);
+  return fixCommonJoinedWords(noUnderscores);
+}
+
 function normalizeSpaces(s: string): string {
-  return s.replace(/\u00A0/g, ' ').replace(/\s+/g, ' ').trim();
+  const cleaned = s.replace(/\u00A0/g, ' ');
+  const noUnderscores = stripOcrUnderscoreArtifacts(cleaned);
+  const spaced = noUnderscores.replace(/\s+/g, ' ').trim();
+  return fixCommonJoinedWords(spaced);
 }
 
 function shouldJoinNoSpace(prev: string): boolean {

@@ -334,6 +334,138 @@ export function renderTypingAnswerMathToHtml(raw: string, opts?: { enableScripts
   let out = '';
 
   const enableScripts = opts?.enableScripts !== false;
+  const disableFractions = (opts as any)?.disableFractions === true;
+
+  const tryReadSimpleFraction = (s: string, start: number): { raw: string; num: string; den: string; end: number } | null => {
+    const m = s.slice(start).match(/^(-?\d+)\/(\d+)/);
+    if (!m) return null;
+    return { raw: m[0], num: m[1], den: m[2], end: start + m[0].length };
+  };
+
+  const isTokenChar = (ch: string) => /[A-Za-z0-9_\^{}]/.test(ch);
+
+  const findBalancedParens = (s: string, start: number): { end: number; content: string } | null => {
+    if (s[start] !== '(') return null;
+    let depth = 0;
+    for (let idx = start; idx < s.length; idx++) {
+      const ch = s[idx];
+      if (ch === '(') depth++;
+      if (ch === ')') depth--;
+      if (depth === 0) {
+        return { end: idx, content: s.slice(start + 1, idx) };
+      }
+    }
+    return null;
+  };
+
+  const tryReadGeneralFraction = (
+    s: string,
+    start: number
+  ): { raw: string; numRaw: string; denRaw: string; end: number } | null => {
+    // Support common student inputs:
+    // - (x^2+1)/7
+    // - x/(x+1)
+    // - (2x-3)/(x+1)
+    // Heuristic: numerator is either a balanced (...) group, or a contiguous token with no spaces.
+    // Denominator is either a balanced (...) group, a number, or a contiguous token with no spaces.
+    if (start >= s.length) return null;
+    if (s[start] === ' ' || s[start] === '\n' || s[start] === '\t') return null;
+
+    let j = start;
+    // allow leading sign for token numerators
+    if (s[j] === '+' || s[j] === '-') j++;
+    if (j >= s.length) return null;
+
+    const parseToken = (from: number): { raw: string; end: number } | null => {
+      let k = from;
+      let saw = false;
+      for (; k < s.length; k++) {
+        const ch = s[k];
+        if (ch === '/') break;
+        if (ch === ' ' || ch === '\n' || ch === '\t') break;
+        if (!isTokenChar(ch)) break;
+        saw = true;
+      }
+      if (!saw) return null;
+      return { raw: s.slice(from, k), end: k };
+    };
+
+    const parseNumerator = (): { raw: string; end: number } | null => {
+      if (s[j] === '(') {
+        const b = findBalancedParens(s, j);
+        if (!b) return null;
+        return { raw: s.slice(start, b.end + 1), end: b.end + 1 };
+      }
+      const tok = parseToken(start);
+      if (!tok) return null;
+      return { raw: tok.raw, end: tok.end };
+    };
+
+    const num = parseNumerator();
+    if (!num) return null;
+    if (num.end >= s.length || s[num.end] !== '/') return null;
+
+    const denStart = num.end + 1;
+    if (denStart >= s.length) return null;
+    if (s[denStart] === ' ' || s[denStart] === '\n' || s[denStart] === '\t') return null;
+
+    const parseDenominator = (): { raw: string; end: number } | null => {
+      if (s[denStart] === '(') {
+        const b = findBalancedParens(s, denStart);
+        if (!b) return null;
+        return { raw: s.slice(denStart, b.end + 1), end: b.end + 1 };
+      }
+
+      // number denominator
+      let k = denStart;
+      while (k < s.length && /\d/.test(s[k]!)) k++;
+      if (k > denStart) return { raw: s.slice(denStart, k), end: k };
+
+      // token denominator (e.g., x or x^2)
+      const tok = parseToken(denStart);
+      if (!tok) return null;
+      return { raw: tok.raw, end: tok.end };
+    };
+
+    const den = parseDenominator();
+    if (!den) return null;
+
+    const rawAll = s.slice(start, den.end);
+    return { raw: rawAll, numRaw: num.raw, denRaw: den.raw, end: den.end };
+  };
+
+  const tryReadAlgebraicFraction = (
+    s: string,
+    start: number
+  ): { raw: string; numRaw: string; den: string; end: number } | null => {
+    // Support common student inputs like x/7, x^7/7, 3x/7, -x^2/5.
+    // Heuristic: numerator must be a contiguous "token" (no spaces), slash, then numeric denominator.
+    let j = start;
+    if (s[j] === '+' || s[j] === '-') j++;
+
+    let sawToken = false;
+    for (; j < s.length; j++) {
+      const ch = s[j];
+      if (ch === '/') break;
+      if (ch === ' ' || ch === '\n' || ch === '\t') return null;
+      if (!isTokenChar(ch)) return null;
+      sawToken = true;
+    }
+
+    if (!sawToken) return null;
+    if (j >= s.length || s[j] !== '/') return null;
+
+    const denStart = j + 1;
+    if (denStart >= s.length) return null;
+    let k = denStart;
+    while (k < s.length && /\d/.test(s[k]!)) k++;
+    if (k === denStart) return null;
+
+    const numRaw = s.slice(start, j);
+    const den = s.slice(denStart, k);
+    const rawAll = s.slice(start, k);
+    return { raw: rawAll, numRaw, den, end: k };
+  };
 
   const pushText = (text: string) => {
     if (!text) return;
@@ -341,6 +473,47 @@ export function renderTypingAnswerMathToHtml(raw: string, opts?: { enableScripts
   };
 
   while (i < raw.length) {
+    if (!disableFractions) {
+      // Render numeric fractions like 4/7.
+      const frac = tryReadSimpleFraction(raw, i);
+      if (frac) {
+        out += `<span class="tk-frac" data-raw="${escapeHtml(frac.raw)}">`;
+        out += `<span class="tk-frac-num">${escapeHtml(frac.num)}</span>`;
+        out += `<span class="tk-frac-bar"></span>`;
+        out += `<span class="tk-frac-den">${escapeHtml(frac.den)}</span>`;
+        out += `</span>`;
+        i = frac.end;
+        continue;
+      }
+
+      // Render parenthesized / general fractions like (x^2+1)/7 or (2x-3)/(x+1).
+      const gf = tryReadGeneralFraction(raw, i);
+      if (gf) {
+        const numHtml = renderTypingAnswerMathToHtml(gf.numRaw, { enableScripts, disableFractions: true } as any);
+        const denHtml = renderTypingAnswerMathToHtml(gf.denRaw, { enableScripts, disableFractions: true } as any);
+        out += `<span class="tk-frac" data-raw="${escapeHtml(gf.raw)}">`;
+        out += `<span class="tk-frac-num">${numHtml || '\u200b'}</span>`;
+        out += `<span class="tk-frac-bar"></span>`;
+        out += `<span class="tk-frac-den">${denHtml || '\u200b'}</span>`;
+        out += `</span>`;
+        i = gf.end;
+        continue;
+      }
+
+      // Render simple algebraic fractions like x^7/7, x/7, 3x/7.
+      const af = tryReadAlgebraicFraction(raw, i);
+      if (af) {
+        const numHtml = renderTypingAnswerMathToHtml(af.numRaw, { enableScripts, disableFractions: true } as any);
+        out += `<span class="tk-frac" data-raw="${escapeHtml(af.raw)}">`;
+        out += `<span class="tk-frac-num">${numHtml || '\u200b'}</span>`;
+        out += `<span class="tk-frac-bar"></span>`;
+        out += `<span class="tk-frac-den">${escapeHtml(af.den)}</span>`;
+        out += `</span>`;
+        i = af.end;
+        continue;
+      }
+    }
+
     // superscript/subscript
     if (enableScripts && (raw[i] === '^' || raw[i] === '_')) {
       const kind = raw[i] === '^' ? 'sup' : 'sub';
@@ -385,6 +558,7 @@ export default function TypingAnswerMathInput({ value, onChange, placeholder, cl
   const ref = useRef<HTMLDivElement>(null);
   const [caretMode, setCaretMode] = useState<'normal' | 'sup' | 'sub'>('normal');
   const [isFocused, setIsFocused] = useState(false);
+  const pendingArrowSpaceRef = useRef(false);
 
   const scriptsEnabled = enableScripts !== false;
 
@@ -548,14 +722,51 @@ export default function TypingAnswerMathInput({ value, onChange, placeholder, cl
         if (disabled) return;
         if (!ref.current) return;
 
+        const isRightKey = e.key === 'ArrowRight' || e.key === 'Right';
+        const isLeftKey = e.key === 'ArrowLeft' || e.key === 'Left';
+
+        // If the user just exited a script (sup/sub) via ArrowRight, allow a second ArrowRight
+        // to insert a normal word-space after the token (so they don't need to press Space).
+        if (scriptsEnabled && isRightKey && pendingArrowSpaceRef.current) {
+          const sel = window.getSelection();
+          const range = sel && sel.rangeCount > 0 ? sel.getRangeAt(0) : null;
+          if (range && range.collapsed) {
+            const container = range.startContainer;
+            const elementContainer = container.nodeType === Node.ELEMENT_NODE ? (container as Element) : container.parentElement;
+            const token = (elementContainer?.closest('.tk-script') || elementContainer?.previousSibling) as HTMLElement | null;
+            const prev = token && token.nodeType === Node.ELEMENT_NODE ? (token as HTMLElement) : null;
+            const prevIsScript = !!prev?.classList?.contains('tk-script');
+            if (prevIsScript) {
+              e.preventDefault();
+              pendingArrowSpaceRef.current = false;
+
+              try {
+                document.execCommand('insertText', false, ' ');
+              } catch {
+                // ignore
+              }
+
+              const caret = getCaretOffsetIn(ref.current);
+              const nextRaw = extractRawFromRoot(ref.current);
+              onChange(nextRaw);
+              ref.current.innerHTML = renderTypingAnswerMathToHtml(nextRaw, { enableScripts: scriptsEnabled });
+              setCaretOffsetIn(ref.current, Math.min(caret, nextRaw.length));
+              return;
+            }
+          }
+          pendingArrowSpaceRef.current = false;
+        }
+
         if (scriptsEnabled && (e.key === '^' || e.key === '_')) {
           e.preventDefault();
           const snippet = e.key === '^' ? '^{}' : '_{}';
           insertRawAtCaret(snippet, 1);
+          pendingArrowSpaceRef.current = false;
           return;
         }
 
         if (e.key === 'Backspace' || e.key === 'Delete') {
+          pendingArrowSpaceRef.current = false;
           const sel = window.getSelection();
           const range = sel && sel.rangeCount > 0 ? sel.getRangeAt(0) : null;
           if (range && range.collapsed) {
@@ -613,6 +824,7 @@ export default function TypingAnswerMathInput({ value, onChange, placeholder, cl
           const isExitKey = e.key === ' ' || e.key === 'Spacebar' || e.key === 'Tab' || e.key === 'Escape';
           if (insideScript && isExitKey) {
             e.preventDefault();
+            pendingArrowSpaceRef.current = false;
             const wrapper = insideScript.closest('.tk-script') as HTMLElement | null;
             const next = document.createRange();
             if (e.shiftKey && e.key === 'Tab') {
@@ -643,7 +855,9 @@ export default function TypingAnswerMathInput({ value, onChange, placeholder, cl
           // Use DOM offsets rather than Range comparisons (which can be unreliable with zero-width placeholders).
           const isArrowRight = e.key === 'ArrowRight';
           const isArrowLeft = e.key === 'ArrowLeft';
-          if (insideScript && (isArrowRight || isArrowLeft)) {
+          const right = isRightKey;
+          const left = isLeftKey;
+          if (insideScript && (right || left)) {
             const wrapper = insideScript.closest('.tk-script') as HTMLElement | null;
             const payloadTextNode =
               insideScript.firstChild && insideScript.firstChild.nodeType === Node.TEXT_NODE
@@ -664,10 +878,12 @@ export default function TypingAnswerMathInput({ value, onChange, placeholder, cl
               return false;
             })();
 
-            if ((isArrowLeft && atStart) || (isArrowRight && atEnd)) {
+            if ((left && atStart) || (right && atEnd)) {
               e.preventDefault();
+              // If the user exits to the right, allow a second ArrowRight to insert a space.
+              pendingArrowSpaceRef.current = right;
               const next = document.createRange();
-              if (isArrowLeft) {
+              if (left) {
                 next.setStartBefore(wrapper || insideScript);
               } else {
                 next.setStartAfter(wrapper || insideScript);
@@ -679,6 +895,9 @@ export default function TypingAnswerMathInput({ value, onChange, placeholder, cl
             }
           }
         }
+
+        // Any other key cancels the pending-arrow-space behavior.
+        pendingArrowSpaceRef.current = false;
       }}
     />
   );

@@ -78,6 +78,34 @@ export default function SettingsPracticeAdminFrequency() {
           };
         }
 
+        if (t.id === 'graph_unit_circle') {
+          return {
+            ...base,
+            variants: [
+              { key: 'arc_length_forward', label: 'Arc length (forward)', defaultValue: 10 },
+              { key: 'arc_length_inverse_radius', label: 'Arc length (find radius/diameter)', defaultValue: 8 },
+              { key: 'arc_length_inverse_theta', label: 'Arc length (find θ)', defaultValue: 6 },
+
+              { key: 'sector_area_forward', label: 'Sector area (forward)', defaultValue: 10 },
+              { key: 'sector_area_inverse_radius', label: 'Sector area (find radius/diameter)', defaultValue: 8 },
+              { key: 'sector_area_inverse_theta', label: 'Sector area (find θ)', defaultValue: 6 },
+
+              { key: 'sector_perimeter_forward', label: 'Sector perimeter', defaultValue: 7 },
+              { key: 'chord_length_forward', label: 'Chord length', defaultValue: 7 },
+
+              { key: 'segment_area_forward', label: 'Segment area (forward)', defaultValue: 6 },
+              { key: 'segment_area_inverse_radius', label: 'Segment area (find radius/diameter)', defaultValue: 5 },
+              { key: 'segment_area_inverse_theta', label: 'Segment area (find θ)', defaultValue: 4 },
+
+              { key: 'midpoint_shaded_area_forward', label: 'Midpoint shaded area (forward)', defaultValue: 6 },
+              { key: 'midpoint_shaded_area_inverse_radius', label: 'Midpoint shaded area (find radius/diameter)', defaultValue: 4 },
+
+              { key: 'diameter_endpoints_equation', label: 'Diameter endpoints -> equation of circle', defaultValue: 8 },
+              { key: 'diameter_endpoints_center', label: 'Diameter endpoints -> center coordinates', defaultValue: 5 },
+            ],
+          };
+        }
+
         if (t.id === 'fractions') {
           return {
             ...base,

@@ -105,7 +105,7 @@ export const PRACTICE_TOPICS: PracticeTopic[] = [
   },
   {
     id: 'graph_unit_circle',
-    title: 'Circular Measure',
+    title: 'Circles',
     description: 'Arc length, sector area, and segment area.',
     enabled: true,
     difficulties: ['easy', 'medium', 'hard'],

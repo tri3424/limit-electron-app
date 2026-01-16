@@ -25,6 +25,19 @@ declare global {
 			exportJsonToFile: (payload: { defaultFileName: string; dataText: string }) => Promise<{ canceled: boolean; filePath?: string }>;
 		};
 	}
+
+	namespace JSX {
+		interface IntrinsicElements {
+			'math-field': import('react').DetailedHTMLProps<import('react').HTMLAttributes<HTMLElement>, HTMLElement> & {
+				value?: string;
+				placeholder?: string;
+				readOnly?: boolean;
+				'virtual-keyboard-mode'?: string;
+				'smart-fence'?: string | boolean;
+				'math-mode-space'?: string;
+			};
+		}
+	}
 }
 
 export {};

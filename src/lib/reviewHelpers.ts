@@ -171,10 +171,40 @@ function evaluateScore(q: any, answer: any): { isCorrect: boolean; scorePercent:
     if (!q.correctAnswers || q.correctAnswers.length === 0) {
       return { isCorrect: false, scorePercent: 0, correctParts: 0, totalParts: 1 };
     }
-    const userAnswer = (answer || '').toString().trim().toLowerCase();
-    const isCorrect = q.correctAnswers.some((correct: string) => 
-      correct.toString().trim().toLowerCase() === userAnswer
-    );
+    const normalizeMathTextAnswer = (raw: unknown) => {
+      return String(raw ?? '')
+        .trim()
+        .toLowerCase()
+        .replace(/[−–]/g, '-')
+        .replace(/\u200b/g, '')
+        .replace(/\\dfrac/g, '\\frac')
+        .replace(/\\tfrac/g, '\\frac')
+        .replace(/\\left/g, '')
+        .replace(/\\right/g, '')
+        .replace(/\\[ ,;!:]/g, '')
+        .replace(/\\cdot/g, '')
+        .replace(/\*/g, '')
+        .replace(/\s+/g, '')
+        .replace(/\{x\}/g, 'x')
+        .replace(/\^\{([^}]+)\}/g, '^$1')
+        .replace(/_\{([^}]+)\}/g, '_$1')
+        .replace(/-\\frac(\d{1,3})(\d{1,3})/g, '-$1/$2')
+        .replace(/\\frac(\d{1,3})(\d{1,3})/g, '$1/$2')
+        .replace(/-\\frac\{(\d+)\}\{(\d+)\}/g, '-$1/$2')
+        .replace(/\\frac\{(-?\d+)\}\{(\d+)\}/g, '$1/$2')
+        .replace(/-\\frac\{(\d+)x\^(\d+)\}\{?(\d+)\}?/g, '-$1/$3x^$2')
+        .replace(/\\frac\{(-?\d+)x\^(\d+)\}\{?(\d+)\}?/g, '$1/$3x^$2')
+        .replace(/-\\frac\{x\^(\d+)\}\{?(\d+)\}?/g, '-1/$2x^$1')
+        .replace(/\\frac\{x\^(\d+)\}\{?(\d+)\}?/g, '1/$2x^$1')
+        .replace(/-\\frac\{(\d+)x\}\{?(\d+)\}?/g, '-$1/$2x')
+        .replace(/\\frac\{(-?\d+)x\}\{?(\d+)\}?/g, '$1/$2x')
+        .replace(/-\\frac\{x\}\{?(\d+)\}?/g, '-1/$1x')
+        .replace(/\\frac\{x\}\{?(\d+)\}?/g, '1/$1x')
+        .replace(/\{(\d+)\}/g, '$1');
+    };
+
+    const userAnswer = normalizeMathTextAnswer(answer || '');
+    const isCorrect = q.correctAnswers.some((correct: string) => normalizeMathTextAnswer(correct) === userAnswer);
     return { isCorrect, scorePercent: isCorrect ? 100 : 0, correctParts: isCorrect ? 1 : 0, totalParts: 1 };
   }
   

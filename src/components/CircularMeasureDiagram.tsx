@@ -16,7 +16,7 @@ export default function CircularMeasureDiagram(props: {
     <div
       className={className ?? 'w-full flex justify-center'}
       role="img"
-      aria-label={altText ?? 'Circular measure diagram'}
+      aria-label={altText ?? 'Circles diagram'}
     >
       <div className="w-full max-w-[520px]">
         <div className="w-full [&_svg]:w-full [&_svg]:h-auto" dangerouslySetInnerHTML={content} />

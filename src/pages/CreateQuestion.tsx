@@ -1,8 +1,8 @@
 import { useEffect, useState, useMemo } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { v4 as uuidv4 } from 'uuid';
-import { ArrowLeft, Plus, X, Save, Sparkles, Upload } from 'lucide-react';
+import { ArrowLeft, Plus, X, Save, Sparkles, Upload, Loader2 } from 'lucide-react';
 import { db, Question, normalizeGlossaryMeaning, normalizeGlossaryWord } from '@/lib/db';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -15,10 +15,13 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { toast } from 'sonner';
 import RichTextEditor from '@/components/RichTextEditor';
-import TypingAnswerMathInput from '@/components/TypingAnswerMathInput';
-import ScreenshotToQuestionModal, { type ScreenshotToQuestionPastePayload } from '@/components/ScreenshotToQuestionModal';
+import MathLiveInput from '@/components/MathLiveInput';
 import { invalidateTagModelCache } from '@/lib/tagLearning';
 import { syncQuestionGlossary } from '@/lib/glossary';
+import { recognizeImageText, type OfflineOcrProgress } from '@/lib/offlineOcr';
+import { parseScreenshotOcrToDrafts, parseScreenshotOcrToDraftsFromTesseract } from '@/lib/screenshotQuestionParser';
+import { ocrTextToRichHtml } from '@/lib/htmlDraft';
+import ScreenshotToQuestionModal, { blobToImageData, type ScreenshotToQuestionPastePayload } from '@/components/ScreenshotToQuestionModal';
 import {
   autoAssignQuestionToModules,
   mapLevelToSelectOptions,
@@ -76,8 +79,38 @@ function levelToClassicDifficulty(level: number): 'easy' | 'medium' | 'hard' {
 
 export default function CreateQuestion() {
   const navigate = useNavigate();
+  const location = useLocation();
   const { id } = useParams();
   const isEditing = !!id;
+
+  const wantsScreenshot = useMemo(() => {
+    if (!location.search) return false;
+    const params = new URLSearchParams(location.search);
+    return params.get('screenshot') === '1';
+  }, [location.search]);
+
+  useEffect(() => {
+    if (!wantsScreenshot) return;
+    if (questionType !== 'mcq') {
+      setQuestionType('mcq');
+      setCorrectAnswers([]);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wantsScreenshot]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (!wantsScreenshot) return;
+    const el = document.getElementById('screenshot-question-upload');
+    if (el) {
+      window.setTimeout(() => {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }, 50);
+    }
+    toast.message('Screenshot → Question', {
+      description: 'Upload screenshots below to generate an OCR draft, then paste into this editor.',
+    });
+  }, [location.search]);
 
   // Load existing question if editing
   const existingQuestion = useLiveQuery(
@@ -106,8 +139,10 @@ export default function CreateQuestion() {
   const [selectTagValue, setSelectTagValue] = useState<string | undefined>(undefined);
   const [difficulty, setDifficulty] = useState<'easy' | 'medium' | 'hard'>('medium');
   const [difficultyLevel, setDifficultyLevel] = useState<number>(DEFAULT_LEVEL);
-	const [screenshotModalOpen, setScreenshotModalOpen] = useState(false);
 	const [screenshotFiles, setScreenshotFiles] = useState<File[]>([]);
+	const [screenshotPreviews, setScreenshotPreviews] = useState<string[]>([]);
+	const [ocrBusy, setOcrBusy] = useState(false);
+	const [ocrProgress, setOcrProgress] = useState<OfflineOcrProgress | null>(null);
   const settings = useLiveQuery(() => db.settings.get('1'), [], null as any);
   const aiOrchestrator = settings?.aiOrchestrator;
   const levelOptions = useMemo(() => mapLevelToSelectOptions(), []);
@@ -116,20 +151,44 @@ export default function CreateQuestion() {
 		return match ? match.label : `Level ${difficultyLevel}`;
 	}, [difficultyLevel, levelOptions]);
 
-	const handlePasteFromScreenshotDraft = (payload: ScreenshotToQuestionPastePayload) => {
+	useEffect(() => {
+		return () => {
+			screenshotPreviews.forEach((u) => URL.revokeObjectURL(u));
+		};
+	}, [screenshotPreviews]);
+
+	const runInlineOcr = async () => {
+		// Kept for compatibility; the embedded tool auto-runs OCR and supports re-run.
+		return;
+	};
+
+	const onPasteScreenshotFromClipboard = (e: React.ClipboardEvent) => {
+		if (!wantsScreenshot) return;
+		const items = Array.from(e.clipboardData?.items || []);
+		const imgs = items
+			.filter((it) => it.type && it.type.startsWith('image/'))
+			.map((it) => it.getAsFile())
+			.filter((f): f is File => !!f);
+		if (!imgs.length) return;
+		e.preventDefault();
+
 		setQuestionType('mcq');
-		setQuestionText(payload.questionHtml);
-		const nextOptions = payload.optionsHtml.map((o) => ({ id: o.id, text: o.html }));
-		setOptions(nextOptions.length >= 2 ? nextOptions : [
-			{ id: uuidv4(), text: '' },
-			{ id: uuidv4(), text: '' },
-		]);
-		setCorrectAnswers(payload.correctOptionIds);
-		const htmlHasInlineImages = /<img\b/i.test(payload.questionHtml);
-		if (!htmlHasInlineImages && payload.questionImageDataUrls.length) {
-			setQuestionImages(payload.questionImageDataUrls);
-		} else if (htmlHasInlineImages) {
-			setQuestionImages([]);
+		setCorrectAnswers([]);
+
+		setScreenshotFiles((prev) => [...prev, ...imgs]);
+		setScreenshotPreviews((prev) => [...prev, ...imgs.map((f) => URL.createObjectURL(f))]);
+	};
+
+	const onApplyFromScreenshotTool = (payload: ScreenshotToQuestionPastePayload) => {
+		if (questionType !== 'mcq') {
+			toast.message('Screenshot → Question works only for MCQ.');
+			return;
+		}
+		setQuestionText(payload.questionHtml || '');
+		setQuestionImages(payload.questionImageDataUrls || []);
+		if (payload.optionsHtml?.length >= 2) {
+			setOptions(payload.optionsHtml.map((o) => ({ id: o.id, text: o.html })));
+			setCorrectAnswers(payload.correctOptionIds || []);
 		}
 	};
 
@@ -407,7 +466,7 @@ export default function CreateQuestion() {
         >
           <ArrowLeft className="h-5 w-5" />
         </Button>
-        <div>
+        <div className="flex-1">
           <h1 className="text-3xl font-bold text-foreground">
             {isEditing ? 'Edit Question' : 'Create Question'}
           </h1>
@@ -415,6 +474,16 @@ export default function CreateQuestion() {
             {isEditing ? 'Update question details' : 'Add a new question to your bank'}
           </p>
         </div>
+			{!isEditing && !wantsScreenshot && (
+				<Button
+					type="button"
+					variant="outline"
+					onClick={() => navigate('/questions/create?screenshot=1')}
+				>
+					<Upload className="h-4 w-4 mr-2" />
+					Screenshot → Question
+				</Button>
+			)}
       </div>
 
       {/* Form */}
@@ -425,8 +494,13 @@ export default function CreateQuestion() {
             <Label className="text-base font-semibold">Question Type</Label>
             <RadioGroup
               value={questionType}
-              onValueChange={(value: 'mcq' | 'text' | 'fill_blanks' | 'matching') => {
+              onValueChange={(value: any) => {
+                if (wantsScreenshot && value !== 'mcq') {
+                  toast.message('Screenshot → Question works only for MCQ.');
+                  return;
+                }
                 setQuestionType(value);
+                // Reset correct answers when switching types
                 setCorrectAnswers([]);
               }}
               className="mt-4"
@@ -436,15 +510,15 @@ export default function CreateQuestion() {
                 <Label htmlFor="mcq" className="cursor-pointer">Multiple Choice</Label>
               </div>
               <div className="flex items-center space-x-2">
-                <RadioGroupItem value="text" id="text" />
+                <RadioGroupItem value="text" id="text" disabled={wantsScreenshot} />
                 <Label htmlFor="text" className="cursor-pointer">Free Text Answer</Label>
               </div>
               <div className="flex items-center space-x-2">
-                <RadioGroupItem value="fill_blanks" id="fill_blanks" />
+                <RadioGroupItem value="fill_blanks" id="fill_blanks" disabled={wantsScreenshot} />
                 <Label htmlFor="fill_blanks" className="cursor-pointer">Fill in the Blanks</Label>
               </div>
               <div className="flex items-center space-x-2">
-                <RadioGroupItem value="matching" id="matching" />
+                <RadioGroupItem value="matching" id="matching" disabled={wantsScreenshot} />
                 <Label htmlFor="matching" className="cursor-pointer">Matching</Label>
               </div>
             </RadioGroup>
@@ -462,30 +536,58 @@ export default function CreateQuestion() {
                 className="tk-question-editor"
               />
             </div>
-				<div className="mt-4">
-					<div className="relative">
-						<Input
-							type="file"
-							accept="image/*"
-							multiple
-							onChange={(e) => {
-								const next = Array.from(e.target.files || []);
-								if (!next.length) return;
-								setScreenshotFiles(next);
-								setScreenshotModalOpen(true);
-								e.target.value = '';
-							}}
-							className="absolute inset-0 opacity-0 cursor-pointer"
-							id="screenshot-question-upload"
-						/>
-						<Button variant="outline" type="button" className="w-full pointer-events-none">
-							<Upload className="h-4 w-4 mr-2" />
-							Screenshot → Question (offline)
-						</Button>
-					</div>
-					<p className="mt-2 text-xs text-muted-foreground">
-						Upload one or more screenshots, review the OCR draft in a modal, then paste into this form.
-					</p>
+				<div className="mt-4" onPaste={onPasteScreenshotFromClipboard} tabIndex={0}>
+					{wantsScreenshot && (
+						<div className="rounded-lg border bg-muted/10 p-3">
+							<div className="text-xs text-muted-foreground mb-2">
+								Paste a screenshot here (<span className="font-mono">Ctrl+V</span>) or upload an image.
+							</div>
+							<div className="relative">
+								<Input
+									type="file"
+									accept="image/*"
+									multiple
+									onChange={(e) => {
+										const next = Array.from(e.target.files || []);
+										if (!next.length) return;
+										setScreenshotFiles(next);
+										setScreenshotPreviews(next.map((f) => URL.createObjectURL(f)));
+										e.target.value = '';
+									}}
+									className="absolute inset-0 opacity-0 cursor-pointer"
+									id="screenshot-question-upload"
+								/>
+								<Button variant="outline" type="button" className="w-full pointer-events-none">
+									<Upload className="h-4 w-4 mr-2" />
+									Screenshot → Question
+								</Button>
+							</div>
+							{screenshotFiles.length > 0 && (
+								<div className="mt-4 space-y-3">
+									<div className="flex items-center justify-between gap-3 flex-wrap">
+										<div className="text-sm text-muted-foreground">
+											{screenshotFiles.length} screenshot{(screenshotFiles.length === 1 ? '' : 's')} ready
+										</div>
+										<Button
+											type="button"
+											variant="outline"
+											size="sm"
+											onClick={() => {
+												setScreenshotFiles([]);
+												screenshotPreviews.forEach((u) => URL.revokeObjectURL(u));
+												setScreenshotPreviews([]);
+												setOcrProgress(null);
+											}}
+											disabled={ocrBusy}
+										>
+											Clear
+										</Button>
+									</div>
+									<ScreenshotToQuestionModal files={screenshotFiles} onApply={onApplyFromScreenshotTool} />
+								</div>
+							)}
+						</div>
+					)}
 				</div>
 				{questionImages.length > 0 && (
 					<div className="mt-4 space-y-3">
@@ -670,7 +772,7 @@ export default function CreateQuestion() {
               {correctAnswers.map((answer, index) => (
                 <div key={index} className="flex items-center gap-3">
                   <div className="w-full max-w-xl">
-                    <TypingAnswerMathInput
+                    <MathLiveInput
                       value={answer}
                       onChange={(v) => {
                         const newAnswers = [...correctAnswers];
@@ -984,15 +1086,6 @@ export default function CreateQuestion() {
         </div>
         </form>
       </div>
-      <ScreenshotToQuestionModal
-        open={screenshotModalOpen}
-        onOpenChange={(open) => {
-          setScreenshotModalOpen(open);
-          if (!open) setScreenshotFiles([]);
-        }}
-        files={screenshotFiles}
-        onPaste={handlePasteFromScreenshotDraft}
-      />
     </div>
   );
 }

@@ -216,7 +216,7 @@ export default function InteractiveGraph(props: {
     const elements: Array<
       | { key: string; kind: 'polyline'; points: string; stroke: string; strokeWidth: number }
       | { key: string; kind: 'polygon'; points: string; fill: string; fillOpacity: number; stroke?: string; strokeWidth?: number }
-      | { key: string; kind: 'label'; x: number; y: number; html: string; fill: string; fontSize: number; anchor: 'start' | 'middle' | 'end' }
+      | { key: string; kind: 'label'; x: number; y: number; html: string; fill: string; fontSize: number; anchor: 'start' | 'middle' | 'end'; preferPlainText: boolean; plainText: string }
       | { key: string; kind: 'point'; cx: number; cy: number; r: number; fill: string; fillOpacity: number; stroke?: string; strokeWidth?: number }
     > = [];
 
@@ -304,14 +304,18 @@ export default function InteractiveGraph(props: {
 
       if (p.kind === 'label') {
         const fontSize = p.fontSize ?? 12;
-        const html = katex.renderToString(p.text, {
-          throwOnError: false,
-          displayMode: false,
-          strict: 'warn',
-          trust: false,
-          output: 'htmlAndMathml',
-          errorColor: '#cc0000',
-        });
+        const preferPlainText = /^[A-Za-z]\(-?\d+(?:\.\d+)?,-?\d+(?:\.\d+)?\)$/.test(String(p.text ?? '').replace(/\s+/g, ''));
+        const plainText = String(p.text ?? '');
+        const html = preferPlainText
+          ? ''
+          : katex.renderToString(p.text, {
+              throwOnError: false,
+              displayMode: false,
+              strict: 'warn',
+              trust: false,
+              output: 'htmlAndMathml',
+              errorColor: '#cc0000',
+            });
 
         elements.push({
           key: `lab-${i}`,
@@ -319,6 +323,8 @@ export default function InteractiveGraph(props: {
           x: sx(p.at.x),
           y: sy(p.at.y),
           html,
+          preferPlainText,
+          plainText,
           fill: p.fill ?? '#111827',
           fontSize,
           anchor: p.anchor ?? 'start',
@@ -436,73 +442,17 @@ export default function InteractiveGraph(props: {
           role="img"
           aria-label={props.altText}
           className={`max-w-full h-auto rounded-md border bg-white select-none${interactive ? ' touch-none' : ''}`}
-          onWheel={
-            interactive
-              ? (e) => {
-                  // Unbounded zoom: wheel up = zoom in, wheel down = zoom out.
-                  // Keep the point under the cursor anchored.
-                  e.preventDefault();
-                  const factor = e.deltaY < 0 ? 0.9 : 1.12;
-                  zoomAtPoint(factor, e.clientX, e.clientY);
-                }
-              : undefined
-          }
-          onPointerDown={
-            interactive
-              ? (e) => {
-                  const el = svgRef.current;
-                  if (!el) return;
-                  el.setPointerCapture(e.pointerId);
-                  setDrag({
-                    pointerId: e.pointerId,
-                    startClient: { x: e.clientX, y: e.clientY },
-                    startView: view,
-                  });
-                  setCursorFromEvent(e);
-                }
-              : undefined
-          }
+          onWheel={undefined}
+          onPointerDown={undefined}
           onPointerMove={
             interactive
               ? (e) => {
-                  if (drag && drag.pointerId === e.pointerId) {
-                    const dxPx = e.clientX - drag.startClient.x;
-                    const dyPx = e.clientY - drag.startClient.y;
-
-                    const dxWorld = (-dxPx / innerW) * (drag.startView.xMax - drag.startView.xMin);
-                    const dyWorld = (dyPx / innerH) * (drag.startView.yMax - drag.startView.yMin);
-
-                    setView(normalizeView({
-                      xMin: drag.startView.xMin + dxWorld,
-                      xMax: drag.startView.xMax + dxWorld,
-                      yMin: drag.startView.yMin + dyWorld,
-                      yMax: drag.startView.yMax + dyWorld,
-                    }));
-                    setCursorFromEvent(e);
-                    return;
-                  }
                   setCursorFromEvent(e);
                 }
               : undefined
           }
-          onPointerUp={
-            interactive
-              ? (e) => {
-                  if (drag && drag.pointerId === e.pointerId) {
-                    setDrag(null);
-                  }
-                }
-              : undefined
-          }
-          onPointerCancel={
-            interactive
-              ? (e) => {
-                  if (drag && drag.pointerId === e.pointerId) {
-                    setDrag(null);
-                  }
-                }
-              : undefined
-          }
+          onPointerUp={undefined}
+          onPointerCancel={undefined}
           onPointerLeave={interactive ? () => setCursorWorld(null) : undefined}
         >
           <defs>
@@ -541,15 +491,37 @@ export default function InteractiveGraph(props: {
           ))}
 
           {grid.labels.map((lab) => (
-            <text key={lab.key} x={lab.x} y={lab.y} textAnchor={lab.anchor} fontSize={12} fill={labelColor}>
+            <text
+              key={lab.key}
+              x={lab.x}
+              y={lab.y}
+              textAnchor={lab.anchor}
+              fontSize={12}
+              fill={labelColor}
+              fontFamily="'Roboto Slab', ui-serif, Georgia, Cambria, 'Times New Roman', Times, serif"
+            >
               {lab.text}
             </text>
           ))}
 
-          <text x={padL + innerW} y={axes.xAxisY - 8} textAnchor="end" fontSize={12} fill={labelColor}>
+          <text
+            x={padL + innerW}
+            y={axes.xAxisY - 8}
+            textAnchor="end"
+            fontSize={12}
+            fill={labelColor}
+            fontFamily="'Roboto Slab', ui-serif, Georgia, Cambria, 'Times New Roman', Times, serif"
+          >
             {axisLabelX}
           </text>
-          <text x={axes.yAxisX + 8} y={padT + 14} textAnchor="start" fontSize={12} fill={labelColor}>
+          <text
+            x={axes.yAxisX + 8}
+            y={padT + 14}
+            textAnchor="start"
+            fontSize={12}
+            fill={labelColor}
+            fontFamily="'Roboto Slab', ui-serif, Georgia, Cambria, 'Times New Roman', Times, serif"
+          >
             {axisLabelY}
           </text>
 
@@ -576,12 +548,13 @@ export default function InteractiveGraph(props: {
               />
             ) : p.kind === 'label' ? (
               (() => {
-                const boxW = 260;
-                const boxH = 34;
-                const x = p.anchor === 'middle' ? p.x - boxW / 2 : p.anchor === 'end' ? p.x - boxW : p.x;
-                const y = p.y - boxH + 8;
+                const boxW = 140;
+                const boxH = 22;
+                const x0 = p.anchor === 'middle' ? p.x - boxW / 2 : p.anchor === 'end' ? p.x - boxW : p.x;
+                // Place label slightly above the anchor point by default.
+                const y0 = p.y - boxH - 4;
                 return (
-                  <foreignObject key={p.key} x={x} y={y} width={boxW} height={boxH} overflow="visible">
+                  <foreignObject key={p.key} x={x0} y={y0} width={boxW} height={boxH} overflow="visible">
                     <div
                       style={{
                         display: 'inline-block',
@@ -590,9 +563,27 @@ export default function InteractiveGraph(props: {
                         lineHeight: 1.1,
                         whiteSpace: 'nowrap',
                         pointerEvents: 'none',
+                        fontFamily: "'Roboto Slab', ui-serif, Georgia, Cambria, 'Times New Roman', Times, serif",
                       }}
-                      dangerouslySetInnerHTML={{ __html: p.html }}
+                      dangerouslySetInnerHTML={p.preferPlainText ? undefined : { __html: p.html }}
                     />
+                    {p.preferPlainText ? (
+                      <foreignObject x={x0} y={y0} width={boxW} height={boxH} overflow="visible">
+                        <div
+                          style={{
+                            display: 'inline-block',
+                            color: p.fill,
+                            fontSize: `${p.fontSize}px`,
+                            lineHeight: 1.1,
+                            whiteSpace: 'nowrap',
+                            pointerEvents: 'none',
+                            fontFamily: "'Roboto Slab', ui-serif, Georgia, Cambria, 'Times New Roman', Times, serif",
+                          }}
+                        >
+                          {p.plainText}
+                        </div>
+                      </foreignObject>
+                    ) : null}
                   </foreignObject>
                 );
               })()
@@ -646,7 +637,7 @@ export default function InteractiveGraph(props: {
           </div>
 
           <div className="mt-2 text-sm text-center text-muted-foreground">
-            Hover the graph to inspect coordinates. Drag to pan. Scroll to zoom.
+            Hover the graph to inspect coordinates.
           </div>
         </>
       ) : null}

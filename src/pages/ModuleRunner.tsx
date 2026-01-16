@@ -12,7 +12,8 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { ExamTimerDisplay } from '@/components/ExamTimerDisplay';
 import { MatchingQuestionSortable } from '@/components/MatchingQuestionSortable';
-import TypingAnswerMathInput, { renderTypingAnswerMathToHtml } from '@/components/TypingAnswerMathInput';
+import { renderTypingAnswerMathToHtml } from '@/components/TypingAnswerMathInput';
+import MathLiveInput from '@/components/MathLiveInput';
 import {
 	Tooltip,
 	TooltipContent,
@@ -2141,12 +2142,9 @@ function ExamSession({
 								)}
 								{currentQuestion.type === 'text' && (
 									<div className="w-full max-w-sm">
-										<TypingAnswerMathInput
+										<MathLiveInput
 											value={(answers[currentQuestion.id] as string) || ''}
 											onChange={(v) => handleAnswerChange(v)}
-											enableScripts={
-												(currentQuestion.correctAnswers ?? []).some((a) => (a ?? '').includes('^') || (a ?? '').includes('_'))
-											}
 											disabled={showFeedback}
 											className="h-12 px-3 text-3xl border-2 border-border rounded-none"
 										/>
@@ -3446,12 +3444,9 @@ function PracticeRunner({ moduleData, baseQuestions, onExit, glossaryEntries, gl
 							)}
 							{current.type === 'text' && (
 								<div className="w-full max-w-sm">
-									<TypingAnswerMathInput
+									<MathLiveInput
 										value={(answers[current.id] as string) || ''}
 										onChange={(v) => handleAnswerChange(v)}
-										enableScripts={
-											(current.correctAnswers ?? []).some((a) => (a ?? '').includes('^') || (a ?? '').includes('_'))
-										}
 										disabled={showFeedback}
 										className="h-12 px-3 text-3xl border-2 border-border rounded-none"
 									/>
@@ -3623,6 +3618,38 @@ function PracticeRunner({ moduleData, baseQuestions, onExit, glossaryEntries, gl
 }
 
 function evaluateScore(q: Question, answer: unknown): { isCorrect: boolean; scorePercent: number; correctParts: number; totalParts: number } {
+	const normalizeMathTextAnswer = (raw: unknown) => {
+		return String(raw ?? '')
+			.trim()
+			.toLowerCase()
+			.replace(/[−–]/g, '-')
+			.replace(/\u200b/g, '')
+			.replace(/\\dfrac/g, '\\frac')
+			.replace(/\\tfrac/g, '\\frac')
+			.replace(/\\left/g, '')
+			.replace(/\\right/g, '')
+			.replace(/\\[ ,;!:]/g, '')
+			.replace(/\\cdot/g, '')
+			.replace(/\*/g, '')
+			.replace(/\s+/g, '')
+			.replace(/\{x\}/g, 'x')
+			.replace(/\^\{([^}]+)\}/g, '^$1')
+			.replace(/_\{([^}]+)\}/g, '_$1')
+			.replace(/-\\frac(\d{1,3})(\d{1,3})/g, '-$1/$2')
+			.replace(/\\frac(\d{1,3})(\d{1,3})/g, '$1/$2')
+			.replace(/-\\frac\{(\d+)\}\{(\d+)\}/g, '-$1/$2')
+			.replace(/\\frac\{(-?\d+)\}\{(\d+)\}/g, '$1/$2')
+			.replace(/-\\frac\{(\d+)x\^(\d+)\}\{?(\d+)\}?/g, '-$1/$3x^$2')
+			.replace(/\\frac\{(-?\d+)x\^(\d+)\}\{?(\d+)\}?/g, '$1/$3x^$2')
+			.replace(/-\\frac\{x\^(\d+)\}\{?(\d+)\}?/g, '-1/$2x^$1')
+			.replace(/\\frac\{x\^(\d+)\}\{?(\d+)\}?/g, '1/$2x^$1')
+			.replace(/-\\frac\{(\d+)x\}\{?(\d+)\}?/g, '-$1/$2x')
+			.replace(/\\frac\{(-?\d+)x\}\{?(\d+)\}?/g, '$1/$2x')
+			.replace(/-\\frac\{x\}\{?(\d+)\}?/g, '-1/$1x')
+			.replace(/\\frac\{x\}\{?(\d+)\}?/g, '1/$1x')
+			.replace(/\{(\d+)\}/g, '$1');
+	};
+
 	// Multiple choice uses option IDs; require exact set match
 	if (q.type === 'mcq') {
 		if (!q.correctAnswers || q.correctAnswers.length === 0) {
@@ -3689,8 +3716,8 @@ function evaluateScore(q: Question, answer: unknown): { isCorrect: boolean; scor
 	if (!q.correctAnswers || q.correctAnswers.length === 0) {
 		return { isCorrect: false, scorePercent: 0, correctParts: 0, totalParts: 0 };
 	}
-	const ans = (typeof answer === 'string' ? answer : '').toString().trim().toLowerCase();
-	const isCorrect = q.correctAnswers.some((c) => c.trim().toLowerCase() === ans);
+	const ansNorm = normalizeMathTextAnswer(typeof answer === 'string' ? answer : '');
+	const isCorrect = q.correctAnswers.some((c) => normalizeMathTextAnswer(c) === ansNorm);
 	const scorePercent = isCorrect ? 100 : 0;
 	return { isCorrect, scorePercent, correctParts: isCorrect ? 1 : 0, totalParts: 1 };
 }

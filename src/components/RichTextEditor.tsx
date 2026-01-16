@@ -330,7 +330,7 @@ const getMarkdownComponents = (
               <PlusCircle className="h-4 w-4" />
               Insert
             </button>
-          </div>
+            </div>
         )}
       </div>
     );
@@ -1486,8 +1486,8 @@ export default function RichTextEditor({ value, onChange, placeholder, className
 
   return (
     <TooltipProvider>
-      <div className={`tk-richtext-editor space-y-2 ${className || ''}`}>
-        <div className="rounded-md border bg-muted/40 px-2 py-1 flex flex-nowrap items-center gap-1 overflow-x-auto">
+      <div className={`tk-richtext-editor flex flex-col gap-2 h-full min-h-0 ${className || ''}`}>
+        <div className="rounded-md border bg-muted/40 px-2 py-1 flex flex-nowrap items-center gap-1 overflow-x-auto flex-shrink-0">
           <div className="flex gap-1 pr-2 border-r">
             <Tooltip>
               <TooltipTrigger asChild>
@@ -1764,10 +1764,10 @@ export default function RichTextEditor({ value, onChange, placeholder, className
         </DialogContent>
       </Dialog>
 
-      <div
-        ref={ref}
-        className={`min-h-[120px] rounded-md border p-3 focus:outline-none focus:ring-2 focus:ring-ring prose prose-base max-w-none`}
-        contentEditable
+        <div
+          ref={ref}
+          className={`min-h-[120px] min-h-0 flex-1 overflow-auto rounded-md border p-3 focus:outline-none focus:ring-2 focus:ring-ring prose prose-base max-w-none`}
+          contentEditable
         onPaste={async (e) => {
           e.preventDefault();
           

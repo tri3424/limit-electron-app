@@ -2,31 +2,28 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { v4 as uuidv4 } from 'uuid';
 import { Crop, Loader2, Wand2 } from 'lucide-react';
 
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
-import { Textarea } from '@/components/ui/textarea';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Separator } from '@/components/ui/separator';
 import { toast } from 'sonner';
 
 import { recognizeImageText } from '@/lib/offlineOcr';
-import { parseScreenshotOcrToDrafts, type ScreenshotQuestionDraft } from '@/lib/screenshotQuestionParser';
-import { plainTextToSimpleHtml } from '@/lib/htmlDraft';
+import {
+  parseScreenshotOcrToDrafts,
+  parseScreenshotOcrToDraftsFromTesseract,
+  type ScreenshotQuestionDraft,
+} from '@/lib/screenshotQuestionParser';
+import { ocrTextToRichHtml } from '@/lib/htmlDraft';
 import { normalizeOcrTextToParagraphs } from '@/lib/ocrTextNormalize';
+import type { RecognizeResult } from 'tesseract.js';
 
 type DraftOption = {
   id: string;
   label: string;
   text: string;
+  attachedImages?: string[];
 };
 
 type DraftUiState = {
@@ -43,16 +40,245 @@ export type ScreenshotToQuestionPastePayload = {
   optionsHtml: Array<{ id: string; html: string }>;
   correctOptionIds: string[];
   questionImageDataUrls: string[];
+  optionImageDataUrls: Record<string, string[]>;
 };
 
 type Props = {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
   files: File[];
-  onPaste: (payload: ScreenshotToQuestionPastePayload) => void;
+  onApply: (payload: ScreenshotToQuestionPastePayload) => void;
 };
 
 type CropRect = { x: number; y: number; w: number; h: number };
+
+function clamp01(n: number) {
+  return Math.max(0, Math.min(1, n));
+}
+
+function HtmlPreview({ html }: { html: string }) {
+  const safe = String(html || '');
+  return (
+    <div
+      className="prose prose-sm max-w-none dark:prose-invert"
+      // eslint-disable-next-line react/no-danger
+      dangerouslySetInnerHTML={{ __html: safe }}
+    />
+  );
+}
+
+export async function blobToImageData(blob: Blob): Promise<{ data: ImageData; width: number; height: number }> {
+  const url = URL.createObjectURL(blob);
+  try {
+    const img = new Image();
+    img.src = url;
+    await new Promise<void>((resolve, reject) => {
+      img.onload = () => resolve();
+      img.onerror = () => reject(new Error('Failed to load image'));
+    });
+    const w = img.naturalWidth || img.width;
+    const h = img.naturalHeight || img.height;
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.max(1, Math.round(w));
+    canvas.height = Math.max(1, Math.round(h));
+    const ctx = canvas.getContext('2d');
+    if (!ctx) throw new Error('Canvas not available');
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+    const data = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    return { data, width: canvas.width, height: canvas.height };
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
+function pixelLum(r: number, g: number, b: number) {
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+}
+
+function scanHorizontalInkRatio(
+  img: ImageData,
+  x0: number,
+  x1: number,
+  y0: number,
+  y1: number,
+  lumThreshold: number
+): number {
+  const w = img.width;
+  const h = img.height;
+  const ix0 = Math.max(0, Math.min(w - 1, Math.floor(x0)));
+  const ix1 = Math.max(0, Math.min(w - 1, Math.floor(x1)));
+  const iy0 = Math.max(0, Math.min(h - 1, Math.floor(y0)));
+  const iy1 = Math.max(0, Math.min(h - 1, Math.floor(y1)));
+  if (ix1 <= ix0 || iy1 < iy0) return 0;
+
+  let dark = 0;
+  let total = 0;
+
+  for (let y = iy0; y <= iy1; y++) {
+    for (let x = ix0; x <= ix1; x++) {
+      const idx = (y * w + x) * 4;
+      const lum = pixelLum(img.data[idx], img.data[idx + 1], img.data[idx + 2]);
+      if (lum < lumThreshold) dark += 1;
+      total += 1;
+    }
+  }
+
+  return total ? dark / total : 0;
+}
+
+function escapeHtmlInline(s: string): string {
+  return String(s || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
+function richHtmlFromTesseractWithDecorations(
+  raw: RecognizeResult,
+  img: ImageData,
+  opts: { inferUnderlineStrike: boolean; experimentalBoldItalic: boolean }
+): string {
+  const words = (raw.data as any)?.words as
+    | Array<{ text: string; bbox: { x0: number; y0: number; x1: number; y1: number }; confidence?: number }>
+    | undefined;
+
+  const lines = (raw.data as any)?.lines as
+    | Array<{ text: string; bbox: { x0: number; y0: number; x1: number; y1: number } }>
+    | undefined;
+
+  if (!words?.length) {
+    return ocrTextToRichHtml(normalizeOcrTextToParagraphs(raw.data.text || ''));
+  }
+
+  const byYThenX = [...words].sort((a, b) => {
+    const ay = (a.bbox.y0 + a.bbox.y1) / 2;
+    const by = (b.bbox.y0 + b.bbox.y1) / 2;
+    if (Math.abs(ay - by) > 6) return ay - by;
+    return a.bbox.x0 - b.bbox.x0;
+  });
+
+  const lineBuckets: Array<{ bbox: { x0: number; y0: number; x1: number; y1: number }; words: typeof byYThenX }> = [];
+
+  if (lines?.length) {
+    for (const l of lines) {
+      lineBuckets.push({ bbox: l.bbox, words: [] as any });
+    }
+    for (const w of byYThenX) {
+      const cy = (w.bbox.y0 + w.bbox.y1) / 2;
+      let bestIdx = -1;
+      let bestScore = -Infinity;
+      for (let i = 0; i < lineBuckets.length; i++) {
+        const lb = lineBuckets[i];
+        const inY = cy >= lb.bbox.y0 - 4 && cy <= lb.bbox.y1 + 4;
+        if (!inY) continue;
+        const score = -Math.abs(((lb.bbox.y0 + lb.bbox.y1) / 2) - cy);
+        if (score > bestScore) {
+          bestScore = score;
+          bestIdx = i;
+        }
+      }
+      if (bestIdx >= 0) lineBuckets[bestIdx].words.push(w as any);
+      else {
+        lineBuckets.push({ bbox: w.bbox, words: [w as any] });
+      }
+    }
+  } else {
+    for (const w of byYThenX) {
+      const cy = (w.bbox.y0 + w.bbox.y1) / 2;
+      const existing = lineBuckets.find((lb) => cy >= lb.bbox.y0 - 6 && cy <= lb.bbox.y1 + 6);
+      if (existing) {
+        existing.words.push(w as any);
+        existing.bbox = {
+          x0: Math.min(existing.bbox.x0, w.bbox.x0),
+          y0: Math.min(existing.bbox.y0, w.bbox.y0),
+          x1: Math.max(existing.bbox.x1, w.bbox.x1),
+          y1: Math.max(existing.bbox.y1, w.bbox.y1),
+        };
+      } else {
+        lineBuckets.push({ bbox: w.bbox, words: [w as any] });
+      }
+    }
+  }
+
+  const sortedLines = lineBuckets.sort((a, b) => a.bbox.y0 - b.bbox.y0);
+  const paragraphs: string[] = [];
+
+  for (const line of sortedLines) {
+    const ws = [...line.words].sort((a, b) => a.bbox.x0 - b.bbox.x0);
+    if (!ws.length) continue;
+
+    const avgH = ws.reduce((s, w) => s + (w.bbox.y1 - w.bbox.y0), 0) / ws.length;
+    const gapSpacePx = Math.max(6, avgH * 0.4);
+
+    let htmlLine = '';
+    let prevX1: number | null = null;
+
+    for (const w of ws) {
+      const rawText = String(w.text ?? '').trim();
+      if (!rawText) continue;
+
+      if (prevX1 != null) {
+        const gap = w.bbox.x0 - prevX1;
+        if (gap > gapSpacePx) htmlLine += ' ';
+      }
+
+      let content = escapeHtmlInline(rawText);
+
+      if (opts.inferUnderlineStrike) {
+        const height = Math.max(1, w.bbox.y1 - w.bbox.y0);
+        const underlineBandTop = w.bbox.y1 + Math.max(1, height * 0.05);
+        const underlineBandBottom = w.bbox.y1 + Math.max(2, height * 0.22);
+        const strikeY = (w.bbox.y0 + w.bbox.y1) / 2;
+        const strikeBandTop = strikeY - Math.max(1, height * 0.08);
+        const strikeBandBottom = strikeY + Math.max(1, height * 0.08);
+
+        const underlineInk = scanHorizontalInkRatio(img, w.bbox.x0, w.bbox.x1, underlineBandTop, underlineBandBottom, 90);
+        const strikeInk = scanHorizontalInkRatio(img, w.bbox.x0, w.bbox.x1, strikeBandTop, strikeBandBottom, 90);
+
+        const underline = underlineInk > 0.18;
+        const strike = strikeInk > 0.14;
+
+        if (strike) content = `<s>${content}</s>`;
+        if (underline) content = `<u>${content}</u>`;
+      }
+
+      if (opts.experimentalBoldItalic) {
+        const boxInk = scanHorizontalInkRatio(
+          img,
+          w.bbox.x0,
+          w.bbox.x1,
+          w.bbox.y0,
+          w.bbox.y1,
+          110
+        );
+        const boldish = boxInk > 0.22;
+        const italicish = clamp01((w.bbox.x1 - w.bbox.x0) / Math.max(1, w.bbox.y1 - w.bbox.y0)) > 3.8;
+        if (italicish) content = `<em>${content}</em>`;
+        if (boldish) content = `<strong>${content}</strong>`;
+      }
+
+      htmlLine += content;
+      prevX1 = w.bbox.x1;
+    }
+
+    const finalLine = htmlLine.trim();
+    if (finalLine) paragraphs.push(`<p>${finalLine}</p>`);
+  }
+
+  return paragraphs.join('');
+}
+
+function stripHtmlToText(html: string): string {
+  if (!html) return '';
+  if (typeof window === 'undefined') return html.replace(/<[^>]*>/g, ' ');
+  try {
+    const el = document.createElement('div');
+    el.innerHTML = html;
+    return (el.textContent || '').replace(/\s+/g, ' ').trim();
+  } catch {
+    return html.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+  }
+}
 
 async function fileToDataUrl(file: File): Promise<string> {
   return await new Promise((resolve, reject) => {
@@ -202,6 +428,18 @@ function buildDefaultOptions(): DraftOption[] {
   ];
 }
 
+function normalizeOptionLabel(label: string): string {
+  const s = String(label || '').trim();
+  if (!s) return '';
+  const upper = s.toUpperCase();
+  if (/^[A-Z]$/.test(upper)) return upper;
+  if (/^[1-9]$/.test(s)) {
+    const n = Number(s);
+    if (n >= 1 && n <= 26) return String.fromCharCode(64 + n);
+  }
+  return upper;
+}
+
 function isDefaultOptionText(text: string, label: string) {
   return String(text || '').trim().toLowerCase() === `option ${String(label || '').trim().toLowerCase()}`;
 }
@@ -212,8 +450,9 @@ function buildOptionsFromParsed(parsed: ScreenshotQuestionDraft): DraftOption[] 
 
   const fromParsed: DraftOption[] = parsed.options.map((o) => ({
     id: uuidv4(),
-    label: o.label,
-    text: o.text,
+    label: normalizeOptionLabel(o.label),
+    text: ocrTextToRichHtml(o.text),
+    attachedImages: [],
   }));
 
   const parsedLabels = new Set(fromParsed.map((o) => o.label));
@@ -221,10 +460,12 @@ function buildOptionsFromParsed(parsed: ScreenshotQuestionDraft): DraftOption[] 
   return [...fromParsed, ...remainingDefaults];
 }
 
-export default function ScreenshotToQuestionModal({ open, onOpenChange, files, onPaste }: Props) {
+export default function ScreenshotToQuestionModal({ files, onApply }: Props) {
   const [tab, setTab] = useState('0');
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState<{ status?: string; progress?: number } | null>(null);
+
+  const [showScreenshotPanel, setShowScreenshotPanel] = useState(true);
 
   const [drafts, setDrafts] = useState<ScreenshotQuestionDraft[]>([]);
   const [draftIndex, setDraftIndex] = useState(0);
@@ -244,6 +485,9 @@ export default function ScreenshotToQuestionModal({ open, onOpenChange, files, o
   const [cropRect, setCropRect] = useState<CropRect | null>(null);
   const [cropAssignTarget, setCropAssignTarget] = useState<'question' | { optionId: string } | null>(null);
 
+  const [inferFormatting, setInferFormatting] = useState(true);
+  const [experimentalBoldItalic, setExperimentalBoldItalic] = useState(false);
+
   const imgRef = useRef<HTMLImageElement | null>(null);
   const dragRef = useRef<{ startX: number; startY: number; dragging: boolean } | null>(null);
 
@@ -253,12 +497,25 @@ export default function ScreenshotToQuestionModal({ open, onOpenChange, files, o
   }, [tab, files.length]);
 
   useEffect(() => {
-    if (!open) return;
+    if (!files.length) {
+      setImageUrls([]);
+      setDraftQuestion('');
+      setDraftOptions([]);
+      setRawLines([]);
+      setDetectedMcq(false);
+      setAttachedQuestionImages([]);
+      setDrafts([]);
+      setDraftIndex(0);
+      setDraftUi([]);
+      return;
+    }
+
     setTab('0');
     setCropMode(false);
     setCropRect(null);
     setCropAssignTarget(null);
     setProgress(null);
+    setShowScreenshotPanel(true);
     setCorrectOptionId(null);
     setAttachedQuestionImages([]);
     setDetectedMcq(false);
@@ -266,7 +523,7 @@ export default function ScreenshotToQuestionModal({ open, onOpenChange, files, o
     setDraftIndex(0);
     setDraftUi([]);
 
-    (async () => {
+    void (async () => {
       try {
         const urls = await Promise.all(files.map((f) => fileToDataUrl(f)));
         setImageUrls(urls);
@@ -275,7 +532,7 @@ export default function ScreenshotToQuestionModal({ open, onOpenChange, files, o
         toast.error('Failed to load screenshots');
       }
     })();
-  }, [open, files]);
+  }, [files]);
 
   const syncDraftUiAtIndex = (idx: number, next: Partial<DraftUiState>) => {
     setDraftUi((prev) => {
@@ -307,7 +564,7 @@ export default function ScreenshotToQuestionModal({ open, onOpenChange, files, o
       existing.options.every((o) => isDefaultOptionText(o.text, o.label));
 
     const merged: DraftUiState = {
-      question: parsed.questionText,
+      question: ocrTextToRichHtml(parsed.questionText),
       options: existing?.options?.length && !existingLooksDefault ? existing.options : baseOptions,
       correctOptionId: existing?.correctOptionId ?? null,
       rawLines: parsed.rawLines,
@@ -342,15 +599,9 @@ export default function ScreenshotToQuestionModal({ open, onOpenChange, files, o
   }, [draftIndex, drafts]);
 
   useEffect(() => {
-    if (!open) return;
-    if (!files.length) {
-      setDraftQuestion('');
-      setDraftOptions([]);
-      setRawLines([]);
-      return;
-    }
+    if (!files.length) return;
 
-    // Auto-run OCR on open (first screenshot) for speed.
+    // Auto-run OCR on load (first screenshot) for speed.
     void (async () => {
       try {
         setBusy(true);
@@ -359,11 +610,17 @@ export default function ScreenshotToQuestionModal({ open, onOpenChange, files, o
           lang: 'eng',
           onProgress: setProgress,
         });
-        const nextDrafts = parseScreenshotOcrToDrafts(res.text);
+        let nextDrafts: ScreenshotQuestionDraft[];
+        try {
+          const { data } = await blobToImageData(files[0]);
+          nextDrafts = parseScreenshotOcrToDraftsFromTesseract(res.raw as any, data);
+        } catch {
+          nextDrafts = parseScreenshotOcrToDrafts(res.text);
+        }
         setDrafts(nextDrafts);
         setDraftIndex(0);
         const nextUi: DraftUiState[] = nextDrafts.map((d) => ({
-          question: d.questionText,
+          question: ocrTextToRichHtml(d.questionText),
           options: buildOptionsFromParsed(d),
           correctOptionId: null,
           rawLines: d.rawLines,
@@ -388,7 +645,7 @@ export default function ScreenshotToQuestionModal({ open, onOpenChange, files, o
       }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open]);
+  }, [files]);
 
   const runOcrForActiveImage = async () => {
     if (!imageUrls[activeIndex]) return;
@@ -401,11 +658,19 @@ export default function ScreenshotToQuestionModal({ open, onOpenChange, files, o
         onProgress: setProgress,
       });
 
-      const nextDrafts = parseScreenshotOcrToDrafts(res.text);
+      let nextDrafts: ScreenshotQuestionDraft[];
+      try {
+        const url = imageUrls[activeIndex];
+        const b = await fetch(url).then((r) => r.blob());
+        const { data } = await blobToImageData(b);
+        nextDrafts = parseScreenshotOcrToDraftsFromTesseract(res.raw as any, data);
+      } catch {
+        nextDrafts = parseScreenshotOcrToDrafts(res.text);
+      }
       setDrafts(nextDrafts);
       setDraftIndex(0);
       const nextUi: DraftUiState[] = nextDrafts.map((d) => ({
-        question: d.questionText,
+        question: ocrTextToRichHtml(d.questionText),
         options: buildOptionsFromParsed(d),
         correctOptionId: null,
         rawLines: d.rawLines,
@@ -424,6 +689,39 @@ export default function ScreenshotToQuestionModal({ open, onOpenChange, files, o
     } catch (e: any) {
       console.error(e);
       toast.error(e?.message ? String(e.message) : 'OCR failed');
+    } finally {
+      setBusy(false);
+      setProgress(null);
+    }
+  };
+
+  const insertCropIntoQuestionText = async () => {
+    if (!cropRect) return;
+    if (!imageUrls[activeIndex]) return;
+    const imgEl = imgRef.current;
+    if (!imgEl) return;
+
+    try {
+      setBusy(true);
+      setProgress(null);
+
+      const blob = await cropImageDataUrl(imageUrls[activeIndex], cropRect, imgEl);
+      const dataUrl = await blobToDataUrl(blob);
+      const resized = await resizeImageDataUrl(dataUrl, 1600, 1200);
+
+      const imgHtml = `<p><img src="${resized}" alt="attached" style="max-width:100%;height:auto;" /></p>`;
+      setDraftQuestion((prev) => {
+        const next = `${String(prev || '').trim()}${imgHtml}`;
+        syncDraftUiAtIndex(draftIndex, { question: next });
+        return next;
+      });
+
+      setCropMode(false);
+      setCropRect(null);
+      setCropAssignTarget(null);
+    } catch (e: any) {
+      console.error(e);
+      toast.error(e?.message ? String(e.message) : 'Failed to insert image');
     } finally {
       setBusy(false);
       setProgress(null);
@@ -462,6 +760,46 @@ export default function ScreenshotToQuestionModal({ open, onOpenChange, files, o
     }
   };
 
+  const attachCropAsOptionImage = async (optionId: string) => {
+    if (!cropRect) return;
+    if (!imageUrls[activeIndex]) return;
+    const imgEl = imgRef.current;
+    if (!imgEl) return;
+
+    try {
+      setBusy(true);
+      setProgress(null);
+
+      const blob = await cropImageDataUrl(imageUrls[activeIndex], cropRect, imgEl);
+      const dataUrl = await blobToDataUrl(blob);
+      // Keep images sharp: only downscale if truly huge.
+      const resized = await resizeImageDataUrl(dataUrl, 1600, 1200);
+
+      setDraftOptions((prev) => {
+        const next = prev.map((o) =>
+          o.id === optionId
+            ? {
+                ...o,
+                attachedImages: [...(o.attachedImages ?? []), resized],
+              }
+            : o
+        );
+        syncDraftUiAtIndex(draftIndex, { options: next });
+        return next;
+      });
+
+      setCropMode(false);
+      setCropRect(null);
+      setCropAssignTarget(null);
+    } catch (e: any) {
+      console.error(e);
+      toast.error(e?.message ? String(e.message) : 'Failed to attach option image');
+    } finally {
+      setBusy(false);
+      setProgress(null);
+    }
+  };
+
   const runCropOcrAndAssign = async (target: 'question' | { optionId: string }) => {
     if (!cropRect) return;
     if (!imageUrls[activeIndex]) return;
@@ -476,14 +814,25 @@ export default function ScreenshotToQuestionModal({ open, onOpenChange, files, o
         lang: 'eng',
         onProgress: setProgress,
       });
-      const text = normalizeOcrTextToParagraphs(res.text);
+
+      let html: string;
+      if (inferFormatting) {
+        const { data } = await blobToImageData(blob);
+        html = richHtmlFromTesseractWithDecorations(res.raw, data, {
+          inferUnderlineStrike: true,
+          experimentalBoldItalic,
+        });
+      } else {
+        const text = normalizeOcrTextToParagraphs(res.text);
+        html = ocrTextToRichHtml(text);
+      }
 
       if (target === 'question') {
-        setDraftQuestion(text);
-        syncDraftUiAtIndex(draftIndex, { question: text });
+        setDraftQuestion(html);
+        syncDraftUiAtIndex(draftIndex, { question: html });
       } else {
         setDraftOptions((prev) => {
-          const next = prev.map((o) => (o.id === target.optionId ? { ...o, text } : o));
+          const next = prev.map((o) => (o.id === target.optionId ? { ...o, text: html } : o));
           syncDraftUiAtIndex(draftIndex, { options: next });
           return next;
         });
@@ -502,8 +851,6 @@ export default function ScreenshotToQuestionModal({ open, onOpenChange, files, o
   };
 
   useEffect(() => {
-    if (!open) return;
-
     const onKeyDown = (e: KeyboardEvent) => {
       // Only shortcuts when crop is active and there's a selection.
       if (!cropRect) return;
@@ -526,7 +873,7 @@ export default function ScreenshotToQuestionModal({ open, onOpenChange, files, o
 
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [open, cropRect, cropMode, draftOptions]);
+  }, [cropRect, cropMode, draftOptions]);
 
   const onImageMouseDown = (e: React.MouseEvent) => {
     if (!cropMode) return;
@@ -559,24 +906,43 @@ export default function ScreenshotToQuestionModal({ open, onOpenChange, files, o
   };
 
   const pasteToInputs = ({ close }: { close: boolean }) => {
-    const baseQHtml = plainTextToSimpleHtml(draftQuestion.trim());
+    if (!detectedMcq) {
+      toast.error('No MCQ options detected. Screenshot → Question only works for MCQ.');
+      return;
+    }
+
+    const baseQHtml = draftQuestion.trim();
     const imgHtml = attachedQuestionImages.length
       ? `<div>${attachedQuestionImages
           .map((src) => `<img src="${src}" alt="attached" style="max-width:100%;height:auto;display:block;margin:0.5rem 0;" />`)
           .join('')}</div>`
       : '';
     const qHtml = `${baseQHtml}${imgHtml}`;
-    const optPayload = draftOptions.map((o) => ({ id: o.id, html: plainTextToSimpleHtml(o.text.trim()) }));
-    const correctIds = correctOptionId ? [correctOptionId] : [];
 
-    onPaste({
+    const optionImageDataUrls: Record<string, string[]> = {};
+    const optPayload = draftOptions.map((o) => {
+      optionImageDataUrls[o.id] = o.attachedImages?.length ? [...o.attachedImages] : [];
+      const base = o.text.trim();
+      const imgs = (o.attachedImages ?? []).length
+        ? `<div>${(o.attachedImages ?? [])
+            .map((src) => `<img src="${src}" alt="option" style="max-width:100%;height:auto;display:block;margin:0.5rem 0;" />`)
+            .join('')}</div>`
+        : '';
+      return { id: o.id, html: `${base}${imgs}` };
+    });
+    const correctIds = detectedMcq && correctOptionId ? [correctOptionId] : [];
+
+    onApply({
       questionHtml: qHtml,
       optionsHtml: optPayload,
       correctOptionIds: correctIds,
       questionImageDataUrls: attachedQuestionImages,
+      optionImageDataUrls,
     });
 
-    if (close) onOpenChange(false);
+    if (close) {
+      // no-op for inline tool
+    }
   };
 
   const pasteAndNext = () => {
@@ -586,48 +952,45 @@ export default function ScreenshotToQuestionModal({ open, onOpenChange, files, o
     }
   };
 
-  const splitAssistFromLines = () => {
-    // User-assisted: pick a line to start options.
-    const idx = rawLines.findIndex((l) => l.toLowerCase().includes('a') && /[\).:\-]/.test(l));
-    if (idx < 0) return;
-    const q = rawLines.slice(0, idx).join('\n');
-    const rest = rawLines.slice(idx);
-    setDraftQuestion(q);
-    syncDraftUiAtIndex(draftIndex, { question: q });
-    const nextOptions = rest.slice(0, 4).map((t, i) => ({
-      id: uuidv4(),
-      label: String.fromCharCode(65 + i),
-      text: t,
-    }));
-    setDraftOptions(nextOptions);
-    syncDraftUiAtIndex(draftIndex, { options: nextOptions });
-    setCorrectOptionId(null);
-    syncDraftUiAtIndex(draftIndex, { correctOptionId: null });
-    setAttachedQuestionImages([]);
-    syncDraftUiAtIndex(draftIndex, { attachedImages: [] });
-  };
-
   const disablePaste =
     !detectedMcq ||
-    !draftQuestion.trim() ||
+    !stripHtmlToText(draftQuestion).trim() ||
     draftOptions.length < 2 ||
-    draftOptions.some((o) => !o.text.trim());
+    draftOptions.some((o) => !stripHtmlToText(o.text).trim() && !(o.attachedImages ?? []).length);
+
+  if (!files.length) return null;
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="w-[96vw] max-w-6xl h-[90vh] overflow-hidden flex flex-col" aria-describedby={undefined}>
-        <DialogHeader className="flex-shrink-0">
-          <DialogTitle>Screenshot → Question</DialogTitle>
-          <DialogDescription>
-            OCR runs on-device. Review and fix text, then paste into the form.
-          </DialogDescription>
-        </DialogHeader>
+    <div className="rounded-lg border bg-background/50 p-4 space-y-4">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <div className="text-sm font-medium">Screenshot → Question</div>
+          <div className="text-xs text-muted-foreground">
+            Select regions and assign to question/options, then click Apply.
+          </div>
+        </div>
+        {busy && (
+          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+            <Loader2 className="h-4 w-4 animate-spin" />
+            <span>{progress?.status || 'Working…'}{typeof progress?.progress === 'number' ? ` ${Math.round(progress.progress * 100)}%` : ''}</span>
+          </div>
+        )}
+      </div>
 
-        <div className="flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-2 gap-4">
-          <div className="min-h-0 rounded-lg border bg-background/50 overflow-hidden flex flex-col">
+      <div className="flex flex-col gap-4">
+        <div
+          className={
+            showScreenshotPanel
+              ? 'rounded-lg border bg-background/50 overflow-hidden flex flex-col flex-shrink-0'
+              : 'rounded-lg border bg-background/50 overflow-hidden flex flex-col flex-shrink-0'
+          }
+        >
             <div className="p-3 border-b flex items-center gap-2">
               <div className="font-medium text-sm">Screenshot</div>
               <div className="ml-auto flex items-center gap-2">
+                <Button type="button" size="sm" variant="outline" onClick={() => setShowScreenshotPanel((v) => !v)}>
+                  {showScreenshotPanel ? 'Collapse' : 'Expand'}
+                </Button>
                 {drafts.length > 1 && (
                   <div className="flex items-center gap-2">
                     <Button
@@ -673,260 +1036,109 @@ export default function ScreenshotToQuestionModal({ open, onOpenChange, files, o
               </div>
             </div>
 
-            <div className="p-3 flex-1 min-h-0">
-              <Tabs value={tab} onValueChange={setTab} className="h-full flex flex-col">
-                <TabsList className="w-full justify-start overflow-x-auto flex-shrink-0">
-                  {files.map((_, i) => (
-                    <TabsTrigger key={i} value={String(i)}>
-                      {i + 1}
-                    </TabsTrigger>
-                  ))}
-                </TabsList>
+            {showScreenshotPanel ? (
+              <div className="p-3">
+                <Tabs value={tab} onValueChange={setTab} className="h-full flex flex-col">
+                  <TabsList className="w-full justify-start overflow-x-auto flex-shrink-0">
+                    {files.map((_, i) => (
+                      <TabsTrigger key={i} value={String(i)}>
+                        {i + 1}
+                      </TabsTrigger>
+                    ))}
+                  </TabsList>
 
-                <ScrollArea className="flex-1 min-h-0 mt-3">
-                  {files.map((_, i) => (
-                    <TabsContent key={i} value={String(i)} className="mt-0">
-                      <div
-                        className="relative rounded-md border bg-muted/10"
-                        onMouseDown={onImageMouseDown}
-                        onMouseMove={onImageMouseMove}
-                        onMouseUp={onImageMouseUp}
-                      >
-                        <img
-                          ref={i === activeIndex ? imgRef : undefined}
-                          src={imageUrls[i]}
-                          alt={`screenshot-${i + 1}`}
-                          className="w-full max-h-[70vh] object-contain select-none"
-                          draggable={false}
-                        />
-                      {cropMode && cropRect && i === activeIndex && (
+                  <div className="mt-3">
+                    {files.map((_, i) => (
+                      <TabsContent key={i} value={String(i)} className="mt-0">
                         <div
-                          className="absolute border-2 border-primary bg-primary/10"
-                          style={{
-                            left: `${normalizeCropRect(cropRect).x}px`,
-                            top: `${normalizeCropRect(cropRect).y}px`,
-                            width: `${normalizeCropRect(cropRect).w}px`,
-                            height: `${normalizeCropRect(cropRect).h}px`,
-                          }}
-                        />
-                      )}
-                      </div>
-                      {cropMode && cropRect && i === activeIndex && (
-                        <div className="mt-3 rounded-md border bg-muted/10 p-3 space-y-2">
-                          <div className="text-xs text-muted-foreground">
-                            Region selected. Assign via buttons or shortcuts:
-                            <div className="mt-1">
-                              <span className="font-mono">Ctrl+1</span> Question, <span className="font-mono">Ctrl+2</span> Option 1, <span className="font-mono">Ctrl+3</span> Option 2
+                          className="relative rounded-md border bg-muted/10"
+                          onMouseDown={onImageMouseDown}
+                          onMouseMove={onImageMouseMove}
+                          onMouseUp={onImageMouseUp}
+                        >
+                          <img
+                            ref={i === activeIndex ? imgRef : undefined}
+                            src={imageUrls[i]}
+                            alt={`screenshot-${i + 1}`}
+                            className="w-full object-contain select-none"
+                            draggable={false}
+                          />
+                        {cropMode && cropRect && i === activeIndex && (
+                          <div
+                            className="absolute border-2 border-primary bg-primary/10"
+                            style={{
+                              left: `${normalizeCropRect(cropRect).x}px`,
+                              top: `${normalizeCropRect(cropRect).y}px`,
+                              width: `${normalizeCropRect(cropRect).w}px`,
+                              height: `${normalizeCropRect(cropRect).h}px`,
+                            }}
+                          />
+                        )}
+                        </div>
+                        {cropMode && cropRect && i === activeIndex && (
+                          <div className="mt-3 rounded-md border bg-muted/10 p-3 space-y-2">
+                            <div className="text-xs text-muted-foreground">
+                              Region selected. Assign via buttons or shortcuts:
+                              <div className="mt-1">
+                                <span className="font-mono">Ctrl+1</span> Question
+                              </div>
+                            </div>
+                            <div className="flex flex-wrap items-center gap-4 text-xs text-muted-foreground">
+                              <label className="flex items-center gap-2">
+                                <input
+                                  type="checkbox"
+                                  checked={inferFormatting}
+                                  onChange={(e) => setInferFormatting(e.target.checked)}
+                                />
+                                Infer underline/strike (region OCR)
+                              </label>
+                              <label className="flex items-center gap-2">
+                                <input
+                                  type="checkbox"
+                                  checked={experimentalBoldItalic}
+                                  onChange={(e) => setExperimentalBoldItalic(e.target.checked)}
+                                  disabled={!inferFormatting}
+                                />
+                                Experimental: infer bold/italic
+                              </label>
+                            </div>
+                            <div className="flex flex-wrap gap-2">
+                              <Button type="button" size="sm" onClick={() => void runCropOcrAndAssign('question')} disabled={busy}>
+                                Assign to question
+                              </Button>
+                              <Button type="button" size="sm" variant="outline" onClick={() => void attachCropAsQuestionImage()} disabled={busy}>
+                                Attach crop as image
+                              </Button>
+                              <Button type="button" size="sm" variant="outline" onClick={() => void insertCropIntoQuestionText()} disabled={busy}>
+                                Insert into question
+                              </Button>
                             </div>
                           </div>
-                          <div className="flex flex-wrap gap-2">
-                            <Button type="button" size="sm" onClick={() => void runCropOcrAndAssign('question')} disabled={busy}>
-                              Assign to question
-                            </Button>
-                            <Button type="button" size="sm" variant="outline" onClick={() => void attachCropAsQuestionImage()} disabled={busy}>
-                              Attach crop as image
-                            </Button>
-                            {draftOptions.slice(0, 4).map((o, idx) => (
-                              <Button
-                                key={o.id}
-                                type="button"
-                                size="sm"
-                                variant="outline"
-                                onClick={() => void runCropOcrAndAssign({ optionId: o.id })}
-                                disabled={busy}
-                              >
-                                Assign to option {idx + 1}
-                              </Button>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-                    </TabsContent>
-                  ))}
-                </ScrollArea>
-              </Tabs>
-            </div>
-          </div>
-
-          <div className="min-h-0 rounded-lg border bg-background/50 overflow-hidden flex flex-col">
-            <div className="p-3 border-b flex items-center gap-2">
-              <div className="font-medium text-sm">Extracted draft</div>
-              <div className="ml-auto flex items-center gap-2">
-                {busy && (
-                  <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                    <span>{progress?.status || 'Working…'}{typeof progress?.progress === 'number' ? ` ${Math.round(progress.progress * 100)}%` : ''}</span>
-                  </div>
-                )}
-              </div>
-            </div>
-
-            <ScrollArea className="flex-1 min-h-0">
-              <div className="p-4 space-y-4">
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between gap-3">
-                    <Label className="text-sm font-semibold">Question</Label>
-                    <Button type="button" variant="outline" size="sm" onClick={splitAssistFromLines}>
-                      Use OCR lines
-                    </Button>
-                  </div>
-                  <textarea
-                    value={draftQuestion}
-                    onChange={(e) => {
-                      const v = e.target.value;
-                      setDraftQuestion(v);
-                      syncDraftUiAtIndex(draftIndex, { question: v });
-                    }}
-                    className="w-full min-h-[140px] rounded-md border bg-background p-3 text-sm resize-vertical"
-                    placeholder="Question text"
-                  />
-                </div>
-
-                <Separator />
-
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between gap-3">
-                    <Label className="text-sm font-semibold">Attached images</Label>
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="outline"
-                      onClick={() => {
-                        setAttachedQuestionImages([]);
-                        syncDraftUiAtIndex(draftIndex, { attachedImages: [] });
-                      }}
-                      disabled={attachedQuestionImages.length === 0}
-                    >
-                      Clear
-                    </Button>
-                  </div>
-                  {attachedQuestionImages.length === 0 ? (
-                    <div className="text-xs text-muted-foreground">
-                      Use “Select region” → “Attach crop as image” to capture tables/diagrams.
-                    </div>
-                  ) : (
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                      {attachedQuestionImages.map((src, idx) => (
-                        <div key={`${src}-${idx}`} className="rounded-md border bg-background/70 p-2 space-y-2">
-                          <img src={src} alt={`attached-${idx + 1}`} className="w-full max-h-56 object-contain rounded" />
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant="outline"
-                            onClick={() =>
-                              setAttachedQuestionImages((prev) => {
-                                const next = prev.filter((_, i) => i !== idx);
-                                syncDraftUiAtIndex(draftIndex, { attachedImages: next });
-                                return next;
-                              })
-                            }
-                          >
-                            Remove
-                          </Button>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-
-                <Separator />
-
-                <div className="space-y-3">
-                  <div className="flex items-center justify-between">
-                    <Label className="text-sm font-semibold">Options</Label>
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="outline"
-                      onClick={() => setDraftOptions((prev) => [...prev, { id: uuidv4(), label: String(prev.length + 1), text: '' }])}
-                    >
-                      Add option
-                    </Button>
-                  </div>
-
-                  <div className="space-y-3">
-                    {draftOptions.map((opt, idx) => (
-                      <div key={opt.id} className="rounded-md border p-3 bg-background/70">
-                        <div className="flex items-center gap-3">
-                          <div className="text-xs font-semibold text-muted-foreground w-10">{opt.label || idx + 1}</div>
-                          <label className="flex items-center gap-2 text-xs text-muted-foreground">
-                            <input
-                              type="radio"
-                              name="correct_option"
-                              checked={correctOptionId === opt.id}
-                              onChange={() => {
-                                setCorrectOptionId(opt.id);
-                                syncDraftUiAtIndex(draftIndex, { correctOptionId: opt.id });
-                              }}
-                            />
-                            Correct
-                          </label>
-                          <div className="ml-auto">
-                            <Button
-                              type="button"
-                              size="sm"
-                              variant="ghost"
-                              onClick={() => {
-                                setDraftOptions((prev) => prev.filter((o) => o.id !== opt.id));
-                                setCorrectOptionId((prev) => (prev === opt.id ? null : prev));
-                              }}
-                              disabled={draftOptions.length <= 2}
-                            >
-                              Remove
-                            </Button>
-                          </div>
-                        </div>
-                        <div className="mt-2">
-                          <Textarea
-                            value={opt.text}
-                            onChange={(e) => {
-                              const v = e.target.value;
-                              setDraftOptions((prev) => {
-                                const next = prev.map((o) => (o.id === opt.id ? { ...o, text: v } : o));
-                                syncDraftUiAtIndex(draftIndex, { options: next });
-                                return next;
-                              });
-                            }}
-                            placeholder={`Option ${idx + 1}`}
-                            rows={3}
-                          />
-                        </div>
-                      </div>
+                        )}
+                      </TabsContent>
                     ))}
                   </div>
-
-                  <div className="text-xs text-muted-foreground">
-                    Tip: If OCR split is wrong, use “Select region” on the left and assign the crop to question/option.
-                  </div>
-                </div>
-
-                <Separator />
-
-                <div className="space-y-2">
-                  <Label className="text-sm font-semibold">OCR lines (for manual reassignment)</Label>
-                  <div className="rounded-md border bg-muted/10 p-2 text-xs text-muted-foreground whitespace-pre-wrap">
-                    {rawLines.length ? rawLines.map((l, i) => `${i + 1}. ${l}`).join('\n') : '—'}
-                  </div>
-                </div>
+                </Tabs>
               </div>
-            </ScrollArea>
+            ) : null}
           </div>
-        </div>
-
-        <DialogFooter className="flex-shrink-0 gap-2 sm:gap-3">
-          <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
-            Close
-          </Button>
+        
+        <div className="flex-shrink-0 flex items-center justify-end gap-2 pt-2">
           {drafts.length > 1 && (
-            <Button type="button" variant="outline" onClick={pasteAndNext} disabled={disablePaste || draftIndex >= drafts.length - 1}>
-              Paste & Next
+            <Button
+              type="button"
+              variant="outline"
+              onClick={pasteAndNext}
+              disabled={disablePaste || draftIndex >= drafts.length - 1}
+            >
+              Apply & Next
             </Button>
           )}
           <Button type="button" onClick={() => pasteToInputs({ close: true })} disabled={disablePaste}>
-            Paste to inputs
+            Apply
           </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+        </div>
+      </div>
+    </div>
   );
 }

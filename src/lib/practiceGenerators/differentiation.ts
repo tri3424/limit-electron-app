@@ -56,6 +56,23 @@ function normalizeExprForCompare(raw: string) {
   return raw
     .trim()
     .toLowerCase()
+    .replace(/\\mathit\{c\}/g, 'c')
+    .replace(/\\mathrm\{c\}/g, 'c')
+    .replace(/\{x\}/g, 'x')
+    .replace(/\{(\d+)\}/g, '$1')
+    .replace(/\\left/g, '')
+    .replace(/\\right/g, '')
+    .replace(/-\\frac\{(\d+)\}\{(\d+)\}/g, '-$1/$2')
+    .replace(/\\frac\{(-?\d+)\}\{(\d+)\}/g, '$1/$2')
+    // Normalize scripts: MathLive may emit x^{6} while users might type x^6
+    .replace(/\^\{([^}]+)\}/g, '^$1')
+    .replace(/_\{([^}]+)\}/g, '_$1')
+    .replace(/-\\frac\{x\^(\d+)\}\{(\d+)\}/g, '-1/$2x^$1')
+    .replace(/\\frac\{x\^(\d+)\}\{(\d+)\}/g, '1/$2x^$1')
+    .replace(/-\\frac\{x\}\{(\d+)\}/g, '-1/$1x')
+    .replace(/\\frac\{x\}\{(\d+)\}/g, '1/$1x')
+    // Strip common LaTeX spacing commands MathLive can emit
+    .replace(/\\[ ,;!:]/g, '')
     .replace(/\s+/g, '')
     .replace(/\\cdot/g, '')
     .replace(/\*/g, '')
