@@ -111,6 +111,7 @@ function pickVariant(rng: Rng, avoid?: WordProblemVariantId): WordProblemVariant
   const all: WordProblemVariantId[] = [
     'mensuration_cuboid_height',
     'probability_complement',
+    'coordinate_intercept',
     'unit_conversion_speed',
     'number_skills_mix',
     'greatest_odd_common_factor',
@@ -146,6 +147,7 @@ function pickVariantByDifficulty(
   // - hard: puzzle / more complex multi-constraint reasoning
   const easyPool: WordProblemVariantId[] = [
     'probability_complement',
+    'coordinate_intercept',
     'unit_conversion_speed',
     'number_skills_mix',
   ];

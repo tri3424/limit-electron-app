@@ -140,12 +140,21 @@ export function generateGraphQuadraticLineMcq(input: {
   topicId: PracticeTopicId;
   difficulty: PracticeDifficulty;
   seed: number;
+  variantWeights?: Record<string, number>;
 }): GraphPracticeQuestion {
   const rng = mulberry32(input.seed);
 
   const variant = (() => {
     // Add a non-MCQ skill variant: read y-intercept directly from a quadratic equation.
     // y-intercept is y when x = 0, so for y = ax^2 + bx + c it is simply c.
+    const w = input.variantWeights ?? {};
+    const wMcq = Math.max(0, Number(w.mcq_quad_line ?? 0));
+    const wYInt = Math.max(0, Number(w.y_intercept_from_quadratic_equation ?? 0));
+    const total = wMcq + wYInt;
+    if (total > 0) {
+      return rng.next() * total < wYInt ? 'y_intercept_from_quadratic_equation' : 'mcq_quad_line';
+    }
+
     const roll = rng.int(0, 9);
     if (input.difficulty === 'easy') return roll < 2 ? 'y_intercept_from_quadratic_equation' : 'mcq_quad_line';
     if (input.difficulty === 'medium') return roll < 3 ? 'y_intercept_from_quadratic_equation' : 'mcq_quad_line';

@@ -32,6 +32,8 @@ import SettingsPracticeAdmin from "./pages/SettingsPracticeAdmin";
 import SettingsPracticeAdminFrequency from "./pages/SettingsPracticeAdminFrequency";
 import SettingsPracticeAdminTopicLocks from "./pages/SettingsPracticeAdminTopicLocks";
 import SettingsPracticeAdminMixedModules from "./pages/SettingsPracticeAdminMixedModules";
+import Scorecard from "./pages/Scorecard";
+import SettingsPracticeAdminAnalytics from "./pages/SettingsPracticeAdminAnalytics";
  
 
 const queryClient = new QueryClient();
@@ -261,6 +263,16 @@ const App = () => {
         </ProtectedRoute>
       ),
     },
+		{
+			path: "/settings/practice-admin/analytics",
+			element: (
+				<ProtectedRoute requireAdmin>
+					<Layout>
+						<SettingsPracticeAdminAnalytics />
+					</Layout>
+				</ProtectedRoute>
+			),
+		},
     {
       path: "/songs",
       element: (
@@ -301,16 +313,6 @@ const App = () => {
 				</ProtectedRoute>
 			),
 		},
-		{
-			path: "/song-module/:id",
-			element: (
-				<ProtectedRoute>
-					<Layout>
-						<SongModuleRunner />
-					</Layout>
-				</ProtectedRoute>
-			),
-		},
     {
       path: "/daily-limit/:moduleId",
       element: (
@@ -327,6 +329,16 @@ const App = () => {
         <ProtectedRoute>
           <Layout>
             <Practice />
+          </Layout>
+        </ProtectedRoute>
+      ),
+    },
+    {
+      path: "/scorecard",
+      element: (
+        <ProtectedRoute>
+          <Layout>
+            <Scorecard />
           </Layout>
         </ProtectedRoute>
       ),

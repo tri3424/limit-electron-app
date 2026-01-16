@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { v4 as uuidv4 } from 'uuid';
+import { useNavigate } from 'react-router-dom';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -27,6 +28,12 @@ type PracticeVariantOverride = {
 } | null;
 
 const PRACTICE_VARIANTS: Partial<Record<PracticeTopicId, string[]>> = {
+  quadratics: ['distinct_root', 'repeated_root'],
+  linear_equations: ['linear'],
+  indices: ['mul', 'div', 'pow'],
+  fractions: ['simplify_fraction', 'add_sub_fractions', 'fraction_of_number', 'mixed_to_improper'],
+  algebraic_factorisation: ['simple', 'x2', 'x3', 'x3_3term', 'gcf_binomial', 'gcf_quadratic'],
+  simultaneous_equations: ['two_var', 'three_var'],
   permutation_combination: [
     'team_no_restriction',
     'team_group_not_separated',
@@ -35,9 +42,13 @@ const PRACTICE_VARIANTS: Partial<Record<PracticeTopicId, string[]>> = {
     'arrange_not_together',
     'committee_men_women',
   ],
+  polynomials: ['factor_theorem'],
+  graph_quadratic_line: ['mcq_quad_line', 'y_intercept_from_quadratic_equation'],
+  graph_straight_line: ['mcq_graph_equation', 'y_intercept_from_equation', 'gradient_from_equation'],
   word_problems: [
     'mensuration_cuboid_height',
     'probability_complement',
+    'coordinate_intercept',
     'unit_conversion_speed',
     'number_skills_mix',
     'greatest_odd_common_factor',
@@ -47,6 +58,23 @@ const PRACTICE_VARIANTS: Partial<Record<PracticeTopicId, string[]>> = {
     'number_properties_puzzle',
   ],
   graph_trigonometry: ['unit_circle', 'ratio_quadrant', 'identity_simplify'],
+  graph_unit_circle: [
+    'arc_length_forward',
+    'arc_length_inverse_radius',
+    'arc_length_inverse_theta',
+    'sector_area_forward',
+    'sector_area_inverse_radius',
+    'sector_area_inverse_theta',
+    'sector_perimeter_forward',
+    'chord_length_forward',
+    'midpoint_shaded_area_forward',
+    'midpoint_shaded_area_inverse_radius',
+    'segment_area_forward',
+    'segment_area_inverse_radius',
+    'segment_area_inverse_theta',
+  ],
+  differentiation: ['basic_polynomial', 'stationary_points'],
+  integration: ['indefinite', 'definite'],
 };
 
 function buildForcedVariantWeights(topicId: PracticeTopicId, variantId: string): Record<string, number> | null {
@@ -58,7 +86,115 @@ function buildForcedVariantWeights(topicId: PracticeTopicId, variantId: string):
   return out;
 }
 
+function normalizeCommandToken(s: string): string {
+  return String(s ?? '')
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, '_')
+    .replace(/[^a-z0-9_]/g, '')
+    .replace(/_+/g, '_')
+    .replace(/^_+|_+$/g, '');
+}
+
+function editDistance(a: string, b: string): number {
+  const s = normalizeCommandToken(a);
+  const t = normalizeCommandToken(b);
+  if (s === t) return 0;
+  if (!s) return t.length;
+  if (!t) return s.length;
+  const dp = new Array(t.length + 1).fill(0).map((_, j) => j);
+  for (let i = 1; i <= s.length; i++) {
+    let prev = dp[0];
+    dp[0] = i;
+    for (let j = 1; j <= t.length; j++) {
+      const tmp = dp[j];
+      const cost = s[i - 1] === t[j - 1] ? 0 : 1;
+      dp[j] = Math.min(
+        dp[j] + 1, // deletion
+        dp[j - 1] + 1, // insertion
+        prev + cost // substitution
+      );
+      prev = tmp;
+    }
+  }
+  return dp[t.length] as number;
+}
+
+function bestFuzzyMatch(input: string, candidates: string[]): { value: string; score: number } | null {
+  const q = normalizeCommandToken(input);
+  if (!q) return null;
+  let best: { value: string; score: number } | null = null;
+  for (const c of candidates) {
+    const cn = normalizeCommandToken(c);
+    if (!cn) continue;
+    // Higher is better.
+    let score = 0;
+    if (cn === q) score += 1000;
+    if (cn.startsWith(q) || q.startsWith(cn)) score += 400;
+    if (cn.includes(q) || q.includes(cn)) score += 250;
+    const dist = editDistance(q, cn);
+    score += Math.max(0, 120 - dist * 12);
+    // Prefer shorter candidates when equal.
+    score += Math.max(0, 20 - cn.length);
+    if (!best || score > best.score) best = { value: c, score };
+  }
+  return best;
+}
+
+function resolveTopicAndVariant(input: {
+  rawTopicId: string | null;
+  rawVariantId: string;
+  currentTopicId: PracticeTopicId | null;
+}): { topicId: PracticeTopicId; variantId: string; resolvedBy: 'exact' | 'fuzzy' | 'global' } | null {
+  const topicKeys = Object.keys(PRACTICE_VARIANTS) as PracticeTopicId[];
+  const rawTopic = input.rawTopicId ? normalizeCommandToken(input.rawTopicId) : '';
+  const rawVar = normalizeCommandToken(input.rawVariantId);
+
+  // 1) Exact / fuzzy topic
+  const topicId: PracticeTopicId | null = (() => {
+    if (rawTopic) {
+      const exact = topicKeys.find((t) => normalizeCommandToken(t) === rawTopic) ?? null;
+      if (exact) return exact;
+      const fuzzy = bestFuzzyMatch(rawTopic, topicKeys)?.value ?? null;
+      return (fuzzy as PracticeTopicId | null);
+    }
+    return input.currentTopicId;
+  })();
+
+  // 2) If we have a topic, try within that topic first.
+  if (topicId) {
+    const variants = PRACTICE_VARIANTS[topicId] ?? [];
+    const exactV = variants.find((v) => normalizeCommandToken(v) === rawVar) ?? null;
+    if (exactV) return { topicId, variantId: exactV, resolvedBy: rawTopic ? 'exact' : 'exact' };
+    const fuzzyV = bestFuzzyMatch(rawVar, variants);
+    if (fuzzyV && fuzzyV.score >= 200) {
+      return { topicId, variantId: fuzzyV.value, resolvedBy: rawTopic ? 'fuzzy' : 'fuzzy' };
+    }
+  }
+
+  // 3) Global search across all topic variants.
+  const allPairs: Array<{ topicId: PracticeTopicId; variantId: string }> = [];
+  for (const t of topicKeys) {
+    const vars = PRACTICE_VARIANTS[t] ?? [];
+    for (const v of vars) allPairs.push({ topicId: t, variantId: v });
+  }
+  const best = (() => {
+    let bestPair: { topicId: PracticeTopicId; variantId: string; score: number } | null = null;
+    for (const p of allPairs) {
+      const label = `${p.topicId}:${p.variantId}`;
+      const score = bestFuzzyMatch(rawVar, [p.variantId, label])?.score ?? 0;
+      if (!bestPair || score > bestPair.score) bestPair = { ...p, score };
+    }
+    return bestPair;
+  })();
+  if (best && best.score >= 220) {
+    return { topicId: best.topicId, variantId: best.variantId, resolvedBy: 'global' };
+  }
+  return null;
+}
+
 export default function Practice() {
+  const navigate = useNavigate();
   const { user, isAdmin } = useAuth();
   const settings = useLiveQuery(() => db.settings.get('1'));
 
@@ -108,6 +244,10 @@ export default function Practice() {
 
   const [adminCommand, setAdminCommand] = useState('');
   const [variantOverride, setVariantOverride] = useState<PracticeVariantOverride>(null);
+
+  const activePracticeEventIdRef = useRef<string | null>(null);
+  const activePracticeEventQuestionIdRef = useRef<string | null>(null);
+  const activePracticeEventShownAtRef = useRef<number | null>(null);
 
   const findScrollableAncestor = (el: HTMLElement | null): HTMLElement | null => {
     let cur: HTMLElement | null = el;
@@ -714,7 +854,14 @@ export default function Practice() {
 
     if (!topicId) return;
     if (topicId === 'quadratics') {
-      const q = tryGenerate((seed) => generateQuadraticByFactorisation({ seed, difficulty }));
+      const forced = variantOverride?.topicId === topicId ? buildForcedVariantWeights(topicId, variantOverride.variantId) : null;
+      const q = tryGenerate((seed) =>
+        generateQuadraticByFactorisation({
+          seed,
+          difficulty,
+          variantWeights: forced ?? undefined,
+        })
+      );
       setQuestion(q);
       rememberQuestionId(q.id);
       resetAttemptState();
@@ -750,6 +897,143 @@ export default function Practice() {
     resetAttemptState();
   };
 
+  const buildPracticeSnapshot = useCallback((q: any) => {
+    if (!q) return null;
+    const pruneExplanation = (blocks: any[]) => {
+      if (!Array.isArray(blocks)) return blocks;
+      return blocks.map((b) => {
+        if (!b || typeof b !== 'object') return b;
+        if (b.kind === 'graph') return { kind: 'graph', altText: b.altText };
+        if (b.kind === 'long_division') {
+          return {
+            kind: 'long_division',
+            divisorLatex: b.divisorLatex,
+            dividendLatex: b.dividendLatex,
+            quotientLatex: b.quotientLatex,
+            steps: b.steps,
+          };
+        }
+        return b;
+      });
+    };
+
+    if (q.kind === 'graph') {
+      return {
+        kind: 'graph',
+        id: q.id,
+        topicId: q.topicId,
+        difficulty: q.difficulty,
+        seed: q.seed,
+        promptText: q.promptText,
+        promptKatex: q.promptKatex,
+        katexQuestion: q.katexQuestion,
+        katexOptions: q.katexOptions,
+        correctIndex: q.correctIndex,
+        katexExplanation: q.katexExplanation,
+        generatorParams: q.generatorParams,
+        svgAltText: q.svgAltText,
+      };
+    }
+
+    if (q.metadata?.topic === 'quadratics') {
+      return {
+        id: q.id,
+        katexQuestion: q.katexQuestion,
+        katexExplanation: pruneExplanation(q.katexExplanation),
+        metadata: q.metadata,
+      };
+    }
+
+    return {
+      kind: q.kind,
+      id: q.id,
+      topicId: q.topicId,
+      difficulty: q.difficulty,
+      seed: q.seed,
+      katexQuestion: q.katexQuestion,
+      katexExplanation: pruneExplanation(q.katexExplanation),
+      variantId: q.variantId,
+      generatorParams: q.generatorParams,
+    };
+  }, []);
+
+  const recordShownEvent = useCallback(async () => {
+    if (!user?.id) return;
+    if (step !== 'session') return;
+    if (!question) return;
+
+    const qAny: any = question as any;
+    const questionId = String(qAny.id ?? '');
+    if (!questionId) return;
+
+    if (activePracticeEventQuestionIdRef.current === questionId && activePracticeEventIdRef.current) return;
+
+    const now = Date.now();
+    const topicForRecord = (qAny.topicId ?? qAny.metadata?.topic ?? topicId) as any;
+    const variantForRecord = (qAny.variantId ?? qAny.generatorParams?.kind ?? qAny.metadata?.method) as any;
+
+    const id = uuidv4();
+    activePracticeEventIdRef.current = id;
+    activePracticeEventQuestionIdRef.current = questionId;
+    activePracticeEventShownAtRef.current = now;
+
+    try {
+      await db.practiceEvents.add({
+        id,
+        userId: user.id,
+        username: user.username,
+        mode,
+        topicId: topicForRecord ? String(topicForRecord) : undefined,
+        difficulty: String(qAny.difficulty ?? difficulty ?? ''),
+        variantId: variantForRecord ? String(variantForRecord) : undefined,
+        mixedModuleId: mode === 'mixed' ? (mixedModuleId ?? undefined) : undefined,
+        questionId,
+        questionKind: qAny.kind ? String(qAny.kind) : undefined,
+        shownAt: now,
+        snapshotJson: JSON.stringify(buildPracticeSnapshot(qAny)),
+        createdAt: now,
+      });
+    } catch (e) {
+      console.error(e);
+    }
+  }, [buildPracticeSnapshot, difficulty, mixedModuleId, mode, question, step, topicId, user?.id, user?.username]);
+
+  useEffect(() => {
+    void recordShownEvent();
+  }, [recordShownEvent]);
+
+  const recordSubmitEvent = useCallback(
+    async (payload: { isCorrect: boolean; userAnswer: string }) => {
+      const id = activePracticeEventIdRef.current;
+      const shownAt = activePracticeEventShownAtRef.current;
+      if (!id) return;
+      try {
+        await db.practiceEvents.update(id, {
+          submittedAt: Date.now(),
+          isCorrect: payload.isCorrect,
+          userAnswer: payload.userAnswer,
+          shownAt: shownAt ?? undefined,
+        } as any);
+      } catch (e) {
+        console.error(e);
+      }
+    },
+    []
+  );
+
+  const recordNextEvent = useCallback(async () => {
+    const id = activePracticeEventIdRef.current;
+    if (!id) return;
+    try {
+      await db.practiceEvents.update(id, { nextAt: Date.now() } as any);
+    } catch (e) {
+      console.error(e);
+    }
+    activePracticeEventIdRef.current = null;
+    activePracticeEventQuestionIdRef.current = null;
+    activePracticeEventShownAtRef.current = null;
+  }, []);
+
   const currentTopicForAdminCommand = useMemo(() => {
     const q: any = question as any;
     const tid = (q?.topicId ?? q?.metadata?.topic) as PracticeTopicId | undefined;
@@ -779,24 +1063,37 @@ export default function Practice() {
       return;
     }
     const parts = payload.split(':').map((p) => p.trim()).filter(Boolean);
-    const topicId = (parts.length >= 2 ? parts[0] : currentTopicForAdminCommand) as PracticeTopicId | null;
-    const variantId = parts.length >= 2 ? parts.slice(1).join(':') : parts[0];
-    if (!topicId) {
-      toast.error('Cannot infer topic. Use "/only <topicId>:<variantId>"');
+    const rawTopicId = parts.length >= 2 ? parts[0] : null;
+    const rawVariantId = parts.length >= 2 ? parts.slice(1).join(':') : parts[0];
+
+    const resolved = resolveTopicAndVariant({
+      rawTopicId,
+      rawVariantId,
+      currentTopicId: currentTopicForAdminCommand,
+    });
+
+    if (!resolved) {
+      toast.error('Could not match command to any topic/variant. Try a more specific keyword.');
       return;
     }
-    const weights = buildForcedVariantWeights(topicId, variantId);
+
+    const weights = buildForcedVariantWeights(resolved.topicId, resolved.variantId);
     if (!weights) {
-      const allowed = PRACTICE_VARIANTS[topicId] ?? [];
+      const allowed = PRACTICE_VARIANTS[resolved.topicId] ?? [];
       toast.error(
         allowed.length
-          ? `Unknown variant for ${topicId}. Allowed: ${allowed.join(', ')}`
+          ? `This topic supports variants, but the command could not be applied. Allowed: ${allowed.join(', ')}`
           : `This topic does not support variants via command.`
       );
       return;
     }
-    setVariantOverride({ topicId, variantId });
-    toast.success(`Forced ${topicId}:${variantId}`);
+
+    setVariantOverride({ topicId: resolved.topicId, variantId: resolved.variantId });
+    if (resolved.resolvedBy === 'exact') {
+      toast.success(`Forced ${resolved.topicId}:${resolved.variantId}`);
+    } else {
+      toast.success(`Forced ${resolved.topicId}:${resolved.variantId} (matched from "${payload}")`);
+    }
   }, [adminCommand, currentTopicForAdminCommand, isAdmin]);
 
   useEffect(() => {
@@ -1276,7 +1573,12 @@ export default function Practice() {
       {step === 'chooser' ? (
         <div className="max-w-6xl mx-auto">
           <div className="mb-4">
-            <div className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">Practice</div>
+            <div className="flex items-center justify-between gap-3">
+              <div className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">Practice</div>
+              <Button variant="outline" size="sm" onClick={() => navigate('/scorecard')}>
+                SCORECARD
+              </Button>
+            </div>
           </div>
 
           <Card className="p-6">
@@ -2235,6 +2537,10 @@ export default function Practice() {
                   const ok = checkSessionAnswer();
                   setSubmitted(true);
                   setIsCorrect(ok);
+                  void recordSubmitEvent({
+                    isCorrect: ok,
+                    userAnswer: [answer1, answer2, answer3].filter((x) => String(x ?? '').trim().length > 0).join(' | '),
+                  });
                   if ((question as any).metadata?.topic === 'quadratics') {
                     persistAttempt({ correct: ok, inputs: [answer1, answer2], q: question as QuadraticFactorizationQuestion });
                   }
@@ -2253,6 +2559,7 @@ export default function Practice() {
                   <Button
                     variant="outline"
                     onClick={() => {
+                      void recordNextEvent();
                       const nextSeed = Date.now();
                       setSessionSeed(nextSeed);
                       if (mode === 'mixed') {

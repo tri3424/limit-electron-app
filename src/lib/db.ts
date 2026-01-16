@@ -185,6 +185,26 @@ export interface Attempt {
   scheduledEndUtc?: number;
 }
 
+export interface PracticeEventRecord {
+  id: string;
+  userId: string;
+  username?: string;
+  mode: 'individual' | 'mixed';
+  topicId?: string;
+  difficulty?: string;
+  variantId?: string;
+  mixedModuleId?: string;
+  questionId: string;
+  questionKind?: string;
+  shownAt: number;
+  submittedAt?: number;
+  nextAt?: number;
+  userAnswer?: string;
+  isCorrect?: boolean;
+  snapshotJson?: string;
+  createdAt: number;
+}
+
 // Integrity event types
 export type IntegrityEventType =
   | 'visibility_change'
@@ -568,6 +588,7 @@ export class ExamDatabase extends Dexie {
 	songSrtCues!: Table<SongSrtCue, string>;
 	binaryAssets!: Table<BinaryAsset, string>;
 	lyricsSource!: Table<LyricsSourceEntry, string>;
+	practiceEvents!: Table<PracticeEventRecord, string>;
 
   constructor() {
     super('ExamDatabase');
@@ -1196,6 +1217,33 @@ export class ExamDatabase extends Dexie {
 			binaryAssets: 'id, kind, createdAt',
 			lyricsSource: 'id, normalizedEnglishTitle, createdAt, writer',
 			songSrtCues: 'id, songId, cueIndex, [songId+cueIndex], startMs, endMs, text'
+		});
+
+		this.version(25).stores({
+			questions: 'id, type, *tags, *modules, metadata.createdAt',
+			modules: 'id, type, *tags, createdAt, visible, locked',
+			attempts: 'id, moduleId, type, startedAt, syncStatus',
+			integrityEvents: 'id, attemptId, type, timestamp',
+			tags: 'id, name',
+			semanticOntologyTags: 'id, kind, parentId, name, updatedAt',
+			semanticEmbeddings: 'id, [scope+scopeId], scope, scopeId, modelId, createdAt',
+			questionSemanticAnalyses: 'id, questionId, createdAt, [questionId+analysisVersion], [questionId+modelId], source',
+			questionSemanticOverrides: 'id, questionId, updatedAt, baseAnalysisId, [questionId+updatedAt]',
+			settings: 'id',
+			dailyStats: 'id, date, moduleId, [date+moduleId], [moduleId+date], moduleType, createdAt',
+			users: 'id, username',
+			globalGlossary: 'id, normalizedWord, word',
+			intelligenceSignals: 'id, type, questionId, moduleId, [type+moduleId], [questionId+type]',
+			reviewInteractions: 'id, attemptId, moduleId, userId, questionId, timestamp, [attemptId+questionId], [moduleId+userId]',
+			errorReports: 'id, status, createdAt, updatedAt, moduleId, questionId, questionCode, reporterUserId, [status+createdAt]',
+			songs: 'id, visible, createdAt, updatedAt',
+			songModules: 'id, visible, createdAt, updatedAt',
+			songListeningEvents: 'id, date, timestamp, songModuleId, userId, songId, [date+songModuleId], [songModuleId+date], [songModuleId+userId], [songModuleId+songId]',
+			binaryAssets: 'id, kind, createdAt',
+			lyricsSource: 'id, normalizedEnglishTitle, createdAt, writer',
+			songSrtCues: 'id, songId, cueIndex, [songId+cueIndex], startMs, endMs, text',
+			practiceEvents:
+				'id, userId, questionId, shownAt, submittedAt, nextAt, mode, topicId, mixedModuleId, [userId+shownAt], [userId+submittedAt], [topicId+shownAt], [mode+shownAt]'
 		});
 	}
 }

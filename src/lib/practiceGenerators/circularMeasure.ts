@@ -227,6 +227,7 @@ export function generateCircularMeasureProblem(input: {
   seed: number;
   difficulty: CircularMeasureDifficulty;
   avoidKind?: CircularMeasureProblemKind;
+  variantWeights?: Record<string, number>;
 }): CircularMeasureProblem {
   const rng = mulberry32(input.seed);
 
@@ -261,7 +262,26 @@ export function generateCircularMeasureProblem(input: {
 
   const kindPool = input.difficulty === 'easy' ? kindPoolEasy : input.difficulty === 'medium' ? kindPoolMed : kindPoolHard;
   const pool = input.avoidKind ? kindPool.filter((k) => k !== input.avoidKind) : kindPool;
-  const kind = (pool.length ? pool : kindPool)[rng.int(0, (pool.length ? pool : kindPool).length - 1)];
+
+  const kind = (() => {
+    const candidates = (pool.length ? pool : kindPool);
+    const w = input.variantWeights ?? {};
+    let total = 0;
+    const weights = candidates.map((k) => {
+      const wk = typeof w[k] === 'number' ? Math.max(0, Number(w[k])) : 0;
+      total += wk;
+      return wk;
+    });
+    if (!(total > 0)) {
+      return candidates[rng.int(0, candidates.length - 1)];
+    }
+    let r = rng.next() * total;
+    for (let i = 0; i < candidates.length; i++) {
+      r -= weights[i] ?? 0;
+      if (r <= 0) return candidates[i];
+    }
+    return candidates[candidates.length - 1];
+  })();
 
   const r = rndNiceRadius(rng, input.difficulty);
   const thetaFrac = pickTheta(rng, input.difficulty);

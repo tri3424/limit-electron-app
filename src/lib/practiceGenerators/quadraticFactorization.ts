@@ -146,10 +146,22 @@ function frac(n: number, d: number): Fraction {
 export function generateQuadraticByFactorisation(input: {
   seed: number;
   difficulty: PracticeDifficulty;
+  variantWeights?: Record<string, number>;
 }): QuadraticFactorizationQuestion {
   const rng = mulberry32(input.seed);
 
-  const repeatedRoot = rng.next() < 0.25;
+  const repeatedRoot = (() => {
+    const w = input.variantWeights ?? {};
+    const wDistinct = typeof w.distinct_root === 'number' ? Math.max(0, Number(w.distinct_root)) : NaN;
+    const wRepeated = typeof w.repeated_root === 'number' ? Math.max(0, Number(w.repeated_root)) : NaN;
+    const hasWeights = Number.isFinite(wDistinct) || Number.isFinite(wRepeated);
+    if (!hasWeights) return rng.next() < 0.25;
+    const a = Number.isFinite(wDistinct) ? wDistinct : 0;
+    const b = Number.isFinite(wRepeated) ? wRepeated : 0;
+    const total = a + b;
+    if (!(total > 0)) return rng.next() < 0.25;
+    return rng.next() * total < b;
+  })();
 
   const ranges = (() => {
     switch (input.difficulty) {

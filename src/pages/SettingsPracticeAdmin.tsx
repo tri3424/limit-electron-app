@@ -2,7 +2,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
-import { ArrowLeft, Shield, Sliders, Lock, Layers } from 'lucide-react';
+import { ArrowLeft, Shield, Sliders, Lock, Layers, BarChart3 } from 'lucide-react';
 
 export default function SettingsPracticeAdmin() {
   const navigate = useNavigate();
@@ -74,6 +74,20 @@ export default function SettingsPracticeAdmin() {
                   <div className="font-semibold">Mixed Modules</div>
                   <div className="text-xs text-muted-foreground mt-1">
                     Create modules combining multiple topics/difficulties.
+                  </div>
+                </div>
+              </div>
+            </Card>
+          </Link>
+
+          <Link to="/settings/practice-admin/analytics" className="block">
+            <Card className="p-4 hover:bg-muted/30 transition-colors">
+              <div className="flex items-start gap-3">
+                <BarChart3 className="h-5 w-5 text-primary mt-0.5" />
+                <div className="min-w-0">
+                  <div className="font-semibold">Analytics</div>
+                  <div className="text-xs text-muted-foreground mt-1">
+                    Daily performance and question timelines.
                   </div>
                 </div>
               </div>

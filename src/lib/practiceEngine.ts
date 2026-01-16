@@ -242,7 +242,12 @@ export function generatePracticeQuestion(input: {
         variantWeights: input.variantWeights,
       });
     case 'indices':
-      return generateIndices(input);
+      return generateIndices({
+        topicId: 'indices',
+        difficulty: input.difficulty,
+        seed: input.seed,
+        variantWeights: input.variantWeights,
+      });
     case 'permutation_combination': {
       const q = generatePermutationCombinationQuestion({
         seed: input.seed,
@@ -289,7 +294,12 @@ export function generatePracticeQuestion(input: {
         variantWeights: input.variantWeights,
       });
     case 'graph_quadratic_line':
-      return generateGraphQuadraticLineMcq(input);
+      return generateGraphQuadraticLineMcq({
+        topicId: 'graph_quadratic_line',
+        difficulty: input.difficulty,
+        seed: input.seed,
+        variantWeights: input.variantWeights,
+      });
     case 'graph_straight_line':
       return generateGraphStraightLineMcq({
         topicId: 'graph_straight_line',
@@ -348,6 +358,7 @@ export function generatePracticeQuestion(input: {
         difficulty: input.difficulty,
         seed: input.seed,
         avoidKind: input.avoidVariantId as any,
+        variantWeights: input.variantWeights,
       });
     case 'word_problems':
       return generateWordProblemQuestion({
@@ -398,8 +409,14 @@ function generateCircularMeasureGraphQuestion(input: {
   difficulty: PracticeDifficulty;
   seed: number;
   avoidKind?: string;
+  variantWeights?: Record<string, number>;
 }): GraphPracticeQuestion {
-  const p = generateCircularMeasureProblem({ seed: input.seed, difficulty: input.difficulty, avoidKind: input.avoidKind as any });
+  const p = generateCircularMeasureProblem({
+    seed: input.seed,
+    difficulty: input.difficulty,
+    avoidKind: input.avoidKind as any,
+    variantWeights: input.variantWeights,
+  });
   const svgDataUrl = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(p.svg)}`;
   const expectsNumber = typeof p.answerValue === 'number' && Number.isFinite(p.answerValue);
 
@@ -650,7 +667,7 @@ function generateFractions(input: {
   };
 }
 
-function generateIndices(input: { topicId: PracticeTopicId; difficulty: PracticeDifficulty; seed: number }): IndicesQuestion {
+function generateIndices(input: { topicId: PracticeTopicId; difficulty: PracticeDifficulty; seed: number; variantWeights?: Record<string, number> }): IndicesQuestion {
   const rng = mulberry32(input.seed);
 
   const base = rng.next() < 0.45 ? 'a' : rng.next() < 0.5 ? 'x' : 'y';
@@ -674,10 +691,21 @@ function generateIndices(input: { topicId: PracticeTopicId; difficulty: Practice
   let explanation: KatexExplanationBlock[] = [];
 
   const pattern = (() => {
-    const choices: Array<'mul' | 'div' | 'pow'> = ['mul'];
-    if (allowDivision) choices.push('div');
-    if (allowPowerOfPower) choices.push('pow');
-    return choices[rng.int(0, choices.length - 1)];
+    const w = input.variantWeights ?? {};
+    const wMul = Math.max(0, Number(w.mul ?? 1));
+    const wDiv = allowDivision ? Math.max(0, Number(w.div ?? 1)) : 0;
+    const wPow = allowPowerOfPower ? Math.max(0, Number(w.pow ?? 1)) : 0;
+    const total = wMul + wDiv + wPow;
+    if (!(total > 0)) {
+      const choices: Array<'mul' | 'div' | 'pow'> = ['mul'];
+      if (allowDivision) choices.push('div');
+      if (allowPowerOfPower) choices.push('pow');
+      return choices[rng.int(0, choices.length - 1)];
+    }
+    const pick = rng.next() * total;
+    if (pick < wMul) return 'mul' as const;
+    if (pick < wMul + wDiv) return 'div' as const;
+    return 'pow' as const;
   })();
 
   if (pattern === 'pow') {
