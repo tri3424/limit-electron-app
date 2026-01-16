@@ -21,8 +21,45 @@ import { generatePracticeQuestion, PracticeQuestion, GraphPracticeQuestion } fro
 import { useAuth } from '@/contexts/AuthContext';
 import { toast } from 'sonner';
 
+type PracticeVariantOverride = {
+  topicId: PracticeTopicId;
+  variantId: string;
+} | null;
+
+const PRACTICE_VARIANTS: Partial<Record<PracticeTopicId, string[]>> = {
+  permutation_combination: [
+    'team_no_restriction',
+    'team_group_not_separated',
+    'digits_even_unique',
+    'arrange_together',
+    'arrange_not_together',
+    'committee_men_women',
+  ],
+  word_problems: [
+    'mensuration_cuboid_height',
+    'probability_complement',
+    'unit_conversion_speed',
+    'number_skills_mix',
+    'greatest_odd_common_factor',
+    'compound_interest_rate',
+    'probability_two_bags_blue',
+    'bus_pass_increases',
+    'number_properties_puzzle',
+  ],
+  graph_trigonometry: ['unit_circle', 'ratio_quadrant', 'identity_simplify'],
+};
+
+function buildForcedVariantWeights(topicId: PracticeTopicId, variantId: string): Record<string, number> | null {
+  const variants = PRACTICE_VARIANTS[topicId];
+  if (!variants || variants.length === 0) return null;
+  if (!variants.includes(variantId)) return null;
+  const out: Record<string, number> = {};
+  for (const v of variants) out[v] = v === variantId ? 1 : 0;
+  return out;
+}
+
 export default function Practice() {
-  const { user } = useAuth();
+  const { user, isAdmin } = useAuth();
   const settings = useLiveQuery(() => db.settings.get('1'));
 
   const [mode, setMode] = useState<'individual' | 'mixed'>('individual');
@@ -68,6 +105,9 @@ export default function Practice() {
   const [reportScreenshotError, setReportScreenshotError] = useState<string | null>(null);
   const [isSubmittingReport, setIsSubmittingReport] = useState(false);
   const [reportCaptureMode, setReportCaptureMode] = useState<'practice_full' | 'screen'>('practice_full');
+
+  const [adminCommand, setAdminCommand] = useState('');
+  const [variantOverride, setVariantOverride] = useState<PracticeVariantOverride>(null);
 
   const findScrollableAncestor = (el: HTMLElement | null): HTMLElement | null => {
     let cur: HTMLElement | null = el;
@@ -637,8 +677,11 @@ export default function Practice() {
         setQuestion(q);
         rememberQuestionId(q.id);
       } else {
-        const weightsForTopic = topicVariantWeights?.[item.topicId] as any;
-        const strictTopic = hasConfiguredWeights(weightsForTopic);
+        const forced = variantOverride?.topicId === item.topicId
+          ? buildForcedVariantWeights(item.topicId, variantOverride.variantId)
+          : null;
+        const weightsForTopic = (forced ?? (topicVariantWeights?.[item.topicId] as any)) as any;
+        const strictTopic = !!forced || hasConfiguredWeights(weightsForTopic);
         const strict = strictMixed || strictTopic;
 
         const avoidVariantId = !strict && item.topicId === 'word_problems'
@@ -664,9 +707,9 @@ export default function Practice() {
           setLastVariantByTopic((m) => ({ ...m, word_problems: nextVariant }));
           rememberWordProblemCategory((q as any).variantId);
         }
+        resetAttemptState();
+        return;
       }
-      resetAttemptState();
-      return;
     }
 
     if (!topicId) return;
@@ -679,11 +722,20 @@ export default function Practice() {
     }
 
     const weightsForTopic = topicVariantWeights?.[topicId] as any;
-    const strict = hasConfiguredWeights(weightsForTopic);
+    const forced = variantOverride?.topicId === topicId ? buildForcedVariantWeights(topicId, variantOverride.variantId) : null;
+    const effectiveWeightsForTopic = (forced ?? weightsForTopic) as any;
+    const strict = !!forced || hasConfiguredWeights(effectiveWeightsForTopic);
     const avoidVariantId = !strict ? (lastVariantByTopic[topicId] as string | undefined) : undefined;
 
     const q = tryGenerate(
-      (seed) => generatePracticeQuestion({ topicId, difficulty, seed, avoidVariantId, variantWeights: weightsForTopic }),
+      (seed) =>
+        generatePracticeQuestion({
+          topicId: topicId,
+          difficulty: difficulty,
+          seed,
+          avoidVariantId,
+          variantWeights: effectiveWeightsForTopic,
+        }),
       topicId === 'word_problems' ? acceptWordProblem : undefined,
       { strict }
     );
@@ -697,6 +749,55 @@ export default function Practice() {
     }
     resetAttemptState();
   };
+
+  const currentTopicForAdminCommand = useMemo(() => {
+    const q: any = question as any;
+    const tid = (q?.topicId ?? q?.metadata?.topic) as PracticeTopicId | undefined;
+    return tid ?? null;
+  }, [question]);
+
+  const applyAdminCommand = useCallback(() => {
+    if (!isAdmin) return;
+    const raw = (adminCommand ?? '').trim();
+    if (!raw) {
+      setVariantOverride(null);
+      return;
+    }
+    if (/^\/?clear\b/i.test(raw)) {
+      setVariantOverride(null);
+      toast.success('Cleared forced variant');
+      return;
+    }
+    const onlyMatch = raw.match(/^\/?only\s+(.+)$/i);
+    if (!onlyMatch) {
+      toast.error('Invalid command. Use "/only <variantId>" or "/only <topicId>:<variantId>" or "/clear"');
+      return;
+    }
+    const payload = onlyMatch[1]?.trim() ?? '';
+    if (!payload) {
+      toast.error('Missing variant id');
+      return;
+    }
+    const parts = payload.split(':').map((p) => p.trim()).filter(Boolean);
+    const topicId = (parts.length >= 2 ? parts[0] : currentTopicForAdminCommand) as PracticeTopicId | null;
+    const variantId = parts.length >= 2 ? parts.slice(1).join(':') : parts[0];
+    if (!topicId) {
+      toast.error('Cannot infer topic. Use "/only <topicId>:<variantId>"');
+      return;
+    }
+    const weights = buildForcedVariantWeights(topicId, variantId);
+    if (!weights) {
+      const allowed = PRACTICE_VARIANTS[topicId] ?? [];
+      toast.error(
+        allowed.length
+          ? `Unknown variant for ${topicId}. Allowed: ${allowed.join(', ')}`
+          : `This topic does not support variants via command.`
+      );
+      return;
+    }
+    setVariantOverride({ topicId, variantId });
+    toast.success(`Forced ${topicId}:${variantId}`);
+  }, [adminCommand, currentTopicForAdminCommand, isAdmin]);
 
   useEffect(() => {
     if (step !== 'session') return;
@@ -1331,6 +1432,8 @@ export default function Practice() {
                     setAnswer1('');
                     setAnswer2('');
                     setAnswer3('');
+                    setVariantOverride(null);
+                    setAdminCommand('');
                   }}
                 >
                   <ArrowLeft className="h-5 w-5" />
@@ -1340,6 +1443,39 @@ export default function Practice() {
                 </div>
               </div>
               <div className="flex items-center gap-2">
+                {isAdmin ? (
+                  <div className="hidden md:flex items-center gap-2">
+                    <Input
+                      value={adminCommand}
+                      onChange={(e) => setAdminCommand(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          applyAdminCommand();
+                        }
+                      }}
+                      placeholder="/only <variantId> or /only <topicId>:<variantId> or /clear"
+                      className="w-[420px] bg-white"
+                    />
+                    <Button variant="outline" size="sm" onClick={applyAdminCommand} className="bg-white">
+                      Apply
+                    </Button>
+                    {variantOverride ? (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          setVariantOverride(null);
+                          setAdminCommand('');
+                          toast.success('Cleared forced variant');
+                        }}
+                        className="bg-white"
+                      >
+                        Clear
+                      </Button>
+                    ) : null}
+                  </div>
+                ) : null}
                 <Button
                   variant="outline"
                   size="sm"
@@ -1364,6 +1500,11 @@ export default function Practice() {
                 </Button>
               </div>
             </div>
+            {isAdmin && variantOverride ? (
+              <div className="mt-2 text-xs text-muted-foreground">
+                Forced variant: <span className="font-mono">{variantOverride.topicId}:{variantOverride.variantId}</span>
+              </div>
+            ) : null}
           </Card>
 
           <Dialog open={reportHelpOpen} onOpenChange={setReportHelpOpen}>
