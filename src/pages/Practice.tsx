@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
+import Dexie from 'dexie';
 import { v4 as uuidv4 } from 'uuid';
 import { useNavigate } from 'react-router-dom';
 import { Card } from '@/components/ui/card';
@@ -21,6 +22,7 @@ import { generateQuadraticByFactorisation, PracticeDifficulty, QuadraticFactoriz
 import { generatePracticeQuestion, PracticeQuestion, GraphPracticeQuestion } from '@/lib/practiceEngine';
 import { useAuth } from '@/contexts/AuthContext';
 import { toast } from 'sonner';
+import { HOME_ROUTE } from '@/constants/routes';
 
 type PracticeVariantOverride = {
   topicId: PracticeTopicId;
@@ -198,6 +200,20 @@ export default function Practice() {
   const { user, isAdmin } = useAuth();
   const settings = useLiveQuery(() => db.settings.get('1'));
 
+  const recentPracticeEvents = useLiveQuery(async () => {
+    if (!user?.id) return [];
+    try {
+      return db.practiceEvents
+        .where('[userId+shownAt]')
+        .between([user.id, Dexie.minKey], [user.id, Dexie.maxKey])
+        .reverse()
+        .limit(250)
+        .toArray();
+    } catch {
+      return [];
+    }
+  }, [user?.id]) || [];
+
   const [mode, setMode] = useState<'individual' | 'mixed'>('individual');
   const [step, setStep] = useState<'chooser' | 'session'>('chooser');
   const [topicId, setTopicId] = useState<PracticeTopicId | null>(null);
@@ -248,6 +264,24 @@ export default function Practice() {
   const activePracticeEventIdRef = useRef<string | null>(null);
   const activePracticeEventQuestionIdRef = useRef<string | null>(null);
   const activePracticeEventShownAtRef = useRef<number | null>(null);
+
+  const finalizeActivePracticeEvent = useCallback(async (payload: { submittedAt: number; nextAt: number; userAnswer: string; isCorrect: boolean }) => {
+    const id = activePracticeEventIdRef.current;
+    if (!id) return;
+    try {
+      await db.practiceEvents.update(id, {
+        submittedAt: payload.submittedAt,
+        nextAt: payload.nextAt,
+        userAnswer: payload.userAnswer,
+        isCorrect: payload.isCorrect,
+      } as any);
+    } catch (e) {
+      console.error(e);
+    }
+    activePracticeEventIdRef.current = null;
+    activePracticeEventQuestionIdRef.current = null;
+    activePracticeEventShownAtRef.current = null;
+  }, []);
 
   const findScrollableAncestor = (el: HTMLElement | null): HTMLElement | null => {
     let cur: HTMLElement | null = el;
@@ -666,10 +700,69 @@ export default function Practice() {
 
   const mixedModules = useMemo(() => settings?.mixedPracticeModules ?? [], [settings?.mixedPracticeModules]);
   const practiceTopicLocks = useMemo(() => settings?.practiceTopicLocks ?? {}, [settings?.practiceTopicLocks]);
+  const practiceTopicLocksByUserKey = useMemo(
+    () => (settings as any)?.practiceTopicLocksByUserKey ?? {},
+    [settings]
+  );
   const selectedMixedModule = useMemo(
     () => (mixedModuleId ? mixedModules.find((m) => m.id === mixedModuleId) ?? null : null),
     [mixedModules, mixedModuleId]
   );
+
+  const parseHHMM = (value: string | undefined): null | { h: number; m: number } => {
+    const v = String(value ?? '').trim();
+    const m = v.match(/^(\d{1,2}):(\d{2})$/);
+    if (!m) return null;
+    const hh = Number(m[1]);
+    const mm = Number(m[2]);
+    if (!Number.isFinite(hh) || !Number.isFinite(mm)) return null;
+    if (hh < 0 || hh > 23 || mm < 0 || mm > 59) return null;
+    return { h: hh, m: mm };
+  };
+
+  const isMixedModuleAssignedToUser = useCallback((m: any) => {
+    if (isAdmin) return true;
+    const ids = Array.isArray(m?.assignedUserIds) ? (m.assignedUserIds as string[]) : [];
+    if (!user?.id) return false;
+    return ids.includes(user.id);
+  }, [isAdmin, user?.id]);
+
+  const isMixedModuleOpenNow = useCallback((m: any, nowMs: number) => {
+    const sched: any = m?.schedule;
+    if (!sched?.enabled) return true;
+
+    // Legacy date-time window
+    if (typeof sched.opensAt === 'number' && typeof sched.closesAt === 'number') {
+      return nowMs >= sched.opensAt && nowMs <= sched.closesAt;
+    }
+
+    // Day-of-week + time window
+    const days = Array.isArray(sched.daysOfWeek) ? (sched.daysOfWeek as number[]) : [];
+    const openT = parseHHMM(sched.opensTime);
+    const closeT = parseHHMM(sched.closesTime);
+    if (!days.length || !openT || !closeT) return true;
+
+    const now = new Date(nowMs);
+    const day = now.getDay();
+    if (!days.includes(day)) return false;
+
+    const cur = now.getHours() * 60 + now.getMinutes();
+    const o = openT.h * 60 + openT.m;
+    const c = closeT.h * 60 + closeT.m;
+    if (o === c) return true;
+    if (c > o) return cur >= o && cur <= c;
+    // crosses midnight
+    return cur >= o || cur <= c;
+  }, [parseHHMM]);
+
+  const userKey = user?.role === 'admin' ? 'admin' : (user?.id || user?.username || 'anonymous');
+
+  const isTopicLocked = (id: PracticeTopicId) => {
+    const globalLocked = !!(practiceTopicLocks as any)?.[id];
+    const perUser = (practiceTopicLocksByUserKey as any)?.[userKey] ?? {};
+    const userLocked = !!(perUser as any)?.[id];
+    return globalLocked || userLocked;
+  };
 
   const resetAttemptState = () => {
     setAnswer1('');
@@ -740,7 +833,6 @@ export default function Practice() {
   };
 
   const generateNext = (seedValue: number) => {
-    const userKey = user?.role === 'admin' ? 'admin' : (user?.id || user?.username || 'anonymous');
     const freq = (settings as any)?.practiceFrequencies?.byUserKey?.[userKey] ?? null;
     const topicVariantWeights = (freq?.topicVariantWeights ?? {}) as Record<string, Record<string, number>>;
     const mixedModuleItemWeights = (freq?.mixedModuleItemWeights ?? {}) as Record<string, Record<number, number>>;
@@ -774,6 +866,52 @@ export default function Practice() {
       return n - 1;
     };
 
+    const weightedPick = <T,>(items: T[], getWeight: (it: T, idx: number) => number, seed: number): T | null => {
+      const rng = (() => {
+        let t = (seed ^ 0x6c8e9cf5) >>> 0;
+        const next = () => {
+          t += 0x6d2b79f5;
+          let x = Math.imul(t ^ (t >>> 15), 1 | t);
+          x ^= x + Math.imul(x ^ (x >>> 7), 61 | x);
+          return ((x ^ (x >>> 14)) >>> 0) / 4294967296;
+        };
+        return { next };
+      })();
+
+      let total = 0;
+      for (let i = 0; i < items.length; i++) total += Math.max(0, Number(getWeight(items[i]!, i) ?? 0));
+      if (!(total > 0)) return null;
+      let r = rng.next() * total;
+      for (let i = 0; i < items.length; i++) {
+        const w = Math.max(0, Number(getWeight(items[i]!, i) ?? 0));
+        r -= w;
+        if (r <= 0) return items[i]!;
+      }
+      return items[items.length - 1] ?? null;
+    };
+
+    const autoDifficultyForTopic = (topic: PracticeTopicId) => {
+      const ev = recentPracticeEvents.filter((e) => e.topicId === topic).slice(0, 40);
+      if (ev.length < 8) return 'easy' as PracticeDifficulty;
+      const recent = ev.slice(0, 12);
+      const wrongStreak = (() => {
+        let s = 0;
+        for (const e of recent) {
+          if (e.isCorrect === false) s += 1;
+          else break;
+        }
+        return s;
+      })();
+      if (wrongStreak >= 2) return 'easy' as PracticeDifficulty;
+
+      const scored = recent.filter((e) => typeof e.isCorrect === 'boolean');
+      const correct = scored.reduce((acc, e) => acc + (e.isCorrect ? 1 : 0), 0);
+      const acc = scored.length ? correct / scored.length : 0;
+      if (acc >= 0.9) return 'hard' as PracticeDifficulty;
+      if (acc >= 0.75) return 'medium' as PracticeDifficulty;
+      return 'easy' as PracticeDifficulty;
+    };
+
     const recentSet = new Set(recentQuestionIds);
     const tryGenerate = (
       fn: (seed: number) => QuadraticFactorizationQuestion | PracticeQuestion,
@@ -799,13 +937,97 @@ export default function Practice() {
     };
 
     if (mode === 'mixed') {
-      if (!selectedMixedModule || !selectedMixedModule.items?.length) return;
-      const items = selectedMixedModule.items;
-      const weights = mixedModuleItemWeights?.[selectedMixedModule.id];
+      if (!selectedMixedModule) return;
+
+      if ((selectedMixedModule as any).type === 'pool') {
+        const pool = ((selectedMixedModule as any).pool ?? []) as Array<{
+          topicId: PracticeTopicId;
+          weight: number;
+          difficultyMode: 'fixed' | 'mix' | 'auto';
+          difficulty?: PracticeDifficulty;
+          difficultyWeights?: Partial<Record<PracticeDifficulty, number>>;
+        }>;
+        const unlocked = pool.filter((p) => p?.topicId && !isTopicLocked(p.topicId));
+        if (!unlocked.length) return;
+
+        const picked =
+          weightedPick(unlocked, (p) => Number(p.weight ?? 0), seedValue) ??
+          unlocked[((seedValue >>> 0) % unlocked.length) as number] ??
+          null;
+        if (!picked) return;
+
+        const pickedDifficulty: PracticeDifficulty = (() => {
+          if (picked.difficultyMode === 'fixed') return (picked.difficulty ?? 'easy') as PracticeDifficulty;
+          if (picked.difficultyMode === 'mix') {
+            const w = picked.difficultyWeights ?? {};
+            const candidates: PracticeDifficulty[] = ['easy', 'medium', 'hard'];
+            const best = weightedPick(candidates, (d) => Number((w as any)[d] ?? 0), seedValue);
+            return (best ?? 'easy') as PracticeDifficulty;
+          }
+          return autoDifficultyForTopic(picked.topicId);
+        })();
+
+        const item = { topicId: picked.topicId, difficulty: pickedDifficulty };
+
+        if (item.topicId === 'quadratics') {
+          const q = tryGenerate((seed) => generateQuadraticByFactorisation({ seed, difficulty: item.difficulty }));
+          setQuestion(q);
+          rememberQuestionId(q.id);
+        } else {
+          const forced =
+            variantOverride?.topicId === item.topicId ? buildForcedVariantWeights(item.topicId, variantOverride.variantId) : null;
+          const weightsForTopic = (forced ?? (topicVariantWeights?.[item.topicId] as any)) as any;
+          const strictTopic = !!forced || hasConfiguredWeights(weightsForTopic);
+
+          const avoidVariantId = !strictTopic && item.topicId === 'word_problems'
+            ? (lastVariantByTopic.word_problems as string | undefined)
+            : undefined;
+
+          const q = tryGenerate(
+            (seed) =>
+              generatePracticeQuestion({
+                topicId: item.topicId,
+                difficulty: item.difficulty,
+                seed,
+                avoidVariantId,
+                variantWeights: weightsForTopic,
+              }),
+            item.topicId === 'word_problems' ? acceptWordProblem : undefined,
+            { strict: strictTopic }
+          );
+
+          setQuestion(q);
+          rememberQuestionId(q.id);
+          if (item.topicId === 'word_problems') {
+            const nextVariant = (q as any).variantId ?? undefined;
+            setLastVariantByTopic((m) => ({ ...m, word_problems: nextVariant }));
+            rememberWordProblemCategory((q as any).variantId);
+          }
+          resetAttemptState();
+          return;
+        }
+
+        resetAttemptState();
+        return;
+      }
+
+      if (!(selectedMixedModule as any).items?.length) return;
+
+      const items = (selectedMixedModule as any).items as Array<{ topicId: PracticeTopicId; difficulty: PracticeDifficulty }>;
+      const weights = mixedModuleItemWeights?.[(selectedMixedModule as any).id];
       const strictMixed = hasConfiguredWeights(weights);
       const weightedIdx = weights ? weightedPickIndex(weights as any, items.length, seedValue) : null;
-      const idx = typeof weightedIdx === 'number' ? weightedIdx : (mixedCursor % items.length);
-      const item = items[idx];
+      const idx0 = typeof weightedIdx === 'number' ? weightedIdx : (mixedCursor % items.length);
+
+      let item: (typeof items)[number] | undefined;
+      for (let i = 0; i < items.length; i++) {
+        const idx = (idx0 + i) % items.length;
+        const candidate = items[idx];
+        if (!candidate) continue;
+        if (isTopicLocked(candidate.topicId)) continue;
+        item = candidate;
+        break;
+      }
       if (!item) return;
 
       if (item.topicId === 'quadratics') {
@@ -903,7 +1125,7 @@ export default function Practice() {
       if (!Array.isArray(blocks)) return blocks;
       return blocks.map((b) => {
         if (!b || typeof b !== 'object') return b;
-        if (b.kind === 'graph') return { kind: 'graph', altText: b.altText };
+        if (b.kind === 'graph') return { kind: 'graph', altText: b.altText, graphSpec: b.graphSpec };
         if (b.kind === 'long_division') {
           return {
             kind: 'long_division',
@@ -916,6 +1138,42 @@ export default function Practice() {
         return b;
       });
     };
+
+    const correctAnswerKatex = (() => {
+      if (q.kind === 'graph') {
+        if (Array.isArray(q.katexOptions) && typeof q.correctIndex === 'number') {
+          return String(q.katexOptions[q.correctIndex] ?? '');
+        }
+        const gp = (q.generatorParams ?? {}) as any;
+        if (typeof gp.expectedLatex === 'string' && gp.expectedLatex) return gp.expectedLatex;
+        if (typeof gp.expectedValue === 'number' && Number.isFinite(gp.expectedValue)) {
+          return String.raw`\text{Answer: }${String(gp.expectedValue)}`;
+        }
+        return '';
+      }
+
+      if (q.metadata?.topic === 'quadratics') {
+        const sols = Array.isArray(q.solutionsLatex) ? q.solutionsLatex : [];
+        if (sols.length === 0) return '';
+        return String.raw`x = ${sols.join('\\;\text{or}\\; x = ')}`;
+      }
+
+      if (typeof q.solutionLatex === 'string' && q.solutionLatex) {
+        return String.raw`x = ${q.solutionLatex}`;
+      }
+
+      if (typeof q.solutionLatexX === 'string' || typeof q.solutionLatexY === 'string') {
+        const x = q.solutionLatexX ? String.raw`x = ${q.solutionLatexX}` : '';
+        const y = q.solutionLatexY ? String.raw`y = ${q.solutionLatexY}` : '';
+        const z = q.solutionLatexZ ? String.raw`z = ${q.solutionLatexZ}` : '';
+        return [x, y, z].filter(Boolean).join('\\; ,\\; ');
+      }
+
+      if (typeof q.expectedLatex === 'string' && q.expectedLatex) return q.expectedLatex;
+      if (typeof q.expectedNumber === 'number' && Number.isFinite(q.expectedNumber)) return String.raw`\text{Answer: }${q.expectedNumber}`;
+      if (typeof q.exponent === 'number' && Number.isFinite(q.exponent)) return String.raw`\text{Exponent: }${q.exponent}`;
+      return '';
+    })();
 
     if (q.kind === 'graph') {
       return {
@@ -931,7 +1189,10 @@ export default function Practice() {
         correctIndex: q.correctIndex,
         katexExplanation: q.katexExplanation,
         generatorParams: q.generatorParams,
+        graphSpec: q.graphSpec,
+        secondaryGraphSpec: q.secondaryGraphSpec,
         svgAltText: q.svgAltText,
+        correctAnswerKatex,
       };
     }
 
@@ -941,6 +1202,7 @@ export default function Practice() {
         katexQuestion: q.katexQuestion,
         katexExplanation: pruneExplanation(q.katexExplanation),
         metadata: q.metadata,
+        correctAnswerKatex,
       };
     }
 
@@ -954,6 +1216,7 @@ export default function Practice() {
       katexExplanation: pruneExplanation(q.katexExplanation),
       variantId: q.variantId,
       generatorParams: q.generatorParams,
+      correctAnswerKatex,
     };
   }, []);
 
@@ -967,6 +1230,10 @@ export default function Practice() {
     if (!questionId) return;
 
     if (activePracticeEventQuestionIdRef.current === questionId && activePracticeEventIdRef.current) return;
+    if (activePracticeEventIdRef.current && activePracticeEventQuestionIdRef.current && activePracticeEventQuestionIdRef.current !== questionId) {
+      const now = Date.now();
+      await finalizeActivePracticeEvent({ submittedAt: now, nextAt: now, userAnswer: 'N/A', isCorrect: false });
+    }
 
     const now = Date.now();
     const topicForRecord = (qAny.topicId ?? qAny.metadata?.topic ?? topicId) as any;
@@ -996,7 +1263,7 @@ export default function Practice() {
     } catch (e) {
       console.error(e);
     }
-  }, [buildPracticeSnapshot, difficulty, mixedModuleId, mode, question, step, topicId, user?.id, user?.username]);
+  }, [buildPracticeSnapshot, difficulty, finalizeActivePracticeEvent, mixedModuleId, mode, question, step, topicId, user?.id, user?.username]);
 
   useEffect(() => {
     void recordShownEvent();
@@ -1033,6 +1300,42 @@ export default function Practice() {
     activePracticeEventQuestionIdRef.current = null;
     activePracticeEventShownAtRef.current = null;
   }, []);
+
+  const prevStepRef = useRef(step);
+  useEffect(() => {
+    const prev = prevStepRef.current;
+    prevStepRef.current = step;
+    if (prev === 'session' && step !== 'session') {
+      const now = Date.now();
+      void finalizeActivePracticeEvent({ submittedAt: now, nextAt: now, userAnswer: 'N/A', isCorrect: false });
+    }
+  }, [finalizeActivePracticeEvent, step]);
+
+  useEffect(() => {
+    return () => {
+      const now = Date.now();
+      void finalizeActivePracticeEvent({ submittedAt: now, nextAt: now, userAnswer: 'N/A', isCorrect: false });
+    };
+  }, [finalizeActivePracticeEvent]);
+
+  useEffect(() => {
+    if (step !== 'session') return;
+    const onVisibility = () => {
+      if (document.visibilityState !== 'hidden') return;
+      const now = Date.now();
+      void finalizeActivePracticeEvent({ submittedAt: now, nextAt: now, userAnswer: 'N/A', isCorrect: false });
+    };
+    const onPageHide = () => {
+      const now = Date.now();
+      void finalizeActivePracticeEvent({ submittedAt: now, nextAt: now, userAnswer: 'N/A', isCorrect: false });
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+    window.addEventListener('pagehide', onPageHide);
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibility);
+      window.removeEventListener('pagehide', onPageHide);
+    };
+  }, [finalizeActivePracticeEvent, step]);
 
   const currentTopicForAdminCommand = useMemo(() => {
     const q: any = question as any;
@@ -1529,12 +1832,42 @@ export default function Practice() {
 
   const nowMs = Date.now();
   const chooserList = mode === 'mixed'
-    ? (mixedModules ?? []).map((m) => {
-        const sched = (m as any).schedule as { enabled: boolean; opensAt: number; closesAt: number } | undefined;
-        const isOpen = !sched?.enabled || (nowMs >= sched.opensAt && nowMs <= sched.closesAt);
-        return { id: m.id, title: m.title || 'Untitled mixed module', disabled: !isOpen };
-      })
-    : PRACTICE_TOPICS.map((t) => ({ id: t.id, title: t.title, disabled: !t.enabled || !!(practiceTopicLocks as any)[t.id] }));
+    ? (mixedModules ?? [])
+        .filter((m) => isMixedModuleAssignedToUser(m as any))
+        .map((m) => {
+          const isOpen = isMixedModuleOpenNow(m as any, nowMs);
+          return { id: m.id, title: m.title || 'Untitled mixed module', disabled: !isOpen };
+        })
+    : PRACTICE_TOPICS.map((t) => ({ id: t.id, title: t.title, disabled: !t.enabled || isTopicLocked(t.id) }));
+
+  const canStartMixed = useMemo(() => {
+    if (mode !== 'mixed') return false;
+    if (!mixedModuleId) return false;
+    const m = (mixedModules ?? []).find((x: any) => x.id === mixedModuleId) ?? null;
+    if (!m) return false;
+    if (!isMixedModuleAssignedToUser(m)) return false;
+    return isMixedModuleOpenNow(m, Date.now());
+  }, [isMixedModuleAssignedToUser, isMixedModuleOpenNow, mixedModuleId, mixedModules, mode]);
+
+  useEffect(() => {
+    if (step !== 'session') return;
+    if (mode !== 'mixed') return;
+    if (!mixedModuleId) return;
+    const m = (mixedModules ?? []).find((x: any) => x.id === mixedModuleId) ?? null;
+    if (!m) return;
+    const tick = () => {
+      const ok = isMixedModuleAssignedToUser(m) && isMixedModuleOpenNow(m, Date.now());
+      if (ok) return;
+      toast.error('Module has ended');
+      setQuestion(null);
+      setMixedModuleId(null);
+      setStep('chooser');
+      navigate(HOME_ROUTE);
+    };
+    tick();
+    const t = window.setInterval(tick, 10_000);
+    return () => window.clearInterval(t);
+  }, [isMixedModuleAssignedToUser, isMixedModuleOpenNow, mixedModuleId, mixedModules, mode, navigate, step]);
 
   const sessionInstruction = useMemo(() => {
     if (!question) return '';
@@ -1636,7 +1969,7 @@ export default function Practice() {
                       <Button
                         variant="default"
                         className="w-full h-12 text-base"
-                        disabled={!mixedModuleId}
+                        disabled={!canStartMixed}
                         onClick={() => {
                           setSessionSeed(Date.now());
                           setQuestion(null);
@@ -2539,7 +2872,16 @@ export default function Practice() {
                   setIsCorrect(ok);
                   void recordSubmitEvent({
                     isCorrect: ok,
-                    userAnswer: [answer1, answer2, answer3].filter((x) => String(x ?? '').trim().length > 0).join(' | '),
+                    userAnswer: (() => {
+                      if ((question as any)?.kind === 'graph' && Array.isArray((question as any)?.katexOptions)) {
+                        if (typeof selectedOptionIndex === 'number') {
+                          return String((question as any).katexOptions[selectedOptionIndex] ?? '').trim() || 'N/A';
+                        }
+                        return 'N/A';
+                      }
+                      const parts = [answer1, answer2, answer3].filter((x) => String(x ?? '').trim().length > 0);
+                      return parts.length ? parts.join(' | ') : 'N/A';
+                    })(),
                   });
                   if ((question as any).metadata?.topic === 'quadratics') {
                     persistAttempt({ correct: ok, inputs: [answer1, answer2], q: question as QuadraticFactorizationQuestion });

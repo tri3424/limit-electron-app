@@ -355,6 +355,7 @@ export interface AppSettings {
   questionPrompts?: { id: string; title: string; content: string }[];
   songRecognitionEnabled?: boolean;
   practiceTopicLocks?: Partial<Record<import('@/lib/practiceTopics').PracticeTopicId, boolean>>;
+  practiceTopicLocksByUserKey?: Record<string, Partial<Record<import('@/lib/practiceTopics').PracticeTopicId, boolean>>>;
   practiceFrequencies?: {
     byUserKey: Record<
       string,
@@ -369,21 +370,55 @@ export interface AppSettings {
     recentWordProblemCategories: string[];
     updatedAt: number;
   };
-  mixedPracticeModules?: {
-    id: string;
-    title: string;
-    items: {
-      topicId: import('@/lib/practiceTopics').PracticeTopicId;
-      difficulty: import('@/lib/practiceGenerators/quadraticFactorization').PracticeDifficulty;
-    }[];
-    schedule?: {
-      enabled: boolean;
-      opensAt: number;
-      closesAt: number;
-    };
-    createdAt: number;
-    updatedAt: number;
-  }[];
+  mixedPracticeModules?: Array<
+    | {
+        id: string;
+        title: string;
+        type?: 'items';
+        items: {
+          topicId: import('@/lib/practiceTopics').PracticeTopicId;
+          difficulty: import('@/lib/practiceGenerators/quadraticFactorization').PracticeDifficulty;
+        }[];
+        schedule?: {
+          enabled: boolean;
+          // Legacy: date-based scheduling
+          opensAt?: number;
+          closesAt?: number;
+          // New: day-based scheduling
+          daysOfWeek?: number[]; // 0=Sun..6=Sat
+          opensTime?: string; // HH:MM (24h)
+          closesTime?: string; // HH:MM (24h)
+        };
+        assignedUserIds?: string[];
+        createdAt: number;
+        updatedAt: number;
+      }
+    | {
+        id: string;
+        title: string;
+        type: 'pool';
+        pool: Array<{
+          topicId: import('@/lib/practiceTopics').PracticeTopicId;
+          weight: number;
+          difficultyMode: 'fixed' | 'mix' | 'auto';
+          difficulty?: import('@/lib/practiceGenerators/quadraticFactorization').PracticeDifficulty;
+          difficultyWeights?: Partial<Record<import('@/lib/practiceGenerators/quadraticFactorization').PracticeDifficulty, number>>;
+        }>;
+        schedule?: {
+          enabled: boolean;
+          // Legacy: date-based scheduling
+          opensAt?: number;
+          closesAt?: number;
+          // New: day-based scheduling
+          daysOfWeek?: number[]; // 0=Sun..6=Sat
+          opensTime?: string; // HH:MM (24h)
+          closesTime?: string; // HH:MM (24h)
+        };
+        assignedUserIds?: string[];
+        createdAt: number;
+        updatedAt: number;
+      }
+  >;
   examIntegrity: {
     requireFullscreen: boolean;
     autoSubmitOnTabChange: boolean;
@@ -1318,6 +1353,7 @@ export async function initializeSettings() {
       questionPrompts: [],
       songRecognitionEnabled: false,
       practiceTopicLocks: {},
+      practiceTopicLocksByUserKey: {},
       practiceFrequencies: {
         byUserKey: {},
       },
@@ -1404,6 +1440,10 @@ export async function initializeSettings() {
 				preserveExistingQuestionTags: true,
 				preserveExistingDifficulty: true,
 			},
+		});
+	} else if (!existingSettings.practiceTopicLocksByUserKey) {
+		await db.settings.update('1', {
+			practiceTopicLocksByUserKey: {},
 		});
 	} else if (!existingSettings.practiceHistory) {
 		await db.settings.update('1', {

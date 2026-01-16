@@ -18,6 +18,7 @@ import {
 	CalendarDays,
 	Music,
 	Layers,
+	BarChart3,
 	Activity,
 	Package,
 	ScrollText,
@@ -1963,6 +1964,7 @@ type ExplorerTableKey =
   | 'integrityEvents'
   | 'tags'
   | 'dailyStats'
+  | 'practiceEvents'
   | 'errorReports'
   | 'songs'
   | 'songModules'
@@ -2175,6 +2177,8 @@ function DatabaseExplorer() {
         return 'Tags';
       case 'dailyStats':
         return 'Daily Stats';
+      case 'practiceEvents':
+        return 'Practice Events';
       case 'settings':
         return 'Settings';
       case 'errorReports':
@@ -2535,6 +2539,14 @@ function DatabaseExplorer() {
               </TabsTrigger>
             </TooltipTrigger>
             <TooltipContent>Daily Stats</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <TabsTrigger value="practiceEvents" aria-label="Practice Events" className="h-9 w-9 p-0 text-primary/70 data-[state=active]:text-primary">
+                <BarChart3 className="h-4 w-4" />
+              </TabsTrigger>
+            </TooltipTrigger>
+            <TooltipContent>Practice Events</TooltipContent>
           </Tooltip>
           <Tooltip>
             <TooltipTrigger asChild>

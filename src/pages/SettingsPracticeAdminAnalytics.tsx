@@ -10,6 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Katex } from '@/components/Katex';
+import InteractiveGraph from '@/components/InteractiveGraph';
 import { PRACTICE_TOPICS } from '@/lib/practiceTopics';
 
 function toDateKey(ts: number): string {
@@ -29,6 +30,12 @@ function topicTitle(topicId: string | undefined, mode: 'individual' | 'mixed'): 
   if (mode === 'mixed' && id === 'mixed') return 'Mixed Exercises';
   const hit = PRACTICE_TOPICS.find((t) => t.id === id);
   return hit?.title ?? id;
+}
+
+function looksLikeLatex(s: string): boolean {
+  const v = String(s ?? '').trim();
+  if (!v) return false;
+  return /\\|\^|_|\{|\}|\$/.test(v);
 }
 
 function fmtTime(ts?: number): string {
@@ -303,7 +310,7 @@ export default function SettingsPracticeAdminAnalytics() {
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                   <Card className="p-3">
                     <div className="text-xs text-muted-foreground">Topic</div>
-                    <div className="text-sm font-medium">{String(selected.topicId ?? '—')}</div>
+                    <div className="text-sm font-medium">{topicTitle(selected.topicId, selected.mode)}</div>
                     <div className="text-xs text-muted-foreground mt-1">Variant: {String(selected.variantId ?? '—')}</div>
                   </Card>
                   <Card className="p-3">
@@ -315,7 +322,14 @@ export default function SettingsPracticeAdminAnalytics() {
                   </Card>
                   <Card className="p-3">
                     <div className="text-xs text-muted-foreground">Answer</div>
-                    <div className="text-sm font-medium break-words">{String(selected.userAnswer ?? '—')}</div>
+                    <div className="space-y-1">
+                      <div className="text-sm font-medium break-words">{String(selected.userAnswer ?? '—')}</div>
+                      {looksLikeLatex(String(selected.userAnswer ?? '')) ? (
+                        <div className="text-lg leading-snug">
+                          <Katex latex={String(selected.userAnswer ?? '')} displayMode />
+                        </div>
+                      ) : null}
+                    </div>
                   </Card>
                 </div>
 
@@ -333,6 +347,31 @@ export default function SettingsPracticeAdminAnalytics() {
                       </div>
                     ) : null}
 
+                    {detailSnapshot.graphSpec ? (
+                      <div className="space-y-2">
+                        <div className="text-sm font-semibold">Graph</div>
+                        {detailSnapshot.secondaryGraphSpec ? (
+                          <div className="w-full grid grid-cols-1 lg:grid-cols-2 gap-4">
+                            <InteractiveGraph spec={detailSnapshot.graphSpec} altText={String(detailSnapshot.svgAltText ?? 'Graph')} interactive={false} />
+                            <InteractiveGraph spec={detailSnapshot.secondaryGraphSpec} altText={String(detailSnapshot.svgAltText ?? 'Graph')} interactive={false} />
+                          </div>
+                        ) : (
+                          <div className="flex justify-center">
+                            <InteractiveGraph spec={detailSnapshot.graphSpec} altText={String(detailSnapshot.svgAltText ?? 'Graph')} interactive={false} />
+                          </div>
+                        )}
+                      </div>
+                    ) : null}
+
+                    {detailSnapshot.correctAnswerKatex ? (
+                      <div className="space-y-2">
+                        <div className="text-sm font-semibold">Correct answer</div>
+                        <div className="text-lg leading-snug">
+                          <Katex latex={String(detailSnapshot.correctAnswerKatex)} displayMode />
+                        </div>
+                      </div>
+                    ) : null}
+
                     {Array.isArray(detailSnapshot.katexExplanation) ? (
                       <div className="space-y-2">
                         <div className="text-sm font-semibold">Explanation</div>
@@ -342,6 +381,13 @@ export default function SettingsPracticeAdminAnalytics() {
                           ) : b?.kind === 'math' ? (
                             <div key={idx} className="text-lg leading-snug">
                               <Katex latex={String(b.content ?? '')} displayMode={!!b.displayMode} />
+                            </div>
+                          ) : b?.kind === 'graph' && b?.graphSpec ? (
+                            <div key={idx} className="space-y-2">
+                              <div className="text-xs text-muted-foreground">{String(b.altText ?? 'Graph')}</div>
+                              <div className="flex justify-center">
+                                <InteractiveGraph spec={b.graphSpec} altText={String(b.altText ?? 'Graph')} interactive={false} />
+                              </div>
                             </div>
                           ) : (
                             <div key={idx} className="text-xs text-muted-foreground">{String(b?.kind ?? '')}</div>
