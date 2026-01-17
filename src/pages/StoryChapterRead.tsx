@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { useNavigate, useParams } from 'react-router-dom';
 import { db, type StoryChapterAttempt } from '@/lib/db';
@@ -86,6 +86,27 @@ export default function StoryChapterRead() {
 		return rows.length;
 	}, [userId, chapterId], 0);
 
+	useEffect(() => {
+		if (!userId || !chapterId) return;
+		if ((attemptsUsed ?? 0) !== 0) return;
+		if (progress) return;
+		try {
+			localStorage.removeItem(assignmentLockKey(userId, chapterId));
+		} catch {
+			// ignore
+		}
+		try {
+			localStorage.removeItem(pendingKey(userId, chapterId));
+		} catch {
+			// ignore
+		}
+		try {
+			localStorage.removeItem(skipRestoreKey(userId, chapterId));
+		} catch {
+			// ignore
+		}
+	}, [userId, chapterId, attemptsUsed, progress]);
+
 	const lastAttempt = useLiveQuery(async () => {
 		if (!userId || !chapterId) return null;
 		const rows = await db.storyAttempts.where('[chapterId+userId]').equals([chapterId, userId]).toArray();
@@ -100,6 +121,37 @@ export default function StoryChapterRead() {
 	const [submittedAttempt, setSubmittedAttempt] = useState<StoryChapterAttempt | null>(null);
 	const [showLastAttemptResult, setShowLastAttemptResult] = useState(true);
 	const [revealAnswers, setRevealAnswers] = useState(false);
+	const [skipForfeit, setSkipForfeit] = useState(false);
+	const mountedAtRef = useRef<number>(Date.now());
+	const skipForfeitRef = useRef<boolean>(false);
+	const submittedAttemptRef = useRef<StoryChapterAttempt | null>(null);
+	const chapterRef = useRef<typeof chapter>(null);
+	const attemptsUsedRef = useRef<number>(0);
+	const isChapterCompletedRef = useRef<boolean>(false);
+
+	useEffect(() => {
+		mountedAtRef.current = Date.now();
+	}, []);
+
+	useEffect(() => {
+		skipForfeitRef.current = skipForfeit;
+	}, [skipForfeit]);
+
+	useEffect(() => {
+		submittedAttemptRef.current = submittedAttempt;
+	}, [submittedAttempt]);
+
+	useEffect(() => {
+		chapterRef.current = chapter;
+	}, [chapter]);
+
+	useEffect(() => {
+		attemptsUsedRef.current = Number(attemptsUsed ?? 0);
+	}, [attemptsUsed]);
+
+	useEffect(() => {
+		isChapterCompletedRef.current = !!(progress && (progress as any).completedAt);
+	}, [progress]);
 
 	useEffect(() => {
 		setSubmittedAttempt(null);
@@ -205,6 +257,7 @@ export default function StoryChapterRead() {
 			toast.error('No attempts remaining');
 			return;
 		}
+		setSkipForfeit(true);
 		setSubmitting(true);
 		try {
 			const res = await submitStoryChapterAttempt({
@@ -224,6 +277,7 @@ export default function StoryChapterRead() {
 			toast.error(String((e as any)?.message || 'Failed'));
 		} finally {
 			setSubmitting(false);
+			setSkipForfeit(false);
 		}
 	};
 
@@ -232,6 +286,7 @@ export default function StoryChapterRead() {
 			toast.error('No attempts remaining');
 			return;
 		}
+		setSkipForfeit(true);
 		setSubmittedAttempt(null);
 		setShowLastAttemptResult(false);
 		setStartedAt(Date.now());
@@ -242,10 +297,12 @@ export default function StoryChapterRead() {
 			}
 			return next;
 		});
+		setSkipForfeit(false);
 	};
 
 	const onProceed = () => {
 		if (!courseId || !chapterId) return;
+		setSkipForfeit(true);
 		if (hasAssignment) {
 			try {
 				if (userId) localStorage.setItem(assignmentLockKey(userId, chapterId), '1');
@@ -276,6 +333,34 @@ export default function StoryChapterRead() {
 		// No assignment: proceed means go back to chapter list
 		navigate(`/stories/course/${courseId}`);
 	};
+
+	useEffect(() => {
+		return () => {
+			if (skipForfeitRef.current) return;
+			// In dev (StrictMode), React may mount/unmount once immediately. Avoid consuming attempts.
+			if (Date.now() - mountedAtRef.current < 1000) return;
+			if (!userId || !chapterId) return;
+			const ch = chapterRef.current;
+			if (!ch) return;
+			if (isChapterCompletedRef.current) return;
+			// If the learner leaves Fill-in without submitting, record a 0% attempt.
+			if (submittedAttemptRef.current) return;
+			if ((attemptsUsedRef.current ?? 0) >= maxAttempts) return;
+			try {
+				setTimeout(() => {
+					try {
+						void import('@/lib/stories').then(({ forfeitStoryChapterAttempt }) =>
+							forfeitStoryChapterAttempt({ userId, username, chapter: ch, includeAssignment: false }),
+						);
+					} catch {
+						// ignore
+					}
+				}, 0);
+			} catch {
+				// ignore
+			}
+		};
+	}, []);
 
 	if (!courseId || !chapterId) {
 		return <div className="max-w-5xl mx-auto p-8 text-muted-foreground">Missing chapter.</div>;

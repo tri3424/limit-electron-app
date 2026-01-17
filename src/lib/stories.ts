@@ -132,6 +132,72 @@ export async function submitStoryChapterAttempt(input: {
 	return row;
 }
 
+export async function forfeitStoryChapterAttempt(input: {
+	userId: string;
+	username?: string;
+	chapter: StoryChapter;
+	includeAssignment: boolean;
+}): Promise<StoryChapterAttempt> {
+	const now = Date.now();
+	const date = toDateKey(now);
+	const previousAttempts = await getAttemptsForUserAndChapter(input.userId, input.chapter.id);
+	if (previousAttempts.length >= 3) {
+		const last = previousAttempts[previousAttempts.length - 1];
+		if (!last) throw new Error('No attempts remaining');
+		return last;
+	}
+	const attemptNo = previousAttempts.length + 1;
+
+	const blanksMeta = input.chapter.fillBlanks?.blanks || [];
+	const blanks: StoryChapterAttempt['blanks'] = blanksMeta.map((b) => {
+		return { blankId: b.id, answer: '', correct: false };
+	});
+
+	const assignmentStatements = input.includeAssignment ? input.chapter.assignment?.statements || [] : [];
+	const assignment = assignmentStatements.length
+		? assignmentStatements.map((s) => {
+			const wrong: StoryAssignmentAnswer = s.correct === 'yes' ? 'no' : 'yes';
+			return { statementId: s.id, answer: wrong, correct: false };
+		})
+		: undefined;
+
+	const row: StoryChapterAttempt = {
+		id: uuidv4(),
+		userId: input.userId,
+		username: input.username,
+		courseId: input.chapter.courseId,
+		chapterId: input.chapter.id,
+		date,
+		attemptNo,
+		startedAt: now,
+		submittedAt: now,
+		durationMs: 0,
+		blanks,
+		assignment,
+		accuracyPercent: 0,
+		lockedBlankIds: [],
+	};
+
+	// Mark as escaped for analytics/debug (non-indexed field; safe in Dexie).
+	(row as any).escaped = true;
+
+	await db.storyAttempts.add(row);
+	try {
+		await db.storyChapterProgress.put({
+			id: `${input.userId}:${input.chapter.id}`,
+			userId: input.userId,
+			courseId: input.chapter.courseId,
+			chapterId: input.chapter.id,
+			completedAt: now,
+			bestAccuracyPercent: 0,
+			attemptsUsed: attemptNo,
+		});
+	} catch {
+		// ignore
+	}
+	return row;
+}
+
 export async function attachAssignmentToAttempt(input: {
 	attemptId: string;
 	chapter: StoryChapter;

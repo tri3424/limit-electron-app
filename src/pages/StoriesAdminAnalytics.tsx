@@ -348,6 +348,9 @@ export default function StoriesAdminAnalytics() {
 											<div className="text-xs text-muted-foreground">Accuracy</div>
 											<div className="text-xl font-semibold">{selectedAttempt?.accuracyPercent ?? 0}%</div>
 											<div className="text-xs text-muted-foreground mt-1">Time: {fmtMs(selectedAttempt?.durationMs ?? 0)}</div>
+											{(selectedAttempt as any)?.escaped ? (
+												<div className="text-xs text-red-600 mt-1">Escaped</div>
+											) : null}
 										</Card>
 
 										{selectedChapter?.storyHtml ? (

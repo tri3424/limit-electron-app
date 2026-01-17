@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { useNavigate, useParams } from 'react-router-dom';
 import { db, type StoryAssignmentAnswer, type StoryChapterAttempt } from '@/lib/db';
@@ -6,7 +6,7 @@ import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { toast } from 'sonner';
-import { attachAssignmentToAttempt } from '@/lib/stories';
+import { attachAssignmentToAttempt, createStoryAttemptForAssignmentRetry, forfeitStoryChapterAttempt } from '@/lib/stories';
 import { useAuth } from '@/contexts/AuthContext';
 
 function pendingKey(userId: string, chapterId: string) {
@@ -15,6 +15,10 @@ function pendingKey(userId: string, chapterId: string) {
 
 function assignmentLockKey(userId: string, chapterId: string) {
 	return `story:assignment_lock:${userId}:${chapterId}`;
+}
+
+function skipRestoreKey(userId: string, chapterId: string) {
+	return `story:skip_restore:${userId}:${chapterId}`;
 }
 
 type Pending = { startedAt: number; blankAnswers: Record<string, string> };
@@ -42,6 +46,12 @@ export default function StoryChapterAssignment() {
 		return rows?.[0] || null;
 	}, [userId, chapterId], null as any);
 
+	const attemptsUsedCount = useLiveQuery(async () => {
+		if (!chapterId || !userId) return 0;
+		const rows = await db.storyAttempts.where('[chapterId+userId]').equals([chapterId, userId]).toArray();
+		return rows.length;
+	}, [chapterId, userId], undefined as unknown as number | undefined);
+
 	const [startedAt, setStartedAt] = useState<number>(() => Date.now());
 	const [blankAnswers, setBlankAnswers] = useState<Record<string, string>>({});
 	const [attemptId, setAttemptId] = useState<string>('');
@@ -49,18 +59,51 @@ export default function StoryChapterAssignment() {
 	const [submitting, setSubmitting] = useState(false);
 	const [submittedAttempt, setSubmittedAttempt] = useState<StoryChapterAttempt | null>(null);
 	const [revealAnswers, setRevealAnswers] = useState(false);
+	const [skipForfeit, setSkipForfeit] = useState(false);
+	const mountedAtRef = useRef<number>(Date.now());
+	const skipForfeitRef = useRef<boolean>(false);
+	const submittedAttemptRef = useRef<StoryChapterAttempt | null>(null);
+	const chapterRef = useRef<typeof chapter>(null);
+	const attemptIdRef = useRef<string>('');
+	const isChapterCompletedRef = useRef<boolean>(false);
+
+	useEffect(() => {
+		mountedAtRef.current = Date.now();
+	}, []);
+
+	useEffect(() => {
+		skipForfeitRef.current = skipForfeit;
+	}, [skipForfeit]);
+
+	useEffect(() => {
+		submittedAttemptRef.current = submittedAttempt;
+	}, [submittedAttempt]);
+
+	useEffect(() => {
+		chapterRef.current = chapter;
+	}, [chapter]);
+
+	useEffect(() => {
+		attemptIdRef.current = attemptId;
+	}, [attemptId]);
+
+	useEffect(() => {
+		isChapterCompletedRef.current = !!(progress && (progress as any).completedAt);
+	}, [progress]);
 
 	const isChapterCompleted = !!(progress && (progress as any).completedAt);
 
 	useEffect(() => {
 		if (!userId || !chapterId) return;
 		if (isChapterCompleted) return;
+		if (attemptsUsedCount === undefined) return;
+		if ((attemptsUsedCount ?? 0) === 0 && !progress) return;
 		try {
 			localStorage.setItem(assignmentLockKey(userId, chapterId), '1');
 		} catch {
 			// ignore
 		}
-	}, [userId, chapterId, isChapterCompleted]);
+	}, [userId, chapterId, isChapterCompleted, attemptsUsedCount, progress]);
 
 	useEffect(() => {
 		if (!userId || !courseId || !chapterId) return;
@@ -104,6 +147,32 @@ export default function StoryChapterAssignment() {
 		return rows.slice().sort((a, b) => a.attemptNo - b.attemptNo)[rows.length - 1] || null;
 	}, [chapterId, userId], undefined as unknown as StoryChapterAttempt | null | undefined);
 
+	useEffect(() => {
+		if (!userId || !chapterId) return;
+		if (attemptsUsedCount === undefined) return;
+		if ((attemptsUsedCount ?? 0) !== 0) return;
+		if (progress) return;
+		try {
+			localStorage.removeItem(assignmentLockKey(userId, chapterId));
+		} catch {
+			// ignore
+		}
+		try {
+			localStorage.removeItem(pendingKey(userId, chapterId));
+		} catch {
+			// ignore
+		}
+		try {
+			localStorage.removeItem(skipRestoreKey(userId, chapterId));
+		} catch {
+			// ignore
+		}
+		setAttemptId('');
+		setSubmittedAttempt(null);
+		setAssignmentAnswers({});
+		if (courseId) navigate(`/stories/course/${courseId}/chapter/${chapterId}/read`, { replace: true });
+	}, [userId, chapterId, attemptsUsedCount, progress, courseId, navigate]);
+
 	const statements = useMemo(() => chapter?.assignment?.statements || [], [chapter?.id]);
 	const statementById = useMemo(() => {
 		const map = new Map<string, { id: string; text: string; correct: StoryAssignmentAnswer }>();
@@ -111,10 +180,10 @@ export default function StoryChapterAssignment() {
 		return map;
 	}, [statements]);
 	const maxAttempts = 3;
-	const effectiveAttemptsUsed = Math.max(
-		latestAttempt?.attemptNo ?? 0,
-		submittedAttempt?.attemptNo ?? 0,
-	);
+	const effectiveAttemptsUsed = useMemo(() => {
+		if (typeof attemptsUsedCount === 'number' && Number.isFinite(attemptsUsedCount)) return attemptsUsedCount;
+		return Math.max(submittedAttempt?.attemptNo ?? 0, latestAttempt?.attemptNo ?? 0);
+	}, [attemptsUsedCount, submittedAttempt?.attemptNo, latestAttempt?.attemptNo]);
 
 	useEffect(() => {
 		if (!chapterId || !userId) return;
@@ -134,6 +203,7 @@ export default function StoryChapterAssignment() {
 			toast.error('Please submit the story first');
 			return;
 		}
+		setSkipForfeit(true);
 		setSubmitting(true);
 		try {
 			const res = await attachAssignmentToAttempt({ attemptId, chapter, assignmentAnswers });
@@ -145,6 +215,7 @@ export default function StoryChapterAssignment() {
 			toast.error('Failed');
 		} finally {
 			setSubmitting(false);
+			setSkipForfeit(false);
 		}
 	};
 
@@ -156,7 +227,8 @@ export default function StoryChapterAssignment() {
 	}, [submittedAttempt]);
 
 	const attemptsRemaining = useMemo(() => {
-		return Math.max(0, maxAttempts - effectiveAttemptsUsed);
+		const used = Number.isFinite(effectiveAttemptsUsed) ? effectiveAttemptsUsed : 0;
+		return Math.max(0, maxAttempts - used);
 	}, [effectiveAttemptsUsed]);
 
 	const canSeeAnswers = !!submittedAttempt && (assignmentAccuracyPercent >= 75 || attemptsRemaining === 0);
@@ -167,27 +239,47 @@ export default function StoryChapterAssignment() {
 	}, [submittedAttempt?.id]);
 
 	const onRetry = async () => {
-		if (!attemptId) return;
+		if (!attemptId || !chapter) return;
+		if (!userId || !chapterId) return;
+		if (effectiveAttemptsUsed >= maxAttempts) {
+			toast.error('No attempts remaining');
+			return;
+		}
+		setSkipForfeit(true);
 		try {
-			const existing = await db.storyAttempts.get(attemptId);
-			if (existing) {
-				const blanks = existing.blanks || [];
-				const correctParts = blanks.filter((b) => b.correct).length;
-				const totalParts = blanks.length;
-				const accuracyPercent = totalParts ? Math.round((correctParts / totalParts) * 100) : 0;
-				await db.storyAttempts.update(existing.id, { assignment: undefined, accuracyPercent });
-			}
+			const now = Date.now();
+			const next = await createStoryAttemptForAssignmentRetry({
+				userId,
+				username,
+				chapter,
+				previousAttemptId: attemptId,
+			});
+			setAttemptId(next.id);
 			setSubmittedAttempt(null);
 			setAssignmentAnswers({});
+			setStartedAt(now);
+			try {
+				const payload: Pending & { attemptId: string } = {
+					startedAt: now,
+					blankAnswers,
+					attemptId: next.id,
+				};
+				localStorage.setItem(pendingKey(userId, chapter.id), JSON.stringify(payload));
+			} catch {
+				// ignore
+			}
 			toast.success('You can retry the assignment');
 		} catch (e) {
 			console.error(e);
-			toast.error('Failed');
+			toast.error(String((e as any)?.message || 'Failed'));
+		} finally {
+			setSkipForfeit(false);
 		}
 	};
 
 	const onComplete = async () => {
 		if (!userId || !courseId || !chapterId) return;
+		setSkipForfeit(true);
 		const bestAccuracyPercent = submittedAttempt?.accuracyPercent ?? latestAttempt?.accuracyPercent ?? 0;
 		try {
 			await db.storyChapterProgress.put({
@@ -213,8 +305,41 @@ export default function StoryChapterAssignment() {
 		} catch (e) {
 			console.error(e);
 			toast.error('Failed');
+		} finally {
+			setSkipForfeit(false);
 		}
 	};
+
+	useEffect(() => {
+		return () => {
+			if (skipForfeitRef.current) return;
+			// In dev (StrictMode), React may mount/unmount once immediately. Avoid consuming attempts.
+			if (Date.now() - mountedAtRef.current < 1000) return;
+			if (!userId || !chapterId) return;
+			const ch = chapterRef.current;
+			if (!ch) return;
+			if (isChapterCompletedRef.current) return;
+			if (!attemptIdRef.current) return;
+			// If the learner leaves Assignment without submitting/completing, record a 0% attempt.
+			if (submittedAttemptRef.current) return;
+			try {
+				setTimeout(() => {
+					try {
+						void forfeitStoryChapterAttempt({
+							userId,
+							username,
+							chapter: ch,
+							includeAssignment: true,
+						});
+					} catch {
+						// ignore
+					}
+				}, 0);
+			} catch {
+				// ignore
+			}
+		};
+	}, []);
 
 	const onProceed = () => {
 		if (!course || !chapter) return;
@@ -240,7 +365,9 @@ export default function StoryChapterAssignment() {
 					<h1 className="text-2xl font-bold text-foreground">Assignment</h1>
 					<div className="text-sm text-muted-foreground mt-2">Answer the statements and submit.</div>
 				</div>
-				<Button variant="outline" onClick={() => navigate(`/stories/course/${courseId}/chapter/${chapterId}/read`)}>Back</Button>
+				{isChapterCompleted ? (
+					<Button variant="outline" onClick={() => navigate(`/stories/course/${courseId}/chapter/${chapterId}/read`)}>Back</Button>
+				) : null}
 			</div>
 
 			<div className="space-y-6">
