@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import { v4 as uuidv4 } from "uuid";
 import { db, LyricsSourceEntry, Song, SongSrtCue } from "@/lib/db";
@@ -17,6 +17,7 @@ import { Check, ChevronsUpDown, Eye, FileText, Pencil, Play, Pause, Trash2 } fro
 import { toast } from "sonner";
 import AudioPlayer from "@/components/AudioPlayer";
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { useLocation } from 'react-router-dom';
 
 async function fileToBase64(file: File): Promise<string> {
 	return new Promise((resolve, reject) => {
@@ -290,6 +291,7 @@ async function fileToDataUrl(file: File): Promise<string> {
 }
 
 export default function SongsAdmin() {
+	const location = useLocation();
 	const songs = useLiveQuery(async () => {
 		const all = await db.songs.toArray();
 		return all.slice().sort((a, b) => (a.title || '').localeCompare(b.title || ''));
@@ -358,6 +360,14 @@ export default function SongsAdmin() {
 	const audioRef = useRef<HTMLAudioElement | null>(null);
 
 	const [songsSearchText, setSongsSearchText] = useState('');
+
+	useEffect(() => {
+		const params = new URLSearchParams(location.search || '');
+		const songId = params.get('songId');
+		if (!songId) return;
+		const title = (songs || []).find((s) => s.id === songId)?.title;
+		if (title && title.trim().length) setSongsSearchText(title);
+	}, [location.search, songs]);
 	const filteredSongs = useMemo(() => {
 		const list = songs ?? [];
 		const q = songsSearchText.trim().toLowerCase();

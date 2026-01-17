@@ -332,14 +332,12 @@ const Home = () => {
           try {
             const completed = await areAllQuestionsCompleted(module.id, user.id);
             status[module.id] = completed;
-            console.log(`[Home] Module "${module.title}" (${module.id}): completed=${completed}`);
           } catch (error) {
             console.error(`Error checking completion for module ${module.id}:`, error);
             status[module.id] = false;
           }
         }
       }
-      console.log(`[Home] Completion status:`, status);
       setCompletionStatus(status);
     };
 

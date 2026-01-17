@@ -69,13 +69,6 @@ export async function areAllQuestionsCompleted(moduleId: string, userId?: string
     }
   }
 
-  // Debug logging
-  console.log(`[Completion Check] Module: ${moduleId}, User: ${userId}`);
-  console.log(`[Completion Check] Total questions in module: ${allQuestionIds.size}`);
-  console.log(`[Completion Check] Completed question IDs:`, Array.from(completedQuestionIds));
-  console.log(`[Completion Check] All question IDs:`, Array.from(allQuestionIds));
-  console.log(`[Completion Check] Found ${completedAttempts.length} completed attempts`);
-
   // Check if all question IDs in the module have been completed
   const missingQuestionIds: string[] = [];
   for (const questionId of allQuestionIds) {
@@ -85,11 +78,8 @@ export async function areAllQuestionsCompleted(moduleId: string, userId?: string
   }
 
   if (missingQuestionIds.length > 0) {
-    console.log(`[Completion Check] Missing question IDs:`, missingQuestionIds);
     return false;
   }
-
-  console.log(`[Completion Check] All questions completed!`);
   return true;
 }
 

@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import { AppSettings, db, Song, SongListeningEvent, SongSrtCue } from "@/lib/db";
 import { Card } from "@/components/ui/card";
@@ -11,11 +11,13 @@ import { Command, CommandEmpty, CommandInput, CommandItem, CommandList } from "@
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
 import { Check, ChevronsUpDown } from "lucide-react";
+import { useLocation } from "react-router-dom";
 
 // Note: This page is retained for backwards compatibility, but the main
 // student-facing entrypoint is now Song Modules at /songs.
 
 export default function Songs() {
+	const location = useLocation();
 	const { user } = useAuth();
 	const appSettings = useLiveQuery<AppSettings | undefined>(() => db.settings.get('1'), []);
 	const songRecognitionEnabled = appSettings?.songRecognitionEnabled === true;
@@ -77,6 +79,14 @@ export default function Songs() {
 			return hay.includes(q);
 		});
 	}, [songs, searchText]);
+
+	useEffect(() => {
+		const params = new URLSearchParams(location.search || '');
+		const songId = params.get('songId');
+		if (!songId) return;
+		if (!(songs || []).some((s) => s.id === songId)) return;
+		setSelectedId(songId);
+	}, [location.search, songs]);
 
 	const selected = useMemo(() => {
 		const list = filteredSongs ?? [];

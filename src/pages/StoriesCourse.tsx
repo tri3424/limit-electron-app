@@ -14,6 +14,19 @@ export default function StoriesCourse() {
 	const { user } = useAuth();
 	const userId = user?.id || '';
 
+	const goToChapter = (chapterId: string) => {
+		if (!courseId) return;
+		try {
+			if (userId && localStorage.getItem(`story:assignment_lock:${userId}:${chapterId}`) === '1') {
+				navigate(`/stories/course/${courseId}/chapter/${chapterId}/assignment`);
+				return;
+			}
+		} catch {
+			// ignore
+		}
+		navigate(`/stories/course/${courseId}/chapter/${chapterId}/read`);
+	};
+
 	const course = useLiveQuery(async () => {
 		if (!courseId) return null;
 		return (await db.storyCourses.get(courseId)) || null;
@@ -95,7 +108,7 @@ export default function StoriesCourse() {
 												<button
 													type="button"
 													className="bg-transparent border-0 p-0 m-0 text-sm text-foreground no-underline hover:no-underline hover:bg-transparent hover:text-foreground focus-visible:outline-none"
-													onClick={() => navigate(`/stories/course/${courseId}/chapter/${ch.id}/read`)}
+													onClick={() => goToChapter(ch.id)}
 												>
 													Read now
 												</button>

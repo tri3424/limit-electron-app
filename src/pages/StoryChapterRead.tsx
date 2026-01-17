@@ -47,6 +47,14 @@ function pendingKey(userId: string, chapterId: string) {
 	return `story:pending:${userId}:${chapterId}`;
 }
 
+function skipRestoreKey(userId: string, chapterId: string) {
+	return `story:skip_restore:${userId}:${chapterId}`;
+}
+
+function assignmentLockKey(userId: string, chapterId: string) {
+	return `story:assignment_lock:${userId}:${chapterId}`;
+}
+
 type Pending = { startedAt: number; blankAnswers: Record<string, string> };
 
 export default function StoryChapterRead() {
@@ -65,6 +73,12 @@ export default function StoryChapterRead() {
 		if (!courseId) return null;
 		return (await db.storyCourses.get(courseId)) || null;
 	}, [courseId]);
+
+	const progress = useLiveQuery(async () => {
+		if (!userId || !chapterId) return null;
+		const rows = await db.storyChapterProgress.where('[chapterId+userId]').equals([chapterId, userId]).toArray();
+		return rows?.[0] || null;
+	}, [userId, chapterId], null as any);
 
 	const attemptsUsed = useLiveQuery(async () => {
 		if (!userId || !chapterId) return 0;
@@ -85,6 +99,7 @@ export default function StoryChapterRead() {
 	const [submitting, setSubmitting] = useState(false);
 	const [submittedAttempt, setSubmittedAttempt] = useState<StoryChapterAttempt | null>(null);
 	const [showLastAttemptResult, setShowLastAttemptResult] = useState(true);
+	const [revealAnswers, setRevealAnswers] = useState(false);
 
 	useEffect(() => {
 		setSubmittedAttempt(null);
@@ -92,6 +107,7 @@ export default function StoryChapterRead() {
 		setStartedAt(Date.now());
 		setBlankAnswers({});
 		setShowLastAttemptResult(true);
+		setRevealAnswers(false);
 	}, [chapterId]);
 
 	useEffect(() => {
@@ -105,6 +121,16 @@ export default function StoryChapterRead() {
 	useEffect(() => {
 		if (!userId || !chapterId) return;
 		const key = pendingKey(userId, chapterId);
+		const skipKey = skipRestoreKey(userId, chapterId);
+		try {
+			if (localStorage.getItem(skipKey) === '1') {
+				localStorage.removeItem(skipKey);
+				localStorage.removeItem(key);
+				return;
+			}
+		} catch {
+			// ignore
+		}
 		// If the chapter already has attempts, don't restore any stale draft answers.
 		if ((attemptsUsed ?? 0) > 0) {
 			try {
@@ -142,6 +168,25 @@ export default function StoryChapterRead() {
 	const attemptsRemaining = Math.max(0, maxAttempts - effectiveAttemptsUsed);
 	const displayAttempt = submittedAttempt ?? (showLastAttemptResult ? lastAttempt : null);
 	const isFinalized = !!(displayAttempt && Array.isArray(displayAttempt.assignment) && displayAttempt.assignment.length > 0);
+	const isChapterCompleted = !!(progress && (progress as any).completedAt);
+
+	useEffect(() => {
+		if (!userId || !courseId || !chapterId) return;
+		if (!hasAssignment) return;
+		if (isChapterCompleted) return;
+		try {
+			const locked = localStorage.getItem(assignmentLockKey(userId, chapterId)) === '1';
+			if (locked) {
+				navigate(`/stories/course/${courseId}/chapter/${chapterId}/assignment`, { replace: true });
+			}
+		} catch {
+			// ignore
+		}
+	}, [userId, courseId, chapterId, hasAssignment, isChapterCompleted, navigate]);
+
+	useEffect(() => {
+		setRevealAnswers(false);
+	}, [displayAttempt?.id]);
 
 	const blanksAccuracyPercent = (() => {
 		if (!displayAttempt) return null;
@@ -151,6 +196,8 @@ export default function StoryChapterRead() {
 		const correct = blanks.filter((b) => b.correct).length;
 		return Math.round((correct / total) * 100);
 	})();
+
+	const canSeeAnswers = !!displayAttempt && ((blanksAccuracyPercent ?? 0) >= 75 || attemptsRemaining === 0);
 
 	const onSubmit = async () => {
 		if (!userId || !chapter) return;
@@ -200,6 +247,29 @@ export default function StoryChapterRead() {
 	const onProceed = () => {
 		if (!courseId || !chapterId) return;
 		if (hasAssignment) {
+			try {
+				if (userId) localStorage.setItem(assignmentLockKey(userId, chapterId), '1');
+			} catch {
+				// ignore
+			}
+			try {
+				if (userId) localStorage.setItem(skipRestoreKey(userId, chapterId), '1');
+			} catch {
+				// ignore
+			}
+			try {
+				const attempt = submittedAttempt ?? lastAttempt;
+				if (attempt && userId) {
+					const payload: Pending & { attemptId: string } = {
+						startedAt: attempt.startedAt || startedAt,
+						blankAnswers,
+						attemptId: attempt.id,
+					};
+					localStorage.setItem(pendingKey(userId, chapterId), JSON.stringify(payload));
+				}
+			} catch {
+				// ignore
+			}
 			navigate(`/stories/course/${courseId}/chapter/${chapterId}/assignment`);
 			return;
 		}
@@ -232,9 +302,9 @@ export default function StoryChapterRead() {
 						return (
 							<span key={idx} className="inline-flex items-center gap-2 mx-1 my-1">
 								<Input
-									value={locked ? p.correct : (blankAnswers[p.id] || '')}
+									value={locked || revealAnswers ? p.correct : (blankAnswers[p.id] || '')}
 									onChange={(e) => setBlankAnswers((prev) => ({ ...prev, [p.id]: e.target.value }))}
-									disabled={locked || !!submittedAttempt}
+									disabled={locked || !!submittedAttempt || isChapterCompleted || revealAnswers}
 									className="h-9 w-[170px]"
 									placeholder={locked ? '' : 'Type…'}
 								/>
@@ -256,14 +326,17 @@ export default function StoryChapterRead() {
 					</div>
 
 					<div className="flex items-center gap-2 shrink-0">
-						{displayAttempt ? (
+						{isChapterCompleted ? null : displayAttempt ? (
 							<>
-								{attemptsRemaining > 0 && !isFinalized ? (
+								{attemptsRemaining > 0 && !isFinalized && !revealAnswers && (blanksAccuracyPercent ?? 0) < 100 ? (
 									<Button variant="outline" onClick={onRetry}>Retry</Button>
 								) : null}
-								{hasAssignment && !isFinalized ? (
+								{canSeeAnswers && !revealAnswers ? (
+									<Button variant="outline" onClick={() => setRevealAnswers(true)}>See Answers</Button>
+								) : null}
+								{canSeeAnswers && revealAnswers && hasAssignment && !isFinalized ? (
 									<Button onClick={onProceed}>Proceed</Button>
-								) : !hasAssignment && (blanksAccuracyPercent ?? 0) >= 75 ? (
+								) : canSeeAnswers && revealAnswers && !hasAssignment ? (
 									<Button onClick={onProceed}>Complete</Button>
 								) : null}
 							</>

@@ -91,11 +91,13 @@ export async function submitStoryChapterAttempt(input: {
 	const shouldScoreAssignment = !!input.assignmentAnswers && Object.keys(input.assignmentAnswers).length > 0;
 	const assignmentStatements = shouldScoreAssignment ? input.chapter.assignment?.statements || [] : [];
 	const assignment = assignmentStatements.length
-		? assignmentStatements.map((s) => {
-			const ans = (input.assignmentAnswers?.[s.id] ?? '') as StoryAssignmentAnswer;
-			const safeAns: StoryAssignmentAnswer = ans === 'yes' || ans === 'no' ? ans : 'no';
-			return { statementId: s.id, answer: safeAns, correct: scoreAssignment(s.correct, safeAns) };
-		})
+		? assignmentStatements
+				.map((s) => {
+					const ans = (input.assignmentAnswers?.[s.id] ?? '') as StoryAssignmentAnswer;
+					if (ans !== 'yes' && ans !== 'no') return null;
+					return { statementId: s.id, answer: ans, correct: scoreAssignment(s.correct, ans) };
+				})
+				.filter(Boolean)
 		: undefined;
 
 	const correctParts =
@@ -141,11 +143,13 @@ export async function attachAssignmentToAttempt(input: {
 	const now = Date.now();
 	const assignmentStatements = input.chapter.assignment?.statements || [];
 	const assignment = assignmentStatements.length
-		? assignmentStatements.map((s) => {
-			const ans = (input.assignmentAnswers?.[s.id] ?? '') as StoryAssignmentAnswer;
-			const safeAns: StoryAssignmentAnswer = ans === 'yes' || ans === 'no' ? ans : 'no';
-			return { statementId: s.id, answer: safeAns, correct: scoreAssignment(s.correct, safeAns) };
-		})
+		? assignmentStatements
+				.map((s) => {
+					const ans = (input.assignmentAnswers?.[s.id] ?? '') as StoryAssignmentAnswer;
+					if (ans !== 'yes' && ans !== 'no') return null;
+					return { statementId: s.id, answer: ans, correct: scoreAssignment(s.correct, ans) };
+				})
+				.filter(Boolean)
 		: undefined;
 
 	const correctParts =
@@ -164,4 +168,46 @@ export async function attachAssignmentToAttempt(input: {
 	const updated = await db.storyAttempts.get(existing.id);
 	if (!updated) throw new Error('Attempt update failed');
 	return updated;
+}
+
+export async function createStoryAttemptForAssignmentRetry(input: {
+	userId: string;
+	username?: string;
+	chapter: StoryChapter;
+	previousAttemptId: string;
+}): Promise<StoryChapterAttempt> {
+	const previous = await db.storyAttempts.get(input.previousAttemptId);
+	if (!previous) throw new Error('Attempt not found');
+	if (previous.userId !== input.userId || previous.chapterId !== input.chapter.id) throw new Error('Attempt mismatch');
+
+	const now = Date.now();
+	const date = toDateKey(now);
+	const previousAttempts = await getAttemptsForUserAndChapter(input.userId, input.chapter.id);
+	if (previousAttempts.length >= 3) throw new Error('No attempts remaining');
+	const attemptNo = previousAttempts.length + 1;
+
+	const blanks = (previous.blanks || []).map((b) => ({ ...b }));
+	const correctParts = blanks.filter((b) => b.correct).length;
+	const totalParts = blanks.length;
+	const accuracyPercent = computeAccuracyPercent({ correctParts, totalParts });
+
+	const row: StoryChapterAttempt = {
+		id: uuidv4(),
+		userId: input.userId,
+		username: input.username,
+		courseId: input.chapter.courseId,
+		chapterId: input.chapter.id,
+		date,
+		attemptNo,
+		startedAt: now,
+		submittedAt: now,
+		durationMs: 0,
+		blanks,
+		assignment: undefined,
+		accuracyPercent,
+		lockedBlankIds: Array.from(new Set(previous.lockedBlankIds || [])),
+	};
+
+	await db.storyAttempts.add(row);
+	return row;
 }

@@ -30,6 +30,15 @@ type DayRow = {
 	avgTimeMs: number;
 };
 
+type ChapterPerfRow = {
+	chapterId: string;
+	chapterTitle: string;
+	totalAttempts: number;
+	bestAccuracy: number;
+	avgAccuracy: number;
+	avgTimeMs: number;
+};
+
 export default function StoriesAdminAnalytics() {
 	const navigate = useNavigate();
 
@@ -56,27 +65,12 @@ export default function StoriesAdminAnalytics() {
 		return out;
 	}, [attempts, userId, courseId, chapterId]);
 
-	const dayRows = useMemo(() => {
-		const buckets = new Map<string, { total: number; accSum: number; timeSum: number }>();
+	const latestAttemptsPerChapter = useMemo(() => {
+		const map = new Map<string, StoryChapterAttempt>();
 		for (const a of filtered) {
-			const date = a.date || new Date(a.submittedAt).toISOString().slice(0, 10);
-			const b = buckets.get(date) || { total: 0, accSum: 0, timeSum: 0 };
-			b.total += 1;
-			b.accSum += a.accuracyPercent || 0;
-			b.timeSum += a.durationMs || 0;
-			buckets.set(date, b);
+			if (!map.has(a.chapterId)) map.set(a.chapterId, a);
 		}
-		const out: DayRow[] = [];
-		for (const [date, b] of buckets.entries()) {
-			out.push({
-				date,
-				totalAttempts: b.total,
-				avgAccuracy: b.total ? Math.round(b.accSum / b.total) : 0,
-				avgTimeMs: b.total ? Math.round(b.timeSum / b.total) : 0,
-			});
-		}
-		out.sort((a, b) => (a.date < b.date ? 1 : -1));
-		return out;
+		return Array.from(map.values());
 	}, [filtered]);
 
 	const chapterOptions = useMemo(() => {
@@ -86,9 +80,47 @@ export default function StoriesAdminAnalytics() {
 		return out;
 	}, [chapters, courseId]);
 
+	const filteredForPerf = useMemo(() => {
+		let out = attempts || [];
+		if (userId) out = out.filter((a) => a.userId === userId);
+		if (courseId !== 'all') out = out.filter((a) => a.courseId === courseId);
+		out = out.slice().sort((a, b) => (b.submittedAt ?? 0) - (a.submittedAt ?? 0));
+		return out;
+	}, [attempts, userId, courseId]);
+
+	const chapterPerfRows = useMemo(() => {
+		if (courseId === 'all') return [] as ChapterPerfRow[];
+		const buckets = new Map<
+			string,
+			{ total: number; accSum: number; timeSum: number; best: number }
+		>();
+		for (const a of filteredForPerf) {
+			const b = buckets.get(a.chapterId) || { total: 0, accSum: 0, timeSum: 0, best: 0 };
+			b.total += 1;
+			b.accSum += a.accuracyPercent || 0;
+			b.timeSum += a.durationMs || 0;
+			b.best = Math.max(b.best, a.accuracyPercent || 0);
+			buckets.set(a.chapterId, b);
+		}
+		const out: ChapterPerfRow[] = [];
+		for (const ch of chapterOptions) {
+			const b = buckets.get(ch.id);
+			out.push({
+				chapterId: ch.id,
+				chapterTitle: ch.title || ch.id,
+				totalAttempts: b?.total ?? 0,
+				bestAccuracy: b?.best ?? 0,
+				avgAccuracy: b?.total ? Math.round(b.accSum / b.total) : 0,
+				avgTimeMs: b?.total ? Math.round(b.timeSum / b.total) : 0,
+			});
+		}
+		return out;
+	}, [courseId, chapterOptions, filteredForPerf]);
+
 	const [open, setOpen] = useState(false);
 	const [selected, setSelected] = useState<StoryChapterAttempt | null>(null);
-	const [detailTab, setDetailTab] = useState<'fill' | 'assignment' | 'all'>('fill');
+	const [detailTab, setDetailTab] = useState<'fill' | 'assignment'>('fill');
+	const [selectedAttemptNo, setSelectedAttemptNo] = useState<1 | 2 | 3>(1);
 
 	const chapterMap = useMemo(() => new Map((chapters || []).map((c) => [c.id, c])), [chapters]);
 	const courseMap = useMemo(() => new Map((courses || []).map((c) => [c.id, c])), [courses]);
@@ -98,11 +130,31 @@ export default function StoriesAdminAnalytics() {
 		return chapterMap.get(selected.chapterId) || null;
 	}, [selected, chapterMap]);
 
+	const assignmentStatementMap = useMemo(() => {
+		const map = new Map<string, { text: string; correct: string }>();
+		const statements = selectedChapter?.assignment?.statements || [];
+		for (const s of statements) {
+			map.set(s.id, { text: s.text || s.id, correct: String(s.correct || '') });
+		}
+		return map;
+	}, [selectedChapter?.id]);
+
 	const relatedAttempts = useMemo(() => {
 		if (!selected) return [] as StoryChapterAttempt[];
 		const list = (attempts || []).filter((a) => a.userId === selected.userId && a.chapterId === selected.chapterId);
 		return list.slice().sort((a, b) => a.attemptNo - b.attemptNo);
 	}, [attempts, selected?.id]);
+
+	const selectedAttempt = useMemo(() => {
+		if (!selected) return null;
+		return relatedAttempts.find((a) => a.attemptNo === selectedAttemptNo) || selected;
+	}, [relatedAttempts, selected, selectedAttemptNo]);
+
+	const attemptNosAvailable = useMemo(() => {
+		const set = new Set<number>();
+		for (const a of relatedAttempts) set.add(a.attemptNo);
+		return set;
+	}, [relatedAttempts]);
 
 	return (
 		<div className="max-w-7xl mx-auto space-y-6 py-8">
@@ -141,7 +193,7 @@ export default function StoriesAdminAnalytics() {
 								<Select value={courseId} onValueChange={(v) => { setCourseId(v); setChapterId('all'); }}>
 									<SelectTrigger className="h-9"><SelectValue placeholder="All" /></SelectTrigger>
 									<SelectContent>
-										<SelectItem value="all">All courses</SelectItem>
+										<SelectItem value="all">Select a course…</SelectItem>
 										{(courses || []).map((c) => (
 											<SelectItem key={c.id} value={c.id}>{c.title}</SelectItem>
 										))}
@@ -150,7 +202,7 @@ export default function StoriesAdminAnalytics() {
 							</div>
 							<div>
 								<div className="text-xs text-muted-foreground mb-1">Chapter</div>
-								<Select value={chapterId} onValueChange={(v) => setChapterId(v)}>
+								<Select value={chapterId} onValueChange={(v) => setChapterId(v)} disabled={courseId === 'all'}>
 									<SelectTrigger className="h-9"><SelectValue placeholder="All" /></SelectTrigger>
 									<SelectContent>
 										<SelectItem value="all">All chapters</SelectItem>
@@ -165,92 +217,102 @@ export default function StoriesAdminAnalytics() {
 				</div>
 			</Card>
 
-			<div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-				<Card className="p-4">
-					<div className="text-sm font-semibold mb-3">Daily performance</div>
-					<ScrollArea className="h-[45vh] rounded-md">
-						<div className="rounded-md border overflow-hidden">
-							<Table>
-								<TableHeader>
-									<TableRow>
-										<TableHead className="w-[140px]">Date</TableHead>
-										<TableHead className="text-right w-[120px]">Attempts</TableHead>
-										<TableHead className="text-right w-[120px]">Avg accuracy</TableHead>
-										<TableHead className="text-right w-[120px]">Avg time</TableHead>
-									</TableRow>
-								</TableHeader>
-								<TableBody>
-									{dayRows.length ? (
-										dayRows.map((r) => (
-											<TableRow key={r.date}>
-												<TableCell className="text-sm font-medium">{formatDateKey(r.date)}</TableCell>
-												<TableCell className="text-right tabular-nums">{r.totalAttempts}</TableCell>
-												<TableCell className="text-right tabular-nums">{r.avgAccuracy}%</TableCell>
-												<TableCell className="text-right tabular-nums">{fmtMs(r.avgTimeMs)}</TableCell>
-											</TableRow>
-										))
-									) : (
-										<TableRow>
-											<TableCell colSpan={4} className="text-center text-muted-foreground py-10">No data.</TableCell>
-										</TableRow>
-									)}
-								</TableBody>
-							</Table>
-						</div>
-					</ScrollArea>
+			{courseId === 'all' ? (
+				<Card className="p-6">
+					<div className="text-sm font-semibold">Select a course to view chapter performance</div>
+					<div className="text-sm text-muted-foreground mt-1">Choose a course above to see performance per chapter and browse attempts.</div>
 				</Card>
-
-				<Card className="p-4">
-					<div className="text-sm font-semibold mb-3">Attempts (newest first)</div>
-					<ScrollArea className="h-[45vh] rounded-md">
-						<div className="rounded-md border overflow-hidden">
-							<Table>
-								<TableHeader>
-									<TableRow>
-										<TableHead>Date</TableHead>
-										<TableHead>User</TableHead>
-										<TableHead>Course</TableHead>
-										<TableHead>Chapter</TableHead>
-										<TableHead className="text-right">Attempt</TableHead>
-										<TableHead className="text-right">Accuracy</TableHead>
-									</TableRow>
-								</TableHeader>
-								<TableBody>
-									{filtered.length ? (
-										filtered.map((a) => {
-											const u = userMap.get(a.userId);
-											const c = courseMap.get(a.courseId);
-											const ch = chapterMap.get(a.chapterId);
-											return (
+			) : (
+				<div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+					<Card className="p-4">
+						<div className="text-sm font-semibold mb-3">Chapter performance</div>
+						<ScrollArea className="h-[45vh] rounded-md">
+							<div className="rounded-md border overflow-hidden">
+								<Table>
+									<TableHeader>
+										<TableRow>
+											<TableHead>Chapter</TableHead>
+											<TableHead className="text-right w-[120px]">Attempts</TableHead>
+											<TableHead className="text-right w-[140px]">Best accuracy</TableHead>
+											<TableHead className="text-right w-[140px]">Avg accuracy</TableHead>
+											<TableHead className="text-right w-[120px]">Avg time</TableHead>
+										</TableRow>
+									</TableHeader>
+									<TableBody>
+										{chapterPerfRows.length ? (
+											chapterPerfRows.map((r) => (
 												<TableRow
-													key={a.id}
+													key={r.chapterId}
 													className="cursor-pointer"
-													onClick={() => {
-														setSelected(a);
-														setDetailTab('fill');
-														setOpen(true);
-													}}
+													onClick={() => setChapterId(r.chapterId)}
 												>
-													<TableCell className="text-xs">{formatDateKey(a.date)}</TableCell>
-													<TableCell className="text-xs">{u?.username ?? a.username ?? a.userId}</TableCell>
-													<TableCell className="text-xs">{c?.title ?? a.courseId}</TableCell>
-													<TableCell className="text-xs">{ch?.title ?? a.chapterId}</TableCell>
-													<TableCell className="text-right tabular-nums text-xs">{a.attemptNo}</TableCell>
-													<TableCell className="text-right tabular-nums text-xs">{a.accuracyPercent}%</TableCell>
+													<TableCell className="text-sm font-medium">{r.chapterTitle}</TableCell>
+													<TableCell className="text-right tabular-nums">{r.totalAttempts}</TableCell>
+													<TableCell className="text-right tabular-nums">{r.bestAccuracy}%</TableCell>
+													<TableCell className="text-right tabular-nums">{r.avgAccuracy}%</TableCell>
+													<TableCell className="text-right tabular-nums">{fmtMs(r.avgTimeMs)}</TableCell>
 												</TableRow>
-											);
-										})
-									) : (
+											))
+										) : (
+											<TableRow>
+												<TableCell colSpan={5} className="text-center text-muted-foreground py-10">No attempts yet.</TableCell>
+											</TableRow>
+										)}
+									</TableBody>
+								</Table>
+							</div>
+						</ScrollArea>
+					</Card>
+
+					<Card className="p-4">
+						<div className="text-sm font-semibold mb-3">Attempts (newest first)</div>
+						<ScrollArea className="h-[45vh] rounded-md">
+							<div className="rounded-md border overflow-hidden">
+								<Table>
+									<TableHeader>
 										<TableRow>
-											<TableCell colSpan={6} className="text-center text-muted-foreground py-10">No attempts.</TableCell>
+											<TableHead>Date</TableHead>
+											<TableHead>User</TableHead>
+											<TableHead>Chapter</TableHead>
+											<TableHead className="text-right">Accuracy</TableHead>
 										</TableRow>
-									)}
-								</TableBody>
-							</Table>
-						</div>
-					</ScrollArea>
-				</Card>
-			</div>
+									</TableHeader>
+									<TableBody>
+										{latestAttemptsPerChapter.length ? (
+											latestAttemptsPerChapter.map((a) => {
+												const u = userMap.get(a.userId);
+												const c = courseMap.get(a.courseId);
+												const ch = chapterMap.get(a.chapterId);
+												return (
+													<TableRow
+														key={a.id}
+														className="cursor-pointer"
+														onClick={() => {
+															setSelected(a);
+															setDetailTab('fill');
+															setSelectedAttemptNo((a.attemptNo || 1) as 1 | 2 | 3);
+															setOpen(true);
+														}}
+													>
+														<TableCell className="text-xs">{formatDateKey(a.date)}</TableCell>
+														<TableCell className="text-xs">{u?.username ?? a.username ?? a.userId}</TableCell>
+														<TableCell className="text-xs">{ch?.title ?? a.chapterId}</TableCell>
+														<TableCell className="text-right tabular-nums text-xs">{a.accuracyPercent}%</TableCell>
+													</TableRow>
+												);
+											})
+										) : (
+											<TableRow>
+												<TableCell colSpan={4} className="text-center text-muted-foreground py-10">No attempts.</TableCell>
+											</TableRow>
+										)}
+									</TableBody>
+								</Table>
+							</div>
+						</ScrollArea>
+					</Card>
+				</div>
+			)}
 
 			<Dialog open={open} onOpenChange={setOpen}>
 				<DialogContent className="max-w-4xl">
@@ -264,14 +326,28 @@ export default function StoriesAdminAnalytics() {
 									<TabsList>
 										<TabsTrigger value="fill">Fill-in</TabsTrigger>
 										<TabsTrigger value="assignment">Assignment</TabsTrigger>
-										<TabsTrigger value="all">All attempts</TabsTrigger>
 									</TabsList>
+
+									<div className="flex items-center gap-2 pt-3">
+										<div className="text-xs text-muted-foreground mr-1">Attempt</div>
+										{([1, 2, 3] as const).map((n) => (
+											<Button
+												key={n}
+												variant={selectedAttemptNo === n ? 'default' : 'outline'}
+												size="sm"
+												disabled={!attemptNosAvailable.has(n)}
+												onClick={() => setSelectedAttemptNo(n)}
+											>
+												{n}
+											</Button>
+										))}
+									</div>
 
 									<TabsContent value="fill" className="space-y-4">
 										<Card className="p-3">
 											<div className="text-xs text-muted-foreground">Accuracy</div>
-											<div className="text-xl font-semibold">{selected.accuracyPercent}%</div>
-											<div className="text-xs text-muted-foreground mt-1">Time: {fmtMs(selected.durationMs)}</div>
+											<div className="text-xl font-semibold">{selectedAttempt?.accuracyPercent ?? 0}%</div>
+											<div className="text-xs text-muted-foreground mt-1">Time: {fmtMs(selectedAttempt?.durationMs ?? 0)}</div>
 										</Card>
 
 										{selectedChapter?.storyHtml ? (
@@ -284,7 +360,7 @@ export default function StoriesAdminAnalytics() {
 										<Card className="p-4">
 											<div className="text-sm font-semibold mb-2">Fill-in-the-Blanks answers</div>
 											<div className="space-y-2">
-												{(selected.blanks || []).map((b) => (
+												{(selectedAttempt?.blanks || []).map((b) => (
 													<div key={b.blankId} className="flex items-center justify-between gap-3 border rounded-md p-2">
 														<div className="text-xs text-muted-foreground">{b.blankId}</div>
 														<div className="text-sm break-words">{b.answer || '—'}</div>
@@ -296,15 +372,26 @@ export default function StoriesAdminAnalytics() {
 									</TabsContent>
 
 									<TabsContent value="assignment" className="space-y-4">
-										{selected.assignment ? (
+										{selectedAttempt?.assignment ? (
 											<Card className="p-4">
 												<div className="text-sm font-semibold mb-2">Assignment answers</div>
 												<div className="space-y-2">
-													{selected.assignment.map((a) => (
-														<div key={a.statementId} className="flex items-center justify-between gap-3 border rounded-md p-2">
-															<div className="text-xs text-muted-foreground">{a.statementId}</div>
-															<div className="text-sm">{a.answer}</div>
-															<div className="text-xs">{a.correct ? 'Correct' : 'Wrong'}</div>
+													{selectedAttempt.assignment.map((a) => (
+														<div key={a.statementId} className="border rounded-md p-3">
+															<div className="flex items-start justify-between gap-3">
+																<div className="min-w-0">
+																	<div className="text-sm font-medium break-words">
+																		{assignmentStatementMap.get(a.statementId)?.text ?? a.statementId}
+																	</div>
+																	<div className="text-xs text-muted-foreground mt-1">
+																		User answer: {(a.answer || '').toLowerCase() === 'yes' ? 'Yes' : (a.answer || '').toLowerCase() === 'no' ? 'No' : '—'}
+																	</div>
+																	<div className="text-xs text-muted-foreground">
+																		Correct answer: {(assignmentStatementMap.get(a.statementId)?.correct || '').toLowerCase() === 'yes' ? 'Yes' : (assignmentStatementMap.get(a.statementId)?.correct || '').toLowerCase() === 'no' ? 'No' : '—'}
+																	</div>
+																</div>
+																<div className="text-xs shrink-0">{a.correct ? 'Correct' : 'Wrong'}</div>
+															</div>
 														</div>
 													))}
 												</div>
@@ -312,47 +399,6 @@ export default function StoriesAdminAnalytics() {
 										) : (
 											<Card className="p-4 text-sm text-muted-foreground">No assignment answers recorded for this attempt.</Card>
 										)}
-									</TabsContent>
-
-									<TabsContent value="all" className="space-y-4">
-										<Card className="p-4">
-											<div className="text-sm font-semibold mb-2">All attempts (1–3)</div>
-											<div className="space-y-3">
-												{relatedAttempts.map((a) => (
-													<Card key={a.id} className="p-3">
-														<div className="flex items-center justify-between">
-															<div className="text-sm font-medium">Attempt {a.attemptNo}</div>
-															<div className="text-xs text-muted-foreground">{fmtMs(a.durationMs)} • {a.accuracyPercent}%</div>
-														</div>
-														<div className="mt-2 space-y-2">
-															<div className="text-xs font-semibold">Fill-in</div>
-															{(a.blanks || []).map((b) => (
-																<div key={b.blankId} className="flex items-center justify-between gap-3 border rounded-md p-2">
-																	<div className="text-xs text-muted-foreground">{b.blankId}</div>
-																	<div className="text-sm break-words">{b.answer || '—'}</div>
-																	<div className="text-xs">{b.correct ? 'Correct' : 'Wrong'}</div>
-																</div>
-															))}
-															{a.assignment ? (
-																<>
-																	<div className="text-xs font-semibold mt-3">Assignment</div>
-																	{a.assignment.map((x) => (
-																		<div key={x.statementId} className="flex items-center justify-between gap-3 border rounded-md p-2">
-																			<div className="text-xs text-muted-foreground">{x.statementId}</div>
-																			<div className="text-sm">{x.answer}</div>
-																			<div className="text-xs">{x.correct ? 'Correct' : 'Wrong'}</div>
-																		</div>
-																	))}
-																</>
-															) : null}
-														</div>
-													</Card>
-												))}
-												{relatedAttempts.length === 0 ? (
-													<div className="text-sm text-muted-foreground">No attempts found.</div>
-												) : null}
-											</div>
-										</Card>
 									</TabsContent>
 								</Tabs>
 							</div>

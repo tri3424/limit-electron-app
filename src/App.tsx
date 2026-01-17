@@ -127,8 +127,30 @@ const App = () => {
     setupCodeBlockCopy();
     void runDisableAutoFeaturesCleanup();
     const cleanupKatex = setupGlobalKatexAutoFit();
+		const onUnhandledRejection = (e: PromiseRejectionEvent) => {
+			const reason: any = e.reason;
+			const msg = String(reason?.message || reason || '');
+			const name = String(reason?.name || '');
+			if (name === 'AbortError' || msg.includes('The operation was aborted')) {
+				e.preventDefault();
+				return;
+			}
+			if (msg.includes('The input data is corrupted') || msg.includes('incorrect header check')) {
+				e.preventDefault();
+			}
+		};
+		const onError = (e: ErrorEvent) => {
+			const msg = String(e?.message || '');
+			if (msg.includes('The input data is corrupted') || msg.includes('incorrect header check')) {
+				e.preventDefault();
+			}
+		};
+		window.addEventListener('unhandledrejection', onUnhandledRejection);
+		window.addEventListener('error', onError);
     return () => {
       cleanupKatex?.();
+			window.removeEventListener('unhandledrejection', onUnhandledRejection);
+			window.removeEventListener('error', onError);
     };
   }, []);
 

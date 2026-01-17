@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import {
  	AlertDialog,
@@ -49,6 +50,9 @@ export default function StoriesAdminCourse() {
 	const [resetting, setResetting] = useState(false);
 	const [confirmOpen, setConfirmOpen] = useState(false);
 	const [confirmText, setConfirmText] = useState('');
+	const [viewOpen, setViewOpen] = useState(false);
+	const [viewChapter, setViewChapter] = useState<StoryChapter | null>(null);
+	const [viewTab, setViewTab] = useState<'story' | 'assignment'>('story');
 
 	const onCreateChapter = async () => {
 		if (!courseId) return;
@@ -184,7 +188,15 @@ export default function StoriesAdminCourse() {
 									<Button size="sm" variant="outline" onClick={() => navigate(`/stories-admin/chapter/${ch.id}/edit`)}>
 										<Pencil className="h-4 w-4 mr-2" /> Edit
 									</Button>
-									<Button size="sm" variant="outline" onClick={() => navigate(`/stories/course/${courseId}/chapter/${ch.id}/read`)}>
+									<Button
+										size="sm"
+										variant="outline"
+										onClick={() => {
+											setViewChapter(ch);
+											setViewTab('story');
+											setViewOpen(true);
+										}}
+									>
 										View
 									</Button>
 								</div>
@@ -207,6 +219,84 @@ export default function StoriesAdminCourse() {
 					<DialogFooter>
 						<Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
 						<Button onClick={onCreateChapter}>Create</Button>
+					</DialogFooter>
+				</DialogContent>
+			</Dialog>
+
+			<Dialog open={viewOpen} onOpenChange={setViewOpen}>
+				<DialogContent className="max-w-3xl">
+					<DialogHeader>
+						<DialogTitle>{viewChapter?.title || 'Chapter'}</DialogTitle>
+					</DialogHeader>
+
+					<Tabs value={viewTab} onValueChange={(v: any) => setViewTab(v)}>
+						<TabsList>
+							<TabsTrigger value="story">Story</TabsTrigger>
+							<TabsTrigger value="assignment">Assignment</TabsTrigger>
+						</TabsList>
+
+						<TabsContent value="story" className="space-y-4">
+							<Card className="p-4">
+								<div className="prose prose-sm max-w-none" dangerouslySetInnerHTML={{ __html: viewChapter?.storyHtml || '' }} />
+							</Card>
+
+							<Card className="p-4">
+								<div className="text-sm font-semibold mb-2">Fill-in-the-Blanks (Correct answers)</div>
+								<div className="space-y-2">
+									{(viewChapter?.fillBlanks?.blanks || []).length ? (
+										(viewChapter?.fillBlanks?.blanks || []).map((b) => (
+											<div key={b.id} className="flex items-center justify-between gap-3 border rounded p-2">
+												<div className="text-xs text-muted-foreground">{b.id}</div>
+												<div className="text-sm font-medium">{b.correct}</div>
+											</div>
+										))
+									) : (
+										<div className="text-sm text-muted-foreground">No blanks.</div>
+									)}
+								</div>
+							</Card>
+						</TabsContent>
+
+						<TabsContent value="assignment" className="space-y-4">
+							{(viewChapter?.assignment?.statements || []).length ? (
+								<Card className="p-4">
+									<div className="text-sm font-semibold mb-2">Assignment (Correct answers)</div>
+									<div className="space-y-3">
+										{(viewChapter?.assignment?.statements || []).map((s) => (
+											<div key={s.id} className="border rounded p-3 space-y-2">
+												<div className="text-sm">{s.text}</div>
+												<div className="flex items-center gap-2">
+													<div
+														className={
+															s.correct === 'yes'
+																? 'px-3 py-2 border rounded bg-green-50 border-green-600 text-green-800'
+																: 'px-3 py-2 border rounded bg-muted/10 text-muted-foreground'
+														}
+													>
+														Yes
+													</div>
+													<div
+														className={
+															s.correct === 'no'
+																? 'px-3 py-2 border rounded bg-green-50 border-green-600 text-green-800'
+																: 'px-3 py-2 border rounded bg-muted/10 text-muted-foreground'
+														}
+													>
+														No
+													</div>
+												</div>
+											</div>
+										))}
+									</div>
+								</Card>
+							) : (
+								<Card className="p-4 text-sm text-muted-foreground">No assignment.</Card>
+							)}
+						</TabsContent>
+					</Tabs>
+
+					<DialogFooter>
+						<Button variant="outline" onClick={() => setViewOpen(false)}>Close</Button>
 					</DialogFooter>
 				</DialogContent>
 			</Dialog>
