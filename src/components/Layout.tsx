@@ -1,7 +1,7 @@
 import { ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { Home, FileQuestion, Settings, Layers, LogOut, Music, ListMusic, Search, BookOpen } from 'lucide-react';
+import { Home, FileQuestion, Settings, Layers, LogOut, Music, ListMusic, Search, BookOpen, BookText } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
@@ -106,6 +106,7 @@ export function Layout({ children }: LayoutProps) {
 
   const adminNavigation = [
     { name: 'Home', href: HOME_ROUTE, icon: Home },
+		{ name: 'Courses', href: '/stories-admin', icon: BookText },
     { name: 'Questions', href: '/questions', icon: FileQuestion },
     { name: 'Modules', href: '/modules', icon: Layers },
 		{ name: 'Songs', href: '/songs-admin', icon: Music },
@@ -114,6 +115,7 @@ export function Layout({ children }: LayoutProps) {
   ];
 
 	const studentNavigation = [
+		{ name: 'Stories', href: '/stories', icon: BookText },
 		{ name: 'Practice', href: '/practice', icon: BookOpen },
 	];
 

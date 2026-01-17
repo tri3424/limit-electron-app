@@ -1,0 +1,280 @@
+import { useEffect, useMemo, useState } from 'react';
+import { useLiveQuery } from 'dexie-react-hooks';
+import { useNavigate, useParams } from 'react-router-dom';
+import { db, type StoryChapterAttempt } from '@/lib/db';
+import { Card } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { toast } from 'sonner';
+import { getLockedBlankIds, submitStoryChapterAttempt } from '@/lib/stories';
+import { useAuth } from '@/contexts/AuthContext';
+
+function parseStoryHtmlToParts(html: string): Array<{ kind: 'text'; value: string } | { kind: 'blank'; id: string; correct: string }> {
+	if (typeof window === 'undefined' || typeof DOMParser === 'undefined') {
+		return [{ kind: 'text', value: html || '' }];
+	}
+	const parser = new DOMParser();
+	const doc = parser.parseFromString(`<div>${html || ''}</div>`, 'text/html');
+	const root = doc.body.firstElementChild;
+	if (!root) return [{ kind: 'text', value: html || '' }];
+
+	const parts: Array<{ kind: 'text'; value: string } | { kind: 'blank'; id: string; correct: string }> = [];
+	const walk = (node: ChildNode) => {
+		if (node.nodeType === Node.TEXT_NODE) {
+			const v = node.textContent || '';
+			if (v) parts.push({ kind: 'text', value: v });
+			return;
+		}
+		if (node.nodeType !== Node.ELEMENT_NODE) return;
+		const el = node as HTMLElement;
+		const isBlank = el.getAttribute('data-blank') === 'true';
+		if (isBlank) {
+			parts.push({ kind: 'blank', id: el.getAttribute('data-blank-id') || '', correct: (el.innerText || '').trim() });
+			return;
+		}
+		if (el.tagName.toLowerCase() === 'br') {
+			parts.push({ kind: 'text', value: '\n' });
+			return;
+		}
+		for (const child of Array.from(el.childNodes)) walk(child);
+		if (['p', 'div', 'li'].includes(el.tagName.toLowerCase())) parts.push({ kind: 'text', value: '\n' });
+	};
+	for (const child of Array.from(root.childNodes)) walk(child);
+	return parts;
+}
+
+function pendingKey(userId: string, chapterId: string) {
+	return `story:pending:${userId}:${chapterId}`;
+}
+
+type Pending = { startedAt: number; blankAnswers: Record<string, string> };
+
+export default function StoryChapterRead() {
+	const { courseId, chapterId } = useParams();
+	const navigate = useNavigate();
+	const { user } = useAuth();
+	const userId = user?.id || '';
+	const username = user?.username;
+
+	const chapter = useLiveQuery(async () => {
+		if (!chapterId) return null;
+		return (await db.storyChapters.get(chapterId)) || null;
+	}, [chapterId]);
+
+	const course = useLiveQuery(async () => {
+		if (!courseId) return null;
+		return (await db.storyCourses.get(courseId)) || null;
+	}, [courseId]);
+
+	const attemptsUsed = useLiveQuery(async () => {
+		if (!userId || !chapterId) return 0;
+		const rows = await db.storyAttempts.where('[chapterId+userId]').equals([chapterId, userId]).toArray();
+		return rows.length;
+	}, [userId, chapterId], 0);
+
+	const lastAttempt = useLiveQuery(async () => {
+		if (!userId || !chapterId) return null;
+		const rows = await db.storyAttempts.where('[chapterId+userId]').equals([chapterId, userId]).toArray();
+		if (!rows.length) return null;
+		return rows.slice().sort((a, b) => a.attemptNo - b.attemptNo)[rows.length - 1] || null;
+	}, [userId, chapterId], null as StoryChapterAttempt | null);
+
+	const [lockedBlankIds, setLockedBlankIds] = useState<string[]>([]);
+	const [startedAt, setStartedAt] = useState<number>(() => Date.now());
+	const [blankAnswers, setBlankAnswers] = useState<Record<string, string>>({});
+	const [submitting, setSubmitting] = useState(false);
+	const [submittedAttempt, setSubmittedAttempt] = useState<StoryChapterAttempt | null>(null);
+	const [showLastAttemptResult, setShowLastAttemptResult] = useState(true);
+
+	useEffect(() => {
+		setSubmittedAttempt(null);
+		setSubmitting(false);
+		setStartedAt(Date.now());
+		setBlankAnswers({});
+		setShowLastAttemptResult(true);
+	}, [chapterId]);
+
+	useEffect(() => {
+		if (!userId || !chapterId) return;
+		void (async () => {
+			const locked = await getLockedBlankIds(userId, chapterId);
+			setLockedBlankIds(locked);
+		})();
+	}, [userId, chapterId, attemptsUsed]);
+
+	useEffect(() => {
+		if (!userId || !chapterId) return;
+		const key = pendingKey(userId, chapterId);
+		// If the chapter already has attempts, don't restore any stale draft answers.
+		if ((attemptsUsed ?? 0) > 0) {
+			try {
+				localStorage.removeItem(key);
+			} catch {
+				// ignore
+			}
+			return;
+		}
+		try {
+			const raw = localStorage.getItem(key);
+			if (!raw) return;
+			const parsed = JSON.parse(raw) as Pending;
+			if (parsed?.blankAnswers) setBlankAnswers(parsed.blankAnswers);
+			if (parsed?.startedAt) setStartedAt(parsed.startedAt);
+		} catch {
+			// ignore
+		}
+	}, [userId, chapterId, attemptsUsed]);
+
+	const parts = useMemo(() => parseStoryHtmlToParts(chapter?.storyHtml || ''), [chapter?.storyHtml]);
+	const blankIds = useMemo(() => {
+		const set = new Set<string>();
+		for (const p of parts) if (p.kind === 'blank' && p.id) set.add(p.id);
+		return Array.from(set);
+	}, [parts]);
+
+	const hasAssignment = (chapter?.assignment?.statements || []).length > 0;
+	const maxAttempts = 3;
+	const effectiveAttemptsUsed = Math.max(
+		Number(attemptsUsed ?? 0),
+		submittedAttempt?.attemptNo ?? 0,
+		lastAttempt?.attemptNo ?? 0,
+	);
+	const attemptsRemaining = Math.max(0, maxAttempts - effectiveAttemptsUsed);
+	const displayAttempt = submittedAttempt ?? (showLastAttemptResult ? lastAttempt : null);
+	const isFinalized = !!(displayAttempt && Array.isArray(displayAttempt.assignment) && displayAttempt.assignment.length > 0);
+
+	const blanksAccuracyPercent = (() => {
+		if (!displayAttempt) return null;
+		const blanks = displayAttempt.blanks || [];
+		const total = blanks.length;
+		if (!total) return 0;
+		const correct = blanks.filter((b) => b.correct).length;
+		return Math.round((correct / total) * 100);
+	})();
+
+	const onSubmit = async () => {
+		if (!userId || !chapter) return;
+		if (effectiveAttemptsUsed >= maxAttempts) {
+			toast.error('No attempts remaining');
+			return;
+		}
+		setSubmitting(true);
+		try {
+			const res = await submitStoryChapterAttempt({
+				userId,
+				username,
+				chapter,
+				startedAt,
+				blankAnswers,
+			});
+			setSubmittedAttempt(res);
+			setShowLastAttemptResult(true);
+			const payload: Pending & { attemptId: string } = { startedAt, blankAnswers, attemptId: res.id };
+			localStorage.setItem(pendingKey(userId, chapter.id), JSON.stringify(payload));
+			toast.success('Submitted');
+		} catch (e) {
+			console.error(e);
+			toast.error(String((e as any)?.message || 'Failed'));
+		} finally {
+			setSubmitting(false);
+		}
+	};
+
+	const onRetry = () => {
+		if (effectiveAttemptsUsed >= maxAttempts) {
+			toast.error('No attempts remaining');
+			return;
+		}
+		setSubmittedAttempt(null);
+		setShowLastAttemptResult(false);
+		setStartedAt(Date.now());
+		setBlankAnswers((prev) => {
+			const next: Record<string, string> = { ...prev };
+			for (const id of blankIds) {
+				if (!lockedBlankIds.includes(id)) next[id] = '';
+			}
+			return next;
+		});
+	};
+
+	const onProceed = () => {
+		if (!courseId || !chapterId) return;
+		if (hasAssignment) {
+			navigate(`/stories/course/${courseId}/chapter/${chapterId}/assignment`);
+			return;
+		}
+		// No assignment: proceed means go back to chapter list
+		navigate(`/stories/course/${courseId}`);
+	};
+
+	if (!courseId || !chapterId) {
+		return <div className="max-w-5xl mx-auto p-8 text-muted-foreground">Missing chapter.</div>;
+	}
+	if (!chapter) {
+		return <div className="max-w-5xl mx-auto p-8 text-muted-foreground">Loading…</div>;
+	}
+
+	return (
+		<div className="max-w-5xl mx-auto py-8">
+			<div className="flex items-start justify-between gap-4 mb-6">
+				<div className="min-w-0">
+					<div className="text-xs text-muted-foreground">Course: {course?.title ?? courseId}</div>
+					<h1 className="text-2xl font-bold text-foreground">{chapter.title}</h1>
+				</div>
+				<Button variant="outline" onClick={() => navigate(`/stories/course/${courseId}`)}>Back</Button>
+			</div>
+
+			<Card className="p-6">
+				<div className="space-y-3 whitespace-pre-wrap leading-relaxed">
+					{parts.map((p, idx) => {
+						if (p.kind === 'text') return <span key={idx}>{p.value}</span>;
+						const locked = lockedBlankIds.includes(p.id);
+						return (
+							<span key={idx} className="inline-flex items-center gap-2 mx-1 my-1">
+								<Input
+									value={locked ? p.correct : (blankAnswers[p.id] || '')}
+									onChange={(e) => setBlankAnswers((prev) => ({ ...prev, [p.id]: e.target.value }))}
+									disabled={locked || !!submittedAttempt}
+									className="h-9 w-[170px]"
+									placeholder={locked ? '' : 'Type…'}
+								/>
+							</span>
+						);
+					})}
+				</div>
+			</Card>
+
+			<Card className="mt-6">
+				<div className="rounded-xl border bg-card shadow-sm p-4 md:p-5 flex items-center justify-between gap-4">
+					<div className="min-w-0">
+						{displayAttempt ? <div className="text-sm font-semibold">Chapter completed!</div> : null}
+						{displayAttempt ? (
+							<div className="text-sm text-muted-foreground mt-1">
+								Accuracy: <span className="font-semibold text-foreground">{blanksAccuracyPercent ?? 0}%</span>
+							</div>
+						) : null}
+					</div>
+
+					<div className="flex items-center gap-2 shrink-0">
+						{displayAttempt ? (
+							<>
+								{attemptsRemaining > 0 && !isFinalized ? (
+									<Button variant="outline" onClick={onRetry}>Retry</Button>
+								) : null}
+								{hasAssignment && !isFinalized ? (
+									<Button onClick={onProceed}>Proceed</Button>
+								) : !hasAssignment && (blanksAccuracyPercent ?? 0) >= 75 ? (
+									<Button onClick={onProceed}>Complete</Button>
+								) : null}
+							</>
+						) : (
+							<Button onClick={onSubmit} disabled={submitting || attemptsRemaining === 0} className="min-w-[140px]">
+								{submitting ? 'Submitting…' : 'Submit'}
+							</Button>
+						)}
+					</div>
+				</div>
+			</Card>
+		</div>
+	);
+}

@@ -249,14 +249,14 @@ All colors MUST be HSL.
     --popover-foreground: 32 12% 12%;
 
     /* Primary - green matching bg-green-700 */
-    --primary: 152 55% 38%;
+    --primary: 94 49% 33%;
     --primary-foreground: 0 0% 100%;
-    --primary-hover: 152 55% 32%;
+    --primary-hover: 94 49% 28%;
     
     /* Accent - darker green shade */
-    --accent: 158 50% 34%;
+    --accent: 94 49% 33%;
     --accent-foreground: 0 0% 100%;
-    --accent-hover: 158 50% 28%;
+    --accent-hover: 94 49% 28%;
 
     /* Secondary - light green matching bg-green-50 */
     --secondary: 148 35% 96%;
@@ -280,9 +280,9 @@ All colors MUST be HSL.
 
     --border: 148 16% 88%;
     --input: 148 18% 96%;
-    --ring: 152 55% 38%;
+    --ring: 94 49% 33%;
 
-    --radius: 0.75rem;
+    --radius: 0.5rem;
 
     /* Exam mode - deep green */
     --exam-primary: 154 62% 26%;
@@ -316,13 +316,13 @@ All colors MUST be HSL.
     --popover: 165 18% 13%;
     --popover-foreground: 40 18% 96%;
 
-    --primary: 152 70% 52%;
+    --primary: 94 55% 55%;
     --primary-foreground: 0 0% 100%;
-    --primary-hover: 152 70% 46%;
+    --primary-hover: 94 55% 48%;
 
-    --accent: 158 62% 46%;
+    --accent: 94 55% 55%;
     --accent-foreground: 0 0% 100%;
-    --accent-hover: 158 62% 40%;
+    --accent-hover: 94 55% 48%;
 
     --secondary: 155 18% 20%;
     --secondary-foreground: 40 18% 96%;
@@ -341,7 +341,7 @@ All colors MUST be HSL.
 
     --border: 155 14% 26%;
     --input: 155 14% 20%;
-    --ring: 152 70% 52%;
+    --ring: 94 55% 55%;
 
     --exam-primary: 154 72% 44%;
     --exam-bg: 165 18% 11%;

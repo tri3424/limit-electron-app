@@ -134,7 +134,7 @@ function ModuleCard({ m, now, navigate, userId, isCompleted }: { m: any; now: nu
         <Dialog>
           <DialogTrigger asChild>
             <Button 
-              className="bg-green-700 hover:bg-green-800 text-white px-6 w-full"
+              className="px-6 w-full"
               disabled={isDisabled}
             >
               INSTRUCTIONS
@@ -156,7 +156,7 @@ function ModuleCard({ m, now, navigate, userId, isCompleted }: { m: any; now: nu
             <TooltipTrigger asChild>
               <span>
                 <Button
-                  className="bg-green-700 hover:bg-green-800 text-white px-6 w-full disabled:bg-gray-300 disabled:text-gray-600 disabled:cursor-not-allowed"
+                  className="px-6 w-full"
                   disabled={isDisabled}
                   onClick={async () => {
                     // Don't navigate if disabled
@@ -426,6 +426,15 @@ const Home = () => {
           {isAdmin ? (
             <Button
               variant="outline"
+              onClick={() => navigate('/stories-admin')}
+              className="border-green-300 text-green-800 hover:bg-green-50 mr-2"
+            >
+              Stories
+            </Button>
+          ) : null}
+          {isAdmin ? (
+            <Button
+              variant="outline"
               onClick={() => navigate('/practice')}
               className="border-green-300 text-green-800 hover:bg-green-50 mr-2"
             >
@@ -448,6 +457,15 @@ const Home = () => {
   return (
     <div className="w-full py-10 space-y-4">
       <div className="flex justify-end">
+        {isAdmin ? (
+          <Button
+            variant="outline"
+            onClick={() => navigate('/stories-admin')}
+            className="border-green-300 text-green-800 hover:bg-green-50 mr-2"
+          >
+            Stories
+          </Button>
+        ) : null}
         {isAdmin ? (
           <Button
             variant="outline"

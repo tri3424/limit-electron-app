@@ -1,0 +1,320 @@
+import { useMemo, useState } from 'react';
+import { useLiveQuery } from 'dexie-react-hooks';
+import { useNavigate, useParams } from 'react-router-dom';
+import { v4 as uuidv4 } from 'uuid';
+import { db, type StoryChapter } from '@/lib/db';
+import { Card } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import {
+ 	AlertDialog,
+ 	AlertDialogAction,
+ 	AlertDialogCancel,
+ 	AlertDialogContent,
+ 	AlertDialogDescription,
+ 	AlertDialogFooter,
+ 	AlertDialogHeader,
+ 	AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import { ArrowLeft, Plus, Pencil } from 'lucide-react';
+import { toast } from 'sonner';
+
+export default function StoriesAdminCourse() {
+	const { courseId } = useParams();
+	const navigate = useNavigate();
+
+	const course = useLiveQuery(async () => {
+		if (!courseId) return null;
+		return (await db.storyCourses.get(courseId)) || null;
+	}, [courseId]);
+
+	const chapters = useLiveQuery(async () => {
+		if (!courseId) return [];
+		return await db.storyChapters.where('courseId').equals(courseId).toArray();
+	}, [courseId], [] as StoryChapter[]);
+
+	const ordered = useMemo(() => (chapters || []).slice().sort((a, b) => (a.order ?? 0) - (b.order ?? 0)), [chapters]);
+	const users = useLiveQuery(() => db.users.toArray(), [], [] as any[]);
+
+	const [open, setOpen] = useState(false);
+	const [chapterTitle, setChapterTitle] = useState('');
+	const [resetOpen, setResetOpen] = useState(false);
+	const [resetUserId, setResetUserId] = useState<string>('');
+	const [resetScope, setResetScope] = useState<'course' | 'chapter'>('course');
+	const [resetChapterId, setResetChapterId] = useState<string>('');
+	const [resetting, setResetting] = useState(false);
+	const [confirmOpen, setConfirmOpen] = useState(false);
+	const [confirmText, setConfirmText] = useState('');
+
+	const onCreateChapter = async () => {
+		if (!courseId) return;
+		const t = chapterTitle.trim();
+		if (!t) {
+			toast.error('Chapter name is required');
+			return;
+		}
+		try {
+			const now = Date.now();
+			const nextOrder = ordered.length ? (ordered[ordered.length - 1].order ?? ordered.length) + 1 : 1;
+			const id = uuidv4();
+			const ch: StoryChapter = {
+				id,
+				courseId,
+				title: t,
+				order: nextOrder,
+				storyHtml: '<p>Write the story here…</p>',
+				fillBlanks: { blanks: [] },
+				assignment: undefined,
+				visible: true,
+				createdAt: now,
+				updatedAt: now,
+			};
+			await db.transaction('rw', db.storyChapters, db.storyCourses, async () => {
+				await db.storyChapters.add(ch);
+				const c = await db.storyCourses.get(courseId);
+				if (c) {
+					const next = Array.from(new Set([...(c.chapterIds || []), id]));
+					await db.storyCourses.update(courseId, { chapterIds: next, updatedAt: Date.now() });
+				}
+			});
+			setOpen(false);
+			setChapterTitle('');
+			navigate(`/stories-admin/chapter/${id}/edit`);
+		} catch (e) {
+			console.error(e);
+			toast.error('Failed to create chapter');
+		}
+	};
+
+	const onResetProgress = async () => {
+		if (!courseId) return;
+		if (!resetUserId) {
+			toast.error('Select a user');
+			return;
+		}
+		if (resetScope === 'chapter' && !resetChapterId) {
+			toast.error('Select a chapter');
+			return;
+		}
+		setResetting(true);
+		try {
+			await db.transaction('rw', db.storyAttempts, db.storyChapterProgress, async () => {
+				if (resetScope === 'chapter') {
+					const rows = await db.storyAttempts
+						.where('[chapterId+userId]')
+						.equals([resetChapterId, resetUserId])
+						.toArray();
+					await db.storyAttempts.bulkDelete(rows.map((r) => r.id));
+					const p = await db.storyChapterProgress
+						.where('[chapterId+userId]')
+						.equals([resetChapterId, resetUserId])
+						.toArray();
+					await db.storyChapterProgress.bulkDelete(p.map((x) => x.id));
+					return;
+				}
+
+				const attempts = await db.storyAttempts
+					.where('userId')
+					.equals(resetUserId)
+					.and((a) => a.courseId === courseId)
+					.toArray();
+				await db.storyAttempts.bulkDelete(attempts.map((a) => a.id));
+
+				const prog = await db.storyChapterProgress
+					.where('[courseId+userId]')
+					.equals([courseId, resetUserId])
+					.toArray();
+				await db.storyChapterProgress.bulkDelete(prog.map((p) => p.id));
+			});
+
+			toast.success('Progress reset');
+			setResetOpen(false);
+			setResetUserId('');
+			setResetScope('course');
+			setResetChapterId('');
+		} catch (e) {
+			console.error(e);
+			toast.error('Failed to reset progress');
+		} finally {
+			setResetting(false);
+		}
+	};
+
+	if (!courseId) {
+		return <div className="max-w-5xl mx-auto p-8 text-muted-foreground">Missing course.</div>;
+	}
+
+	return (
+		<div className="max-w-6xl mx-auto space-y-6 py-8">
+			<div className="flex items-start justify-between gap-4">
+				<div className="min-w-0">
+					<div className="flex items-center gap-3">
+						<Button variant="outline" size="sm" onClick={() => navigate('/stories-admin')}>
+							<ArrowLeft className="h-4 w-4 mr-2" /> Back
+						</Button>
+						<h1 className="text-2xl font-bold text-foreground">{course?.title ?? 'Course'}</h1>
+					</div>
+					{course?.description ? <div className="text-sm text-muted-foreground mt-2">{course.description}</div> : null}
+				</div>
+				<div className="flex gap-2">
+					<Button variant="outline" onClick={() => setResetOpen(true)}>
+						Reset progress
+					</Button>
+					<Button onClick={() => setOpen(true)}>
+						<Plus className="h-4 w-4 mr-2" /> New chapter
+					</Button>
+				</div>
+			</div>
+
+			<Card className="p-4">
+				<div className="text-sm font-semibold mb-3">Chapters</div>
+				<ScrollArea className="h-[60vh]">
+					<div className="space-y-2 pr-2">
+						{ordered.map((ch) => (
+							<div key={ch.id} className="flex items-center justify-between gap-3 rounded-md border p-3">
+								<div className="min-w-0">
+									<div className="font-medium truncate">{ch.title}</div>
+									<div className="text-xs text-muted-foreground">Order: {ch.order} • Visible: {ch.visible === false ? 'No' : 'Yes'}</div>
+								</div>
+								<div className="flex gap-2">
+									<Button size="sm" variant="outline" onClick={() => navigate(`/stories-admin/chapter/${ch.id}/edit`)}>
+										<Pencil className="h-4 w-4 mr-2" /> Edit
+									</Button>
+									<Button size="sm" variant="outline" onClick={() => navigate(`/stories/course/${courseId}/chapter/${ch.id}/read`)}>
+										View
+									</Button>
+								</div>
+							</div>
+						))}
+						{ordered.length === 0 ? <div className="text-sm text-muted-foreground p-4">No chapters.</div> : null}
+					</div>
+				</ScrollArea>
+			</Card>
+
+			<Dialog open={open} onOpenChange={setOpen}>
+				<DialogContent className="max-w-lg">
+					<DialogHeader>
+						<DialogTitle>Create chapter</DialogTitle>
+					</DialogHeader>
+					<div className="space-y-2">
+						<Label>Chapter name</Label>
+						<Input value={chapterTitle} onChange={(e) => setChapterTitle(e.target.value)} />
+					</div>
+					<DialogFooter>
+						<Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
+						<Button onClick={onCreateChapter}>Create</Button>
+					</DialogFooter>
+				</DialogContent>
+			</Dialog>
+
+			<Dialog open={resetOpen} onOpenChange={setResetOpen}>
+				<DialogContent className="max-w-lg">
+					<DialogHeader>
+						<DialogTitle>Reset progress</DialogTitle>
+					</DialogHeader>
+					<div className="space-y-4">
+						<div className="space-y-2">
+							<Label>User</Label>
+							<Select value={resetUserId} onValueChange={setResetUserId}>
+								<SelectTrigger>
+									<SelectValue />
+								</SelectTrigger>
+								<SelectContent>
+									{(users || []).map((u) => (
+										<SelectItem key={u.id} value={u.id}>
+											{u.username}
+										</SelectItem>
+									))}
+								</SelectContent>
+							</Select>
+						</div>
+						<div className="space-y-2">
+							<Label>Scope</Label>
+							<Select value={resetScope} onValueChange={(v: any) => setResetScope(v)}>
+								<SelectTrigger>
+									<SelectValue />
+								</SelectTrigger>
+								<SelectContent>
+									<SelectItem value="course">Whole course</SelectItem>
+									<SelectItem value="chapter">Specific chapter</SelectItem>
+								</SelectContent>
+							</Select>
+						</div>
+						{resetScope === 'chapter' ? (
+							<div className="space-y-2">
+								<Label>Chapter</Label>
+								<Select value={resetChapterId} onValueChange={setResetChapterId}>
+									<SelectTrigger>
+										<SelectValue />
+									</SelectTrigger>
+									<SelectContent>
+										{ordered.map((ch) => (
+											<SelectItem key={ch.id} value={ch.id}>
+												{ch.title}
+											</SelectItem>
+										))}
+									</SelectContent>
+								</Select>
+							</div>
+						) : null}
+					</div>
+					<DialogFooter>
+						<Button
+							variant="outline"
+							onClick={() => {
+								setResetOpen(false);
+							}}
+						>
+							Cancel
+						</Button>
+						<Button
+							onClick={() => {
+								if (!resetUserId) {
+									toast.error('Select a user');
+									return;
+								}
+								if (resetScope === 'chapter' && !resetChapterId) {
+									toast.error('Select a chapter');
+									return;
+								}
+								const scopeText = resetScope === 'course' ? 'entire course' : 'selected chapter';
+								setConfirmText(`Reset progress for ${scopeText}? This will delete attempts.`);
+								setConfirmOpen(true);
+							}}
+							disabled={resetting}
+						>
+							{resetting ? 'Resetting…' : 'Reset'}
+						</Button>
+					</DialogFooter>
+				</DialogContent>
+			</Dialog>
+
+			<AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+				<AlertDialogContent>
+					<AlertDialogHeader>
+						<AlertDialogTitle>Confirm reset</AlertDialogTitle>
+						<AlertDialogDescription className="mt-3">
+							{confirmText}
+						</AlertDialogDescription>
+					</AlertDialogHeader>
+					<AlertDialogFooter className="mt-6">
+						<AlertDialogCancel disabled={resetting}>Cancel</AlertDialogCancel>
+						<AlertDialogAction
+							onClick={async () => {
+								setConfirmOpen(false);
+								await onResetProgress();
+							}}
+							disabled={resetting}
+						>
+							Reset
+						</AlertDialogAction>
+					</AlertDialogFooter>
+				</AlertDialogContent>
+			</AlertDialog>
+		</div>
+	);
+}

@@ -34,6 +34,14 @@ import SettingsPracticeAdminTopicLocks from "./pages/SettingsPracticeAdminTopicL
 import SettingsPracticeAdminMixedModules from "./pages/SettingsPracticeAdminMixedModules";
 import Scorecard from "./pages/Scorecard";
 import SettingsPracticeAdminAnalytics from "./pages/SettingsPracticeAdminAnalytics";
+import Stories from "./pages/Stories";
+import StoriesCourse from "./pages/StoriesCourse";
+import StoriesAdmin from "./pages/StoriesAdmin";
+import StoriesAdminCourse from "./pages/StoriesAdminCourse";
+import StoryChapterEditor from "./pages/StoryChapterEditor";
+import StoryChapterRead from "./pages/StoryChapterRead";
+import StoryChapterAssignment from "./pages/StoryChapterAssignment";
+import StoriesAdminAnalytics from "./pages/StoriesAdminAnalytics";
  
 
 const queryClient = new QueryClient();
@@ -279,6 +287,86 @@ const App = () => {
         <ProtectedRoute>
           <Layout>
             <SongModules />
+          </Layout>
+        </ProtectedRoute>
+      ),
+    },
+    {
+      path: "/stories",
+      element: (
+        <ProtectedRoute>
+          <Layout>
+            <Stories />
+          </Layout>
+        </ProtectedRoute>
+      ),
+    },
+    {
+      path: "/stories/course/:courseId",
+      element: (
+        <ProtectedRoute>
+          <Layout>
+            <StoriesCourse />
+          </Layout>
+        </ProtectedRoute>
+      ),
+    },
+    {
+      path: "/stories/course/:courseId/chapter/:chapterId/read",
+      element: (
+        <ProtectedRoute>
+          <Layout>
+            <StoryChapterRead />
+          </Layout>
+        </ProtectedRoute>
+      ),
+    },
+    {
+      path: "/stories/course/:courseId/chapter/:chapterId/assignment",
+      element: (
+        <ProtectedRoute>
+          <Layout>
+            <StoryChapterAssignment />
+          </Layout>
+        </ProtectedRoute>
+      ),
+    },
+    {
+      path: "/stories-admin",
+      element: (
+        <ProtectedRoute requireAdmin>
+          <Layout>
+            <StoriesAdmin />
+          </Layout>
+        </ProtectedRoute>
+      ),
+    },
+    {
+      path: "/stories-admin/course/:courseId",
+      element: (
+        <ProtectedRoute requireAdmin>
+          <Layout>
+            <StoriesAdminCourse />
+          </Layout>
+        </ProtectedRoute>
+      ),
+    },
+    {
+      path: "/stories-admin/chapter/:chapterId/edit",
+      element: (
+        <ProtectedRoute requireAdmin>
+          <Layout>
+            <StoryChapterEditor />
+          </Layout>
+        </ProtectedRoute>
+      ),
+    },
+    {
+      path: "/stories-admin/analytics",
+      element: (
+        <ProtectedRoute requireAdmin>
+          <Layout>
+            <StoriesAdminAnalytics />
           </Layout>
         </ProtectedRoute>
       ),

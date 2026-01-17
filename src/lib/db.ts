@@ -601,6 +601,78 @@ export interface SongSrtCue {
 	createdAt: number;
 }
 
+export interface StoryCourse {
+	id: string;
+	title: string;
+	description?: string;
+	chapterIds: string[];
+	assignedUserIds?: string[];
+	visible?: boolean;
+	createdAt: number;
+	updatedAt: number;
+}
+
+export type StoryAssignmentAnswer = 'yes' | 'no';
+
+export interface StoryChapter {
+	id: string;
+	courseId: string;
+	title: string;
+	order: number;
+	storyHtml: string;
+	fillBlanks: {
+		blanks: {
+			id: string;
+			correct: string;
+		}[];
+	};
+	assignment?: {
+		statements: {
+			id: string;
+			text: string;
+			correct: StoryAssignmentAnswer;
+		}[];
+	};
+	visible?: boolean;
+	createdAt: number;
+	updatedAt: number;
+}
+
+export interface StoryChapterAttempt {
+	id: string;
+	userId: string;
+	username?: string;
+	courseId: string;
+	chapterId: string;
+	date: string; // YYYY-MM-DD
+	attemptNo: number; // 1..3
+	startedAt: number;
+	submittedAt: number;
+	durationMs: number;
+	blanks: {
+		blankId: string;
+		answer: string;
+		correct: boolean;
+	}[];
+	assignment?: {
+		statementId: string;
+		answer: StoryAssignmentAnswer;
+		correct: boolean;
+	}[];
+	accuracyPercent: number;
+	lockedBlankIds: string[];
+}
+
+export interface StoryChapterProgress {
+	id: string;
+	userId: string;
+	courseId: string;
+	chapterId: string;
+	completedAt: number;
+	bestAccuracyPercent: number;
+	attemptsUsed: number;
+}
+
 // Database class
 export class ExamDatabase extends Dexie {
   questions!: Table<Question, string>;
@@ -626,6 +698,10 @@ export class ExamDatabase extends Dexie {
 	binaryAssets!: Table<BinaryAsset, string>;
 	lyricsSource!: Table<LyricsSourceEntry, string>;
 	practiceEvents!: Table<PracticeEventRecord, string>;
+	storyCourses!: Table<StoryCourse, string>;
+	storyChapters!: Table<StoryChapter, string>;
+	storyAttempts!: Table<StoryChapterAttempt, string>;
+	storyChapterProgress!: Table<StoryChapterProgress, string>;
 
   constructor() {
     super('ExamDatabase');
@@ -1281,6 +1357,38 @@ export class ExamDatabase extends Dexie {
 			songSrtCues: 'id, songId, cueIndex, [songId+cueIndex], startMs, endMs, text',
 			practiceEvents:
 				'id, userId, questionId, shownAt, submittedAt, nextAt, mode, topicId, mixedModuleId, [userId+shownAt], [userId+submittedAt], [topicId+shownAt], [mode+shownAt]'
+		});
+
+		// v26: add Stories / Courses tables
+		this.version(26).stores({
+			questions: 'id, type, *tags, *modules, metadata.createdAt',
+			modules: 'id, type, *tags, createdAt, visible, locked',
+			attempts: 'id, moduleId, type, startedAt, syncStatus',
+			integrityEvents: 'id, attemptId, type, timestamp',
+			tags: 'id, name',
+			semanticOntologyTags: 'id, kind, parentId, name, updatedAt',
+			semanticEmbeddings: 'id, [scope+scopeId], scope, scopeId, modelId, createdAt',
+			questionSemanticAnalyses: 'id, questionId, createdAt, [questionId+analysisVersion], [questionId+modelId], source',
+			questionSemanticOverrides: 'id, questionId, updatedAt, baseAnalysisId, [questionId+updatedAt]',
+			settings: 'id',
+			dailyStats: 'id, date, moduleId, [date+moduleId], [moduleId+date], moduleType, createdAt',
+			users: 'id, username',
+			globalGlossary: 'id, normalizedWord, word',
+			intelligenceSignals: 'id, type, questionId, moduleId, [type+moduleId], [questionId+type]',
+			reviewInteractions: 'id, attemptId, moduleId, userId, questionId, timestamp, [attemptId+questionId], [moduleId+userId]',
+			errorReports: 'id, status, createdAt, updatedAt, moduleId, questionId, questionCode, reporterUserId, [status+createdAt]',
+			songs: 'id, visible, createdAt, updatedAt',
+			songModules: 'id, visible, createdAt, updatedAt',
+			songListeningEvents: 'id, date, timestamp, songModuleId, userId, songId, [date+songModuleId], [songModuleId+date], [songModuleId+userId], [songModuleId+songId]',
+			binaryAssets: 'id, kind, createdAt',
+			lyricsSource: 'id, normalizedEnglishTitle, createdAt, writer',
+			songSrtCues: 'id, songId, cueIndex, [songId+cueIndex], startMs, endMs, text',
+			practiceEvents:
+				'id, userId, questionId, shownAt, submittedAt, nextAt, mode, topicId, mixedModuleId, [userId+shownAt], [userId+submittedAt], [topicId+shownAt], [mode+shownAt]',
+			storyCourses: 'id, visible, createdAt, updatedAt',
+			storyChapters: 'id, courseId, order, visible, createdAt, updatedAt, [courseId+order]',
+			storyAttempts: 'id, userId, courseId, chapterId, date, attemptNo, submittedAt, [chapterId+userId], [userId+date], [chapterId+date], [chapterId+userId+attemptNo]',
+			storyChapterProgress: 'id, userId, courseId, chapterId, completedAt, [chapterId+userId], [courseId+userId]'
 		});
 	}
 }
