@@ -128,6 +128,19 @@ export default function SettingsPracticeAdminFrequency() {
           };
         }
 
+        if (t.id === 'clock_reading') {
+          return {
+            ...base,
+            variants: [
+              { key: 'read_time', label: 'Read the time (HH:MM)', defaultValue: 35 },
+              { key: 'end_time_ampm', label: 'Find end time (AM/PM)', defaultValue: 25 },
+              { key: 'end_time_24h', label: 'Find end time (24-hour)', defaultValue: 20 },
+              { key: 'duration_hm', label: 'Duration (hours + minutes)', defaultValue: 10 },
+              { key: 'duration_minutes', label: 'Duration (total minutes)', defaultValue: 10 },
+            ],
+          };
+        }
+
         if (t.id === 'permutation_combination') {
           return {
             ...base,

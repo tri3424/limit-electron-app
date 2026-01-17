@@ -58,6 +58,9 @@ export default function SettingsPracticeAdminTopicLocks() {
   const userLocksAll = (localSettings as any).practiceTopicLocksByUserKey ?? {};
   const userLocks = (userKey ? userLocksAll?.[userKey] : null) ?? {};
 
+  const userHiddenAll = (localSettings as any).practiceTopicHiddenByUserKey ?? {};
+  const userHidden = (userKey ? userHiddenAll?.[userKey] : null) ?? {};
+
   return (
     <div className="max-w-6xl mx-auto space-y-6">
       <div className="flex items-start justify-between gap-4">
@@ -79,7 +82,7 @@ export default function SettingsPracticeAdminTopicLocks() {
           <div className="min-w-0">
             <div className="text-lg font-semibold">Topics</div>
             <div className="text-sm text-muted-foreground mt-1">
-              You can lock topics for everyone (Global), and also lock additional topics for a specific user.
+              You can lock or hide topics for everyone (Global), and also apply additional rules for a specific user.
             </div>
           </div>
         </div>
@@ -111,11 +114,17 @@ export default function SettingsPracticeAdminTopicLocks() {
             const globalLocked = !!(localSettings?.practiceTopicLocks as any)?.[t.id];
             const perUserLocked = !!(userLocks as any)?.[t.id];
             const effectiveLocked = globalLocked || perUserLocked;
+
+            const globalHidden = !!(localSettings?.practiceTopicHidden as any)?.[t.id];
+            const perUserHidden = !!(userHidden as any)?.[t.id];
+            const effectiveHidden = globalHidden || perUserHidden;
             return (
               <div key={t.id} className="flex items-center justify-between gap-3 rounded-md border bg-background p-3">
                 <div className="min-w-0">
                   <div className="font-medium text-foreground">{t.title}</div>
-                  <div className="text-xs text-muted-foreground mt-1">{effectiveLocked ? 'Locked' : 'Open'}</div>
+                  <div className="text-xs text-muted-foreground mt-1">
+                    {effectiveHidden ? 'Hidden' : effectiveLocked ? 'Locked' : 'Open'}
+                  </div>
                 </div>
                 <div className="flex items-center gap-2">
                   <div className="flex flex-col items-end gap-1">
@@ -126,6 +135,18 @@ export default function SettingsPracticeAdminTopicLocks() {
                         const nextLocks = { ...(localSettings.practiceTopicLocks ?? {}) } as any;
                         nextLocks[t.id] = !checked;
                         await handleUpdateSettings({ practiceTopicLocks: nextLocks });
+                      }}
+                    />
+                  </div>
+
+                  <div className="flex flex-col items-end gap-1">
+                    <div className="text-[10px] text-muted-foreground">Global hide</div>
+                    <Switch
+                      checked={!globalHidden}
+                      onCheckedChange={async (checked) => {
+                        const nextHidden = { ...((localSettings as any).practiceTopicHidden ?? {}) } as any;
+                        nextHidden[t.id] = !checked;
+                        await handleUpdateSettings({ practiceTopicHidden: nextHidden } as any);
                       }}
                     />
                   </div>
@@ -142,6 +163,22 @@ export default function SettingsPracticeAdminTopicLocks() {
                         nextUser[t.id] = !checked;
                         nextAll[userKey] = nextUser;
                         await handleUpdateSettings({ practiceTopicLocksByUserKey: nextAll } as any);
+                      }}
+                    />
+                  </div>
+
+                  <div className="flex flex-col items-end gap-1">
+                    <div className="text-[10px] text-muted-foreground">User hide</div>
+                    <Switch
+                      disabled={!userKey}
+                      checked={!perUserHidden}
+                      onCheckedChange={async (checked) => {
+                        if (!userKey) return;
+                        const nextAll = { ...userHiddenAll };
+                        const nextUser = { ...(nextAll[userKey] ?? {}) } as any;
+                        nextUser[t.id] = !checked;
+                        nextAll[userKey] = nextUser;
+                        await handleUpdateSettings({ practiceTopicHiddenByUserKey: nextAll } as any);
                       }}
                     />
                   </div>

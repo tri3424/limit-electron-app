@@ -37,6 +37,7 @@ type PracticeVariantMultiOverride = {
 
 const PRACTICE_VARIANTS: Partial<Record<PracticeTopicId, string[]>> = {
   quadratics: ['distinct_root', 'repeated_root'],
+  clock_reading: ['read_time', 'end_time_ampm', 'end_time_24h', 'duration_hm', 'duration_minutes'],
   linear_equations: ['linear'],
   indices: ['mul', 'div', 'pow'],
   fractions: ['simplify_fraction', 'add_sub_fractions', 'fraction_of_number', 'mixed_to_improper'],
@@ -728,6 +729,11 @@ export default function Practice() {
     () => (settings as any)?.practiceTopicLocksByUserKey ?? {},
     [settings]
   );
+  const practiceTopicHidden = useMemo(() => (settings as any)?.practiceTopicHidden ?? {}, [settings]);
+  const practiceTopicHiddenByUserKey = useMemo(
+    () => (settings as any)?.practiceTopicHiddenByUserKey ?? {},
+    [settings]
+  );
   const selectedMixedModule = useMemo(
     () => (mixedModuleId ? mixedModules.find((m) => m.id === mixedModuleId) ?? null : null),
     [mixedModules, mixedModuleId]
@@ -786,6 +792,14 @@ export default function Practice() {
     const perUser = (practiceTopicLocksByUserKey as any)?.[userKey] ?? {};
     const userLocked = !!(perUser as any)?.[id];
     return globalLocked || userLocked;
+  };
+
+  const isTopicHidden = (id: PracticeTopicId) => {
+    if (isAdmin) return false;
+    const globalHidden = !!(practiceTopicHidden as any)?.[id];
+    const perUser = (practiceTopicHiddenByUserKey as any)?.[userKey] ?? {};
+    const userHidden = !!(perUser as any)?.[id];
+    return globalHidden || userHidden;
   };
 
   const resetAttemptState = () => {
@@ -996,7 +1010,7 @@ export default function Practice() {
           difficulty?: PracticeDifficulty;
           difficultyWeights?: Partial<Record<PracticeDifficulty, number>>;
         }>;
-        const unlocked0 = pool.filter((p) => p?.topicId && !isTopicLocked(p.topicId));
+        const unlocked0 = pool.filter((p) => p?.topicId && !isTopicLocked(p.topicId) && !isTopicHidden(p.topicId));
         const unlocked = activeTopicScope
           ? unlocked0.filter((p) => p.topicId === activeTopicScope)
           : unlocked0;
@@ -1096,7 +1110,7 @@ export default function Practice() {
       const items = (selectedMixedModule as any).items as Array<{ topicId: PracticeTopicId; difficulty: PracticeDifficulty }>;
       const weights = mixedModuleItemWeights?.[(selectedMixedModule as any).id];
       const strictMixed = hasConfiguredWeights(weights);
-      const candidates0 = items.filter((it) => it?.topicId && !isTopicLocked(it.topicId));
+      const candidates0 = items.filter((it) => it?.topicId && !isTopicLocked(it.topicId) && !isTopicHidden(it.topicId));
       const candidates = activeTopicScope
         ? candidates0.filter((it) => it.topicId === activeTopicScope)
         : candidates0;
@@ -2211,6 +2225,69 @@ export default function Practice() {
         }
 
         const gp = (gq.generatorParams ?? {}) as any;
+
+        if (gq.topicId === 'clock_reading') {
+          const kind = String(gp.answerKind ?? '');
+          const hRaw = String(answer1 ?? '').trim();
+          const mRaw = String(answer2 ?? '').trim();
+          const sRaw = String(answer3 ?? '').trim();
+
+          const parseIntSafe = (v: string) => {
+            if (!/^\d+$/.test(v)) return null;
+            const n = Number(v);
+            return Number.isFinite(n) ? n : null;
+          };
+
+          if (kind === 'time_12_no_ampm') {
+            const h = parseIntSafe(hRaw);
+            const m = parseIntSafe(mRaw);
+            if (h == null || m == null) return false;
+            if (h < 1 || h > 12) return false;
+            if (m < 0 || m > 59) return false;
+            return h === Number(gp.expectedHour) && m === Number(gp.expectedMinute);
+          }
+
+          if (kind === 'time_12_ampm') {
+            const h = parseIntSafe(hRaw);
+            const m = parseIntSafe(mRaw);
+            if (h == null || m == null) return false;
+            if (h < 1 || h > 12) return false;
+            if (m < 0 || m > 59) return false;
+            const ampm = sRaw.toUpperCase();
+            if (ampm !== 'AM' && ampm !== 'PM') return false;
+            return (
+              h === Number(gp.expectedHour)
+              && m === Number(gp.expectedMinute)
+              && ampm === String(gp.expectedAmPm ?? '').toUpperCase()
+            );
+          }
+
+          if (kind === 'time_24') {
+            const h = parseIntSafe(hRaw);
+            const m = parseIntSafe(mRaw);
+            if (h == null || m == null) return false;
+            if (h < 0 || h > 23) return false;
+            if (m < 0 || m > 59) return false;
+            return h === Number(gp.expectedHour24) && m === Number(gp.expectedMinute);
+          }
+
+          if (kind === 'duration_hm') {
+            const h = parseIntSafe(hRaw);
+            const m = parseIntSafe(mRaw);
+            if (h == null || m == null) return false;
+            if (h < 0) return false;
+            if (m < 0 || m > 59) return false;
+            return h === Number(gp.expectedHours) && m === Number(gp.expectedMinutes);
+          }
+
+          if (kind === 'duration_minutes') {
+            const mins = parseIntSafe(hRaw);
+            if (mins == null) return false;
+            if (mins < 0) return false;
+            return mins === Number(gp.expectedTotalMinutes);
+          }
+        }
+
         if (Array.isArray(gp.expectedParts) && gp.expectedParts.length > 0) {
           const parts = [answer1, answer2, answer3];
           for (let i = 0; i < gp.expectedParts.length; i++) {
@@ -2292,7 +2369,9 @@ export default function Practice() {
           const isOpen = isMixedModuleOpenNow(m as any, nowMs);
           return { id: m.id, title: m.title || 'Untitled mixed module', disabled: !isOpen };
         })
-    : PRACTICE_TOPICS.map((t) => ({ id: t.id, title: t.title, disabled: !t.enabled || isTopicLocked(t.id) }));
+    : PRACTICE_TOPICS
+        .filter((t) => !isTopicHidden(t.id))
+        .map((t) => ({ id: t.id, title: t.title, disabled: !t.enabled || isTopicLocked(t.id) }));
 
   const canStartMixed = useMemo(() => {
     if (mode !== 'mixed') return false;
@@ -2813,7 +2892,11 @@ export default function Practice() {
                     <img
                       src={(question as GraphPracticeQuestion).svgDataUrl}
                       alt={(question as GraphPracticeQuestion).svgAltText}
-                      className={(question as any).generatorParams?.circularMeasure ? 'max-w-full h-auto' : 'max-w-full h-auto rounded-md border bg-white'}
+                      className={(question as any).generatorParams?.circularMeasure
+                        ? 'max-w-full h-auto'
+                        : ((question as any).topicId === 'clock_reading'
+                            ? 'max-w-full h-auto'
+                            : 'max-w-full h-auto rounded-md border bg-white')}
                     />
                   )}
                 </div>
@@ -2824,7 +2907,7 @@ export default function Practice() {
               {(question as any).kind === 'graph' ? (
                 <div className="w-full select-none">
                   {(question as GraphPracticeQuestion).promptText ? (
-                    <div className="tk-wp-expl-text text-xl md:text-2xl leading-snug text-left text-foreground">
+                    <div className={`tk-wp-expl-text text-xl md:text-2xl leading-snug text-left text-foreground ${(question as any).topicId === 'clock_reading' ? 'font-slab' : ''}`}>
                       {(question as GraphPracticeQuestion).promptText}
                     </div>
                   ) : null}
@@ -3182,41 +3265,139 @@ export default function Practice() {
               {(question as any).kind === 'graph'
                 && !(question as GraphPracticeQuestion).katexOptions?.length
                 && (question as GraphPracticeQuestion).inputFields?.length ? (
-                <div className="max-w-sm mx-auto space-y-3">
-                  {(question as GraphPracticeQuestion).inputFields!.map((f, idx) => {
-                    const values = [answer1, answer2, answer3];
-                    const setters = [setAnswer1, setAnswer2, setAnswer3] as const;
-                    const value = values[idx] ?? '';
-                    const setValue = setters[idx] ?? setAnswer1;
-                    return (
-                      <div key={f.id} className="space-y-1">
-                        <Label className="text-xs text-muted-foreground">{f.label}</Label>
-                        {f.kind === 'text' ? (
-                          <MathLiveInput
-                            value={value}
-                            onChange={setValue as any}
-                            placeholder=""
-                            disabled={submitted}
-                            className="text-2xl font-normal text-left tk-expr-input"
-                          />
-                        ) : (
-                          <Input
-                            value={value}
-                            inputMode="decimal"
-                            onChange={(e) => {
-                              const gp = ((question as GraphPracticeQuestion).generatorParams ?? {}) as any;
-                              const fixed2 = gp.expectedFormat === 'fixed2';
-                              const next = sanitizeNumericInput(e.target.value, { maxDecimals: fixed2 ? 2 : undefined });
-                              (setValue as any)(next);
-                            }}
-                            disabled={submitted}
-                            className="h-12 text-2xl font-normal text-center py-1"
-                          />
-                        )}
+                ((question as any).topicId === 'clock_reading'
+                  ? (() => {
+                      const gp = ((question as GraphPracticeQuestion).generatorParams ?? {}) as any;
+                      const kind = String(gp.answerKind ?? '');
+
+                      if (kind === 'time_12_ampm') {
+                        return (
+                          <div className="max-w-md mx-auto space-y-3">
+                            <Label className="text-xs text-muted-foreground">Answer</Label>
+                            <div className="flex flex-wrap items-end justify-center gap-3">
+                              <div className="space-y-1">
+                                <Label className="text-xs text-muted-foreground">Hour</Label>
+                                <Input
+                                  value={answer1}
+                                  inputMode="numeric"
+                                  onChange={(e) => setAnswer1(sanitizeNumericInput(e.target.value))}
+                                  disabled={submitted}
+                                  className="h-12 w-24 text-2xl font-normal text-center py-1"
+                                />
+                              </div>
+                              <div className="pb-2 text-2xl select-none">:</div>
+                              <div className="space-y-1">
+                                <Label className="text-xs text-muted-foreground">Minute</Label>
+                                <Input
+                                  value={answer2}
+                                  inputMode="numeric"
+                                  onChange={(e) => setAnswer2(sanitizeNumericInput(e.target.value))}
+                                  disabled={submitted}
+                                  className="h-12 w-24 text-2xl font-normal text-center py-1"
+                                />
+                              </div>
+                              <div className="space-y-1">
+                                <Label className="text-xs text-muted-foreground">AM/PM</Label>
+                                <select
+                                  value={answer3 || ''}
+                                  onChange={(e) => setAnswer3(e.target.value)}
+                                  disabled={submitted}
+                                  className="h-12 rounded-md border bg-white px-3 text-lg"
+                                >
+                                  <option value="">—</option>
+                                  <option value="AM">AM</option>
+                                  <option value="PM">PM</option>
+                                </select>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      }
+
+                      if (kind === 'duration_minutes') {
+                        return (
+                          <div className="max-w-sm mx-auto space-y-1">
+                            <Label className="text-xs text-muted-foreground">Total minutes</Label>
+                            <Input
+                              value={answer1}
+                              inputMode="numeric"
+                              onChange={(e) => setAnswer1(sanitizeNumericInput(e.target.value))}
+                              disabled={submitted}
+                              className="h-12 text-2xl font-normal text-center py-1"
+                            />
+                          </div>
+                        );
+                      }
+
+                      // time_12_no_ampm, time_24, duration_hm
+                      const hourLabel = kind === 'time_24' ? 'Hour (24h)' : (kind === 'duration_hm' ? 'Hours' : 'Hour');
+                      const minuteLabel = kind === 'duration_hm' ? 'Minutes' : 'Minute';
+                      return (
+                        <div className="max-w-md mx-auto space-y-3">
+                          <Label className="text-xs text-muted-foreground">Answer</Label>
+                          <div className="flex items-end justify-center gap-3">
+                            <div className="space-y-1">
+                              <Label className="text-xs text-muted-foreground">{hourLabel}</Label>
+                              <Input
+                                value={answer1}
+                                inputMode="numeric"
+                                onChange={(e) => setAnswer1(sanitizeNumericInput(e.target.value))}
+                                disabled={submitted}
+                                className="h-12 w-28 text-2xl font-normal text-center py-1"
+                              />
+                            </div>
+                            <div className="pb-2 text-2xl select-none">:</div>
+                            <div className="space-y-1">
+                              <Label className="text-xs text-muted-foreground">{minuteLabel}</Label>
+                              <Input
+                                value={answer2}
+                                inputMode="numeric"
+                                onChange={(e) => setAnswer2(sanitizeNumericInput(e.target.value))}
+                                disabled={submitted}
+                                className="h-12 w-28 text-2xl font-normal text-center py-1"
+                              />
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })()
+                  : (
+                      <div className="max-w-sm mx-auto space-y-3">
+                        {(question as GraphPracticeQuestion).inputFields!.map((f, idx) => {
+                          const values = [answer1, answer2, answer3];
+                          const setters = [setAnswer1, setAnswer2, setAnswer3] as const;
+                          const value = values[idx] ?? '';
+                          const setValue = setters[idx] ?? setAnswer1;
+                          return (
+                            <div key={f.id} className="space-y-1">
+                              <Label className="text-xs text-muted-foreground">{f.label}</Label>
+                              {f.kind === 'text' ? (
+                                <MathLiveInput
+                                  value={value}
+                                  onChange={setValue as any}
+                                  placeholder=""
+                                  disabled={submitted}
+                                  className="text-2xl font-normal text-left tk-expr-input"
+                                />
+                              ) : (
+                                <Input
+                                  value={value}
+                                  inputMode="decimal"
+                                  onChange={(e) => {
+                                    const gp = ((question as GraphPracticeQuestion).generatorParams ?? {}) as any;
+                                    const fixed2 = gp.expectedFormat === 'fixed2';
+                                    const next = sanitizeNumericInput(e.target.value, { maxDecimals: fixed2 ? 2 : undefined });
+                                    (setValue as any)(next);
+                                  }}
+                                  disabled={submitted}
+                                  className="h-12 text-2xl font-normal text-center py-1"
+                                />
+                              )}
+                            </div>
+                          );
+                        })}
                       </div>
-                    );
-                  })}
-                </div>
+                    ))
               ) : null}
 
               {(question as any).metadata?.topic === 'quadratics' ? (

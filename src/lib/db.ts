@@ -356,6 +356,8 @@ export interface AppSettings {
   songRecognitionEnabled?: boolean;
   practiceTopicLocks?: Partial<Record<import('@/lib/practiceTopics').PracticeTopicId, boolean>>;
   practiceTopicLocksByUserKey?: Record<string, Partial<Record<import('@/lib/practiceTopics').PracticeTopicId, boolean>>>;
+  practiceTopicHidden?: Partial<Record<import('@/lib/practiceTopics').PracticeTopicId, boolean>>;
+  practiceTopicHiddenByUserKey?: Record<string, Partial<Record<import('@/lib/practiceTopics').PracticeTopicId, boolean>>>;
   practiceFrequencies?: {
     byUserKey: Record<
       string,
@@ -1354,6 +1356,8 @@ export async function initializeSettings() {
       songRecognitionEnabled: false,
       practiceTopicLocks: {},
       practiceTopicLocksByUserKey: {},
+      practiceTopicHidden: {},
+      practiceTopicHiddenByUserKey: {},
       practiceFrequencies: {
         byUserKey: {},
       },
@@ -1444,6 +1448,14 @@ export async function initializeSettings() {
 	} else if (!existingSettings.practiceTopicLocksByUserKey) {
 		await db.settings.update('1', {
 			practiceTopicLocksByUserKey: {},
+		});
+	} else if (!(existingSettings as any).practiceTopicHidden) {
+		await db.settings.update('1', {
+			practiceTopicHidden: {},
+		});
+	} else if (!(existingSettings as any).practiceTopicHiddenByUserKey) {
+		await db.settings.update('1', {
+			practiceTopicHiddenByUserKey: {},
 		});
 	} else if (!existingSettings.practiceHistory) {
 		await db.settings.update('1', {

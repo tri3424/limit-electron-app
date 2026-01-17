@@ -294,6 +294,16 @@ const App = () => {
       ),
     },
     {
+      path: "/song-module/:id",
+      element: (
+        <ProtectedRoute>
+          <Layout>
+            <SongModuleRunner />
+          </Layout>
+        </ProtectedRoute>
+      ),
+    },
+    {
       path: "/songs-admin",
       element: (
         <ProtectedRoute requireAdmin>

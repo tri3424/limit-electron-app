@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { Plus, Search, Edit, Eye, Tag as TagIcon, FileQuestion, Trash2 } from 'lucide-react';
+import { Plus, Search, Edit, Eye, Tag as TagIcon, FileQuestion, Trash2, Upload, Download } from 'lucide-react';
 import { db, Question, GlobalGlossaryEntry, normalizeGlossaryMeaning, normalizeGlossaryWord } from '@/lib/db';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -21,6 +21,7 @@ import { toast } from 'sonner';
 import { summarizeDifficulty } from '@/lib/intelligenceEngine';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { v4 as uuidv4 } from 'uuid';
 
 export default function Questions() {
   const location = useLocation();
@@ -32,7 +33,15 @@ export default function Questions() {
   const [confirmDeleteIds, setConfirmDeleteIds] = useState<string[] | null>(null);
   const [mergingGlossary, setMergingGlossary] = useState(false);
   const [highlightQuestionId, setHighlightQuestionId] = useState<string | null>(null);
+  const [importDialogOpen, setImportDialogOpen] = useState(false);
+  const [pendingImport, setPendingImport] = useState<null | {
+    importedQuestions: any[];
+    newQuestions: any[];
+    duplicateQuestions: any[];
+    existingQuestionsSnapshot: any[];
+  }>(null);
   const handledScrollRequestRef = useRef<string | null>(null);
+  const importInputRef = useRef<HTMLInputElement | null>(null);
 
   const questions = useLiveQuery(async () => {
     let query = db.questions.toArray();
@@ -41,6 +50,248 @@ export default function Questions() {
 
   const tags = useLiveQuery(() => db.tags.toArray(), [], []);
   const globalGlossary = useLiveQuery(() => db.globalGlossary.toArray(), [], []);
+
+  const questionsStructurallyMatch = useCallback((a: any, b: any): boolean => {
+    if (!a || !b) return false;
+    if (a.type !== b.type) return false;
+
+    const norm = (v: string | undefined | null) => (v ?? '').toString().trim().replace(/\s+/g, ' ').toLowerCase();
+    if (norm(a.text) !== norm(b.text)) return false;
+
+    if (a.type === 'mcq') {
+      const optsA = Array.isArray(a.options) ? a.options : [];
+      const optsB = Array.isArray(b.options) ? b.options : [];
+      if (optsA.length !== optsB.length) return false;
+      const textsA = optsA.map((o: any) => norm(o.text));
+      const textsB = optsB.map((o: any) => norm(o.text));
+      if (textsA.some((t, idx) => t !== textsB[idx])) return false;
+
+      const corrA = Array.isArray(a.correctAnswers) ? a.correctAnswers.map((_id: any, idx: number) => norm(optsA[idx]?.text)) : [];
+      const corrB = Array.isArray(b.correctAnswers) ? b.correctAnswers.map((_id: any, idx: number) => norm(optsB[idx]?.text)) : [];
+      if (corrA.length !== corrB.length) return false;
+      const setA = new Set(corrA);
+      const setB = new Set(corrB);
+      if (setA.size !== setB.size) return false;
+      for (const v of setA) {
+        if (!setB.has(v)) return false;
+      }
+    }
+
+    if (a.type === 'text') {
+      const corrA = Array.isArray(a.correctAnswers) ? a.correctAnswers.map((c: any) => norm(c)) : [];
+      const corrB = Array.isArray(b.correctAnswers) ? b.correctAnswers.map((c: any) => norm(c)) : [];
+      if (corrA.length !== corrB.length) return false;
+      const setA = new Set(corrA);
+      const setB = new Set(corrB);
+      if (setA.size !== setB.size) return false;
+      for (const v of setA) {
+        if (!setB.has(v)) return false;
+      }
+    }
+
+    if (a.type === 'fill_blanks') {
+      const blanksA = a.fillBlanks?.blanks ?? [];
+      const blanksB = b.fillBlanks?.blanks ?? [];
+      if (blanksA.length !== blanksB.length) return false;
+      for (let i = 0; i < blanksA.length; i++) {
+        if (norm(blanksA[i]?.correct) !== norm(blanksB[i]?.correct)) return false;
+      }
+    }
+
+    if (a.type === 'matching') {
+      const pairsA = a.matching?.pairs ?? [];
+      const pairsB = b.matching?.pairs ?? [];
+      if (pairsA.length !== pairsB.length) return false;
+      for (let i = 0; i < pairsA.length; i++) {
+        if (norm(pairsA[i]?.leftText) !== norm(pairsB[i]?.leftText)) return false;
+        if (norm(pairsA[i]?.rightText) !== norm(pairsB[i]?.rightText)) return false;
+      }
+    }
+
+    return true;
+  }, []);
+
+  const performImportWithStrategy = useCallback(async (keepDuplicateQuestions: boolean) => {
+    if (!pendingImport) return;
+    const { importedQuestions, newQuestions, duplicateQuestions, existingQuestionsSnapshot } = pendingImport;
+
+    try {
+      await db.transaction('rw', db.questions, async () => {
+        const existingIds = new Set<string>();
+        const existingCodes = new Set<string>();
+
+        for (const q of existingQuestionsSnapshot as any[]) {
+          if (q?.id) existingIds.add(String(q.id));
+          if (q?.code) existingCodes.add(String(q.code));
+        }
+
+        const questionsToImport: any[] = [...newQuestions];
+
+        if (keepDuplicateQuestions) {
+          for (const q of duplicateQuestions) {
+            const clone = { ...q };
+            let newId = uuidv4();
+            while (existingIds.has(newId)) newId = uuidv4();
+            clone.id = newId;
+            existingIds.add(newId);
+
+            let newCode = `Q-${newId.slice(0, 8)}`;
+            while (existingCodes.has(newCode)) {
+              const extra = uuidv4().slice(0, 4);
+              newCode = `Q-${newId.slice(0, 4)}${extra}`;
+            }
+            clone.code = newCode;
+            existingCodes.add(newCode);
+
+            questionsToImport.push(clone);
+          }
+        }
+
+        for (const q of questionsToImport) {
+          if (!q?.id || existingIds.has(String(q.id))) {
+            let newId = uuidv4();
+            while (existingIds.has(newId)) newId = uuidv4();
+            q.id = newId;
+            existingIds.add(newId);
+          }
+          if (!q?.code) {
+            const suffix = String(q.id).slice(0, 8);
+            q.code = `Q-${suffix}`;
+          }
+        }
+
+        if (questionsToImport.length > 0) {
+          await db.questions.bulkPut(questionsToImport);
+        }
+      });
+
+      toast.success('Questions imported successfully');
+      setPendingImport(null);
+      setImportDialogOpen(false);
+    } catch (error) {
+      toast.error('Failed to import questions');
+      console.error(error);
+    }
+  }, [pendingImport]);
+
+  const handleImportQuestions = useCallback(
+    async (event: React.ChangeEvent<HTMLInputElement>) => {
+      const file = event.target.files?.[0];
+      if (!file) return;
+
+      try {
+        const text = await file.text();
+        const parsed = JSON.parse(text);
+
+        const importedQuestions: any[] = Array.isArray(parsed?.questions)
+          ? parsed.questions
+          : Array.isArray(parsed?.data?.questions)
+            ? parsed.data.questions
+            : [];
+
+        if (!importedQuestions.length) {
+          throw new Error('No questions found in file');
+        }
+
+        const existingQuestions = await db.questions.toArray();
+        const newQuestions: any[] = [];
+        const duplicateQuestions: any[] = [];
+
+        for (const imported of importedQuestions) {
+          const match = (existingQuestions as any[]).find((q) => questionsStructurallyMatch(q, imported));
+          if (match) duplicateQuestions.push(imported);
+          else newQuestions.push(imported);
+        }
+
+        const nextPending = {
+          importedQuestions,
+          newQuestions,
+          duplicateQuestions,
+          existingQuestionsSnapshot: existingQuestions,
+        };
+        setPendingImport(nextPending);
+
+        if (duplicateQuestions.length === 0) {
+          await db.transaction('rw', db.questions, async () => {
+            const existingIds = new Set<string>((existingQuestions as any[]).map((q) => String(q?.id ?? '')).filter(Boolean));
+            const toPut = importedQuestions.map((q) => ({ ...q }));
+            for (const q of toPut) {
+              if (!q?.id || existingIds.has(String(q.id))) {
+                let newId = uuidv4();
+                while (existingIds.has(newId)) newId = uuidv4();
+                q.id = newId;
+                existingIds.add(newId);
+              }
+              if (!q?.code) {
+                const suffix = String(q.id).slice(0, 8);
+                q.code = `Q-${suffix}`;
+              }
+            }
+            await db.questions.bulkPut(toPut);
+          });
+
+          toast.success('Questions imported successfully');
+          setPendingImport(null);
+          setImportDialogOpen(false);
+        } else {
+          setImportDialogOpen(true);
+        }
+      } catch (error) {
+        toast.error('Failed to import questions');
+        console.error(error);
+      }
+
+      event.target.value = '';
+    },
+    [questionsStructurallyMatch],
+  );
+
+  const handleExportSelectedQuestions = useCallback(async () => {
+    try {
+      if (!selectedIds.length) return;
+      const picked = await db.questions.bulkGet(selectedIds);
+      const questions = (picked.filter(Boolean) as Question[]) || [];
+      if (!questions.length) {
+        toast.error('No questions selected');
+        return;
+      }
+
+      const data = {
+        questions,
+        exportedAt: new Date().toISOString(),
+        kind: 'questions_selection',
+        schemaVersion: 22,
+      };
+
+      const now = new Date();
+      const yyyy = now.getFullYear();
+      const mm = String(now.getMonth() + 1).padStart(2, '0');
+      const dd = String(now.getDate()).padStart(2, '0');
+      const hh = String(now.getHours()).padStart(2, '0');
+      const min = String(now.getMinutes()).padStart(2, '0');
+      const timestampPart = `${yyyy}${mm}${dd}-${hh}${min}`;
+      const fileName = `Limit-questions-selected-${questions.length}-${timestampPart}.json`;
+
+      const dataText = JSON.stringify(data, null, 2);
+      if (window.data?.exportJsonToFile) {
+        const res = await window.data.exportJsonToFile({ defaultFileName: fileName, dataText });
+        if (res?.canceled) return;
+      } else {
+        const blob = new Blob([dataText], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = fileName;
+        a.click();
+        URL.revokeObjectURL(url);
+      }
+
+      toast.success('Selected questions exported');
+    } catch (error) {
+      toast.error('Failed to export selected questions');
+      console.error(error);
+    }
+  }, [selectedIds]);
 
   // Ensure all questions have a stable code, including older ones created before codes existed
   useEffect(() => {
@@ -149,6 +400,23 @@ export default function Questions() {
           </p>
         </div>
         <div className="flex items-center gap-2">
+          <input
+            ref={importInputRef}
+            type="file"
+            accept=".json"
+            onChange={handleImportQuestions}
+            className="hidden"
+          />
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              importInputRef.current?.click();
+            }}
+          >
+            <Upload className="h-4 w-4 mr-2" />
+            Import Questions
+          </Button>
           <Button
             variant="outline"
             size="sm"
@@ -169,9 +437,14 @@ export default function Questions() {
             {mergingGlossary ? 'Normalizing...' : 'Normalize Glossary'}
           </Button>
           {selectedIds.length > 0 && (
-            <Button variant="destructive" onClick={() => setConfirmDeleteIds(selectedIds.slice())}>
-              <Trash2 className="h-4 w-4 mr-2" /> Delete Selected ({selectedIds.length})
-            </Button>
+            <>
+              <Button variant="outline" onClick={handleExportSelectedQuestions}>
+                <Download className="h-4 w-4 mr-2" /> Export Selected ({selectedIds.length})
+              </Button>
+              <Button variant="destructive" onClick={() => setConfirmDeleteIds(selectedIds.slice())}>
+                <Trash2 className="h-4 w-4 mr-2" /> Delete Selected ({selectedIds.length})
+              </Button>
+            </>
           )}
           <Link to="/questions/create">
             <Button>
@@ -181,6 +454,69 @@ export default function Questions() {
           </Link>
         </div>
       </div>
+
+      <Dialog
+        open={importDialogOpen}
+        onOpenChange={(open) => {
+          setImportDialogOpen(open);
+          if (!open) setPendingImport(null);
+        }}
+      >
+        <DialogContent className="w-[96vw] max-w-3xl">
+          <DialogHeader>
+            <DialogTitle>Import Questions</DialogTitle>
+            <DialogDescription>
+              We found existing questions that closely match questions in the imported file.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 text-sm">
+            <p>
+              <strong>Total questions in file:</strong>{' '}
+              {pendingImport ? pendingImport.newQuestions.length + pendingImport.duplicateQuestions.length : 0}
+            </p>
+            <p>
+              <strong>New questions to be added:</strong>{' '}
+              {pendingImport ? pendingImport.newQuestions.length : 0}
+            </p>
+            <p>
+              <strong>Matching questions detected:</strong>{' '}
+              {pendingImport ? pendingImport.duplicateQuestions.length : 0}
+            </p>
+            <p className="text-muted-foreground">
+              Existing questions in your bank will never be removed. For the matching questions from the
+              file, choose whether to skip them or keep separate copies with new question codes.
+            </p>
+          </div>
+          <DialogFooter className="flex flex-col gap-4 sm:gap-3">
+            <div className="flex flex-col sm:flex-row flex-wrap gap-2 sm:items-center sm:justify-end">
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setPendingImport(null);
+                  setImportDialogOpen(false);
+                }}
+              >
+                Cancel
+              </Button>
+              <Button
+                variant="outline"
+                onClick={async () => {
+                  await performImportWithStrategy(false);
+                }}
+              >
+                Import &amp; Skip Matches
+              </Button>
+              <Button
+                onClick={async () => {
+                  await performImportWithStrategy(true);
+                }}
+              >
+                Import &amp; Keep with New Codes
+              </Button>
+            </div>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Filters */}
       <Card className="p-6">

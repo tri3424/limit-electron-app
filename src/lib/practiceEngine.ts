@@ -9,6 +9,7 @@ import { generateCircularMeasureProblem } from '@/lib/practiceGenerators/circula
 import { generateWordProblemQuestion, WordProblemQuestion, WordProblemVariantId } from '@/lib/practiceGenerators/wordProblems';
 import { generatePolynomialsQuestion } from '@/lib/practiceGenerators/polynomials';
 import { generatePermutationCombinationQuestion, PermutationCombinationQuestion, PermutationCombinationVariantId } from '@/lib/practiceGenerators/permutationCombination';
+import { generateClockReadingQuestion } from '@/lib/practiceGenerators/clockReading';
 
 export type PracticeDifficulty = 'easy' | 'medium' | 'hard';
 
@@ -45,6 +46,7 @@ export type PracticeTopicId =
   | 'quadratics'
   | 'linear_equations'
   | 'algebraic_factorisation'
+  | 'clock_reading'
   | 'addition'
   | 'subtraction'
   | 'multiplication'
@@ -615,6 +617,13 @@ export function generatePracticeQuestion(input: {
   variantWeights?: Record<string, number>;
 }): PracticeQuestion {
   switch (input.topicId) {
+    case 'clock_reading':
+      return generateClockReadingQuestion({
+        seed: input.seed,
+        difficulty: input.difficulty,
+        variantWeights: input.variantWeights,
+        avoidVariantId: input.avoidVariantId,
+      }) as any;
     case 'linear_equations':
       return generateLinear({ topicId: input.topicId, difficulty: input.difficulty, seed: input.seed, variantWeights: input.variantWeights });
     case 'addition':

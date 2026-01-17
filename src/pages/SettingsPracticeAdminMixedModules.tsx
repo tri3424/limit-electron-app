@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { v4 as uuidv4 } from 'uuid';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, Layers } from 'lucide-react';
+import { ArrowLeft, Layers, Info, X } from 'lucide-react';
 import { db, AppSettings, initializeSettings } from '@/lib/db';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -43,6 +43,7 @@ export default function SettingsPracticeAdminMixedModules() {
   const [mixedModuleOpensTime, setMixedModuleOpensTime] = useState('18:00');
   const [mixedModuleClosesTime, setMixedModuleClosesTime] = useState('20:00');
   const [mixedModuleAssignedUserIds, setMixedModuleAssignedUserIds] = useState<string[]>([]);
+  const [poolInfoOpen, setPoolInfoOpen] = useState(false);
 
   const dayLabels = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
@@ -267,34 +268,57 @@ export default function SettingsPracticeAdminMixedModules() {
               setMixedModuleOpensTime('18:00');
               setMixedModuleClosesTime('20:00');
               setMixedModuleAssignedUserIds([]);
+              setPoolInfoOpen(false);
             }
           }}
         >
-          <DialogContent className="max-w-2xl">
+          <DialogContent className="w-[96vw] max-w-5xl lg:max-w-6xl">
             <DialogHeader>
               <DialogTitle>{editingMixedModuleId ? 'Edit Mixed Practice Module' : 'Add Mixed Practice Module'}</DialogTitle>
-              <DialogDescription>Add one or more topic rows. Each row chooses a topic and a difficulty.</DialogDescription>
+              <DialogDescription>
+                Create a mixed practice module by selecting topics and difficulty settings.
+              </DialogDescription>
             </DialogHeader>
 
-            <div className="space-y-3">
-              <div className="space-y-1">
-                <Label>Title</Label>
-                <Input value={mixedModuleTitle} onChange={(e) => setMixedModuleTitle(e.target.value)} placeholder="e.g. Mixed revision set" />
-              </div>
+            <div className="max-h-[70vh] overflow-auto pr-1 space-y-4">
+              <div className="rounded-md border bg-muted/10 p-3 space-y-3">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <Label>Title</Label>
+                    <Input
+                      value={mixedModuleTitle}
+                      onChange={(e) => setMixedModuleTitle(e.target.value)}
+                      placeholder="e.g. Mixed revision set"
+                    />
+                  </div>
 
-              <div className="space-y-1">
-                <Label>Type</Label>
-                <Select value={mixedModuleType} onValueChange={(v) => setMixedModuleType(v as any)}>
-                  <SelectTrigger className="h-9">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="items">Items (fixed list)</SelectItem>
-                    <SelectItem value="pool">Pool (frequency weights)</SelectItem>
-                  </SelectContent>
-                </Select>
-                <div className="text-xs text-muted-foreground">
-                  Items = each row is a topic with a fixed difficulty. Pool = choose topics by frequency weights and optionally auto-adjust difficulty.
+                  <div className="space-y-1">
+                    <div className="flex items-center justify-between gap-2">
+                      <Label>Type</Label>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setPoolInfoOpen(true)}
+                        className="h-8 px-2"
+                      >
+                        <Info className="h-4 w-4 mr-2" />
+                        What is Pool?
+                      </Button>
+                    </div>
+                    <Select value={mixedModuleType} onValueChange={(v) => setMixedModuleType(v as any)}>
+                      <SelectTrigger className="h-9">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="items">Items (fixed list)</SelectItem>
+                        <SelectItem value="pool">Pool (frequency weights)</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <div className="text-xs text-muted-foreground">
+                      Choose <strong>Items</strong> when you want an exact fixed set. Choose <strong>Pool</strong> when you want the app to pick topics more often based on weights.
+                    </div>
+                  </div>
                 </div>
               </div>
 
@@ -468,7 +492,12 @@ export default function SettingsPracticeAdminMixedModules() {
               ) : (
                 <div className="space-y-2">
                   <div className="flex items-center justify-between">
-                    <Label>Pool</Label>
+                    <div>
+                      <Label>Pool</Label>
+                      <div className="text-xs text-muted-foreground mt-1">
+                        Add topics with weights. Higher weight = selected more often.
+                      </div>
+                    </div>
                     <Button
                       type="button"
                       variant="outline"
@@ -497,36 +526,44 @@ export default function SettingsPracticeAdminMixedModules() {
                     <div className="space-y-2">
                       {mixedModulePool.map((p, idx) => (
                         <div key={idx} className="rounded-md border bg-muted/10 p-3 space-y-2">
-                          <div className="grid grid-cols-12 gap-2 items-center">
-                            <div className="col-span-5">
-                              <Select
-                                value={p.topicId}
-                                onValueChange={(v) =>
-                                  setMixedModulePool((prev) =>
-                                    prev.map((x, i) => (i === idx ? { ...x, topicId: v as PracticeTopicId } : x))
-                                  )
-                                }
-                              >
-                                <SelectTrigger>
-                                  <SelectValue />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  {PRACTICE_TOPICS.map((t) => (
-                                    <SelectItem key={t.id} value={t.id}>
-                                      {t.title}
-                                    </SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
+                          <div className="grid grid-cols-1 md:grid-cols-12 gap-3 items-end">
+                            <div className="md:col-span-6">
+                              <div className="space-y-1">
+                                <Label>Topic</Label>
+                                <Select
+                                  value={p.topicId}
+                                  onValueChange={(v) =>
+                                    setMixedModulePool((prev) =>
+                                      prev.map((x, i) => (i === idx ? { ...x, topicId: v as PracticeTopicId } : x))
+                                    )
+                                  }
+                                >
+                                  <SelectTrigger className="h-9">
+                                    <SelectValue />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    {PRACTICE_TOPICS.map((t) => (
+                                      <SelectItem key={t.id} value={t.id}>
+                                        {t.title}
+                                      </SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                              </div>
                             </div>
 
-                            <div className="col-span-3">
+                            <div className="md:col-span-2">
                               <div className="space-y-1">
                                 <Label>Weight</Label>
                                 <Input
+                                  type="number"
+                                  min={0}
+                                  step={1}
+                                  className="h-9"
                                   value={String(p.weight)}
                                   onChange={(e) => {
-                                    const w = Number(e.target.value);
+                                    const raw = e.target.value;
+                                    const w = raw === '' ? 0 : Number(raw);
                                     setMixedModulePool((prev) => prev.map((x, i) => (i === idx ? { ...x, weight: w } : x)));
                                   }}
                                   inputMode="numeric"
@@ -534,7 +571,7 @@ export default function SettingsPracticeAdminMixedModules() {
                               </div>
                             </div>
 
-                            <div className="col-span-3">
+                            <div className="md:col-span-3">
                               <div className="space-y-1">
                                 <Label>Difficulty</Label>
                                 <Select
@@ -557,14 +594,16 @@ export default function SettingsPracticeAdminMixedModules() {
                               </div>
                             </div>
 
-                            <div className="col-span-1 flex justify-end">
+                            <div className="md:col-span-1 flex justify-end">
                               <Button
                                 type="button"
                                 variant="destructive"
-                                size="sm"
+                                size="icon"
+                                className="h-9 w-9"
                                 onClick={() => setMixedModulePool((prev) => prev.filter((_, i) => i !== idx))}
+                                aria-label="Remove topic"
                               >
-                                X
+                                <X className="h-4 w-4" />
                               </Button>
                             </div>
                           </div>
@@ -625,6 +664,56 @@ export default function SettingsPracticeAdminMixedModules() {
                 </div>
               )}
             </div>
+
+            <Dialog open={poolInfoOpen} onOpenChange={setPoolInfoOpen}>
+              <DialogContent className="w-[96vw] max-w-2xl">
+                <DialogHeader>
+                  <DialogTitle>What is the Pool type?</DialogTitle>
+                  <DialogDescription>
+                    A simple guide to help you choose the right type.
+                  </DialogDescription>
+                </DialogHeader>
+                <div className="space-y-4 text-sm">
+                  <div className="rounded-md border bg-muted/10 p-3 space-y-2">
+                    <div className="font-medium text-foreground">In one line</div>
+                    <div className="text-muted-foreground">
+                      <strong>Pool</strong> means the app will pick questions from different topics more often based on the <strong>weight</strong> you set.
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <div className="rounded-md border p-3 space-y-2">
+                      <div className="font-medium text-foreground">Items (fixed list)</div>
+                      <div className="text-muted-foreground">
+                        Use this when you want an exact list: “Always practice these topics at these difficulties.”
+                      </div>
+                    </div>
+                    <div className="rounded-md border p-3 space-y-2">
+                      <div className="font-medium text-foreground">Pool (frequency weights)</div>
+                      <div className="text-muted-foreground">
+                        Use this when you want a flexible mix: “Practice these topics, but some more than others.”
+                      </div>
+                    </div>
+                  </div>
+                  <div className="rounded-md border p-3 space-y-2">
+                    <div className="font-medium text-foreground">How weight works</div>
+                    <div className="text-muted-foreground">
+                      If Topic A has weight 10 and Topic B has weight 5, Topic A will be chosen about twice as often as Topic B.
+                    </div>
+                  </div>
+                  <div className="rounded-md border p-3 space-y-2">
+                    <div className="font-medium text-foreground">Difficulty modes (inside Pool)</div>
+                    <div className="text-muted-foreground">
+                      <div><strong>Auto</strong>: app adjusts difficulty over time.</div>
+                      <div><strong>Fixed</strong>: always use one difficulty.</div>
+                      <div><strong>Mix</strong>: use your easy/medium/hard percentages.</div>
+                    </div>
+                  </div>
+                </div>
+                <DialogFooter>
+                  <Button type="button" onClick={() => setPoolInfoOpen(false)}>Got it</Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
 
             <DialogFooter>
               <Button type="button" variant="outline" onClick={() => setMixedModuleDialogOpen(false)}>

@@ -428,7 +428,7 @@ export default function Settings() {
       const min = String(now.getMinutes()).padStart(2, '0');
       const timestampPart = `${yyyy}${mm}${dd}-${hh}${min}`;
 
-      const fileName = `Limit-backup-${tagsPart}-${timestampPart}.json`;
+      const fileName = `Limit-app-data-backup-${tagsPart}-${timestampPart}.json`;
 
       const dataText = JSON.stringify(data, null, 2);
       if (window.data?.exportJsonToFile) {
@@ -469,7 +469,7 @@ export default function Settings() {
       const hh = String(now.getHours()).padStart(2, '0');
       const min = String(now.getMinutes()).padStart(2, '0');
       const timestampPart = `${yyyy}${mm}${dd}-${hh}${min}`;
-      const fileName = `Limit-questions-${timestampPart}.json`;
+      const fileName = `Limit-questions-only-${timestampPart}.json`;
       const dataText = JSON.stringify(data, null, 2);
       if (window.data?.exportJsonToFile) {
         const res = await window.data.exportJsonToFile({ defaultFileName: fileName, dataText });
@@ -486,6 +486,58 @@ export default function Settings() {
       toast.success('Questions exported successfully');
     } catch (error) {
       toast.error('Failed to export questions');
+      console.error(error);
+    }
+  };
+
+  const handleExportModulesWithQuestions = async () => {
+    try {
+      const modules = await db.modules.toArray();
+      const moduleQuestionIds = new Set<string>();
+      for (const m of modules as any[]) {
+        const ids = Array.isArray((m as any).questionIds) ? ((m as any).questionIds as any[]) : [];
+        for (const id of ids) {
+          if (typeof id === 'string' && id) moduleQuestionIds.add(id);
+        }
+      }
+      const questions = (await db.questions.bulkGet(Array.from(moduleQuestionIds))).filter(Boolean);
+      const tags = await db.tags.toArray();
+
+      const data = {
+        modules,
+        questions,
+        tags,
+        exportedAt: new Date().toISOString(),
+        kind: 'modules_with_questions',
+        schemaVersion: 23,
+      };
+
+      const now = new Date();
+      const yyyy = now.getFullYear();
+      const mm = String(now.getMonth() + 1).padStart(2, '0');
+      const dd = String(now.getDate()).padStart(2, '0');
+      const hh = String(now.getHours()).padStart(2, '0');
+      const min = String(now.getMinutes()).padStart(2, '0');
+      const timestampPart = `${yyyy}${mm}${dd}-${hh}${min}`;
+      const fileName = `Limit-modules-with-questions-${timestampPart}.json`;
+
+      const dataText = JSON.stringify(data, null, 2);
+      if (window.data?.exportJsonToFile) {
+        const res = await window.data.exportJsonToFile({ defaultFileName: fileName, dataText });
+        if (res?.canceled) return;
+      } else {
+        const blob = new Blob([dataText], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = fileName;
+        a.click();
+        URL.revokeObjectURL(url);
+      }
+
+      toast.success('Modules exported successfully');
+    } catch (error) {
+      toast.error('Failed to export modules');
       console.error(error);
     }
   };
@@ -723,13 +775,29 @@ export default function Settings() {
       const text = await file.text();
       const data = JSON.parse(text);
 
-      // Validate data structure
-      if (!data.questions || !data.modules || !data.tags) {
-        throw new Error('Invalid backup file format');
+      // Validate minimal structure for supported import types
+      // - Full backup: includes questions + modules (+ tags etc)
+      // - Questions export: includes questions
+      // - Modules export: includes modules + questions (and optionally tags)
+      const kind = typeof data?.kind === 'string' ? data.kind : undefined;
+      const hasQuestions = Array.isArray(data?.questions);
+      const hasModules = Array.isArray(data?.modules);
+      if (!hasQuestions && !hasModules) {
+        throw new Error('Invalid import file format');
+      }
+      if (kind === 'modules_with_questions' && (!hasModules || !hasQuestions)) {
+        throw new Error('Invalid modules export format');
       }
 
       const existingQuestions = await db.questions.toArray();
       const importedQuestions: any[] = Array.isArray(data.questions) ? data.questions : [];
+
+      const normalizedData = {
+        ...data,
+        questions: importedQuestions,
+        modules: Array.isArray(data.modules) ? data.modules : [],
+        tags: Array.isArray(data.tags) ? data.tags : [],
+      };
 
       const newQuestions: any[] = [];
       const duplicateQuestions: any[] = [];
@@ -746,7 +814,7 @@ export default function Settings() {
       if (duplicateQuestions.length === 0) {
         // No conflicts; import everything directly without confirmation dialog
         const importData = {
-          rawData: data,
+          rawData: normalizedData,
           newQuestions: importedQuestions,
           duplicateQuestions: [],
           existingQuestionsSnapshot: existingQuestions,
@@ -756,7 +824,7 @@ export default function Settings() {
       } else {
         // Store pending import and show confirmation dialog
         setPendingImport({
-          rawData: data,
+          rawData: normalizedData,
           newQuestions,
           duplicateQuestions,
           existingQuestionsSnapshot: existingQuestions,
@@ -1360,6 +1428,11 @@ export default function Settings() {
 						<FileText className="h-4 w-4 mr-2" />
 						Export Questions Only
 					</Button>
+
+          <Button onClick={handleExportModulesWithQuestions} variant="outline" className="w-full">
+            <Download className="h-4 w-4 mr-2" />
+            Export Modules (with Questions)
+          </Button>
 
           <div className="relative">
             <Input

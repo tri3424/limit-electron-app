@@ -1155,9 +1155,17 @@ export default function SongsAdmin() {
 								</Button>
 								<Tooltip>
 									<TooltipTrigger asChild>
-										<span className="inline-flex">
+										<Button
+											variant="outline"
+											size="icon"
+											className="h-8 w-8"
+											onClick={() => {
+												void openSyncLyricsForSong(s);
+											}}
+											aria-label="Sync lyrics"
+										>
 											<FileText className="h-4 w-4" />
-										</span>
+										</Button>
 									</TooltipTrigger>
 									<TooltipContent>Sync lyrics</TooltipContent>
 								</Tooltip>

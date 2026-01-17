@@ -1,4 +1,5 @@
 import { useMemo } from 'react';
+import { prepareContentForDisplay } from '@/lib/contentFormatting';
 
 interface TruncatedQuestionTextProps {
   html: string;
@@ -14,30 +15,26 @@ export function TruncatedQuestionText({
   questionType, 
   maxLength = 150 
 }: TruncatedQuestionTextProps) {
-  const extractText = (htmlString: string): string => {
-    if (typeof window === 'undefined') return String(htmlString ?? '');
-    const parser = new DOMParser();
-    const doc = parser.parseFromString(String(htmlString ?? ''), 'text/html');
-    return doc.body.textContent || '';
-  };
-
-  const previewText = useMemo(() => {
-    const text = extractText(html).replace(/\s+/g, ' ').trim();
-    if (text.length <= maxLength) return text;
-    let truncateAt = maxLength;
-    for (let i = maxLength; i > maxLength - 20 && i > 0; i--) {
-      if (text[i] === ' ' || text[i] === '.' || text[i] === ',' || text[i] === ';') {
-        truncateAt = i;
-        break;
-      }
+  const previewHtml = useMemo(() => {
+    const prepared = prepareContentForDisplay(html);
+    if (typeof window === 'undefined' || typeof DOMParser === 'undefined') {
+      return prepared.replace(/<img\b[^>]*>/gi, '');
     }
-    return text.substring(0, truncateAt).trimEnd() + '...';
-  }, [html, maxLength]);
+    try {
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(prepared, 'text/html');
+      doc.body.querySelectorAll('img, figure, picture, svg').forEach((el) => el.remove());
+      return doc.body.innerHTML;
+    } catch {
+      return prepared.replace(/<img\b[^>]*>/gi, '');
+    }
+  }, [html]);
 
   return (
-    <div className="tk-question-snippet text-sm font-medium prose prose-sm max-w-none overflow-hidden">
-      {previewText || (questionType ? '' : '')}
-    </div>
+    <div
+      className="tk-question-snippet text-sm font-medium prose prose-sm max-w-none overflow-hidden content-html line-clamp-2"
+      dangerouslySetInnerHTML={{ __html: previewHtml || (questionType ? '' : '') }}
+    />
   );
 }
 

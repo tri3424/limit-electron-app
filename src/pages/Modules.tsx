@@ -5,7 +5,7 @@ import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { useNavigate } from 'react-router-dom';
-import { Eye, Pencil, RefreshCw, Trash2, Plus, BarChart3 } from 'lucide-react';
+import { Eye, Pencil, RefreshCw, Trash2, Plus, BarChart3, Download } from 'lucide-react';
 import { deleteModule, resetModuleProgress } from '@/lib/modules';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -28,6 +28,8 @@ export default function ModulesPage() {
 	const modules = useLiveQuery(() => db.modules.toArray(), []);
 	const users = useLiveQuery(() => db.users.toArray(), []) as User[] | undefined;
 	const navigate = useNavigate();
+
+	const [selectedModuleIds, setSelectedModuleIds] = useState<string[]>([]);
 
 	const getQuestionPreview = (html: string, maxLen = 90) => {
 		const raw = (html || '').trim();
@@ -238,6 +240,70 @@ export default function ModulesPage() {
 					<p className="text-sm text-muted-foreground">Create, edit, and manage your modules.</p>
 				</div>
 				<div className="flex gap-2">
+					{selectedModuleIds.length > 0 && (
+						<Button
+							variant="outline"
+							onClick={async () => {
+								try {
+									const picked = await db.modules.bulkGet(selectedModuleIds);
+									const selectedModules = (picked.filter(Boolean) as any[]) || [];
+									if (!selectedModules.length) {
+										toast.error('No modules selected');
+										return;
+									}
+
+									const qIds = new Set<string>();
+									for (const m of selectedModules) {
+										const ids = Array.isArray(m?.questionIds) ? (m.questionIds as any[]) : [];
+										for (const id of ids) {
+											if (typeof id === 'string' && id) qIds.add(id);
+										}
+									}
+									const questions = (await db.questions.bulkGet(Array.from(qIds))).filter(Boolean);
+									const tags = await db.tags.toArray();
+
+									const data = {
+										modules: selectedModules,
+										questions,
+										tags,
+										exportedAt: new Date().toISOString(),
+										kind: 'modules_selection_with_questions',
+										schemaVersion: 23,
+									};
+
+									const now = new Date();
+									const yyyy = now.getFullYear();
+									const mm = String(now.getMonth() + 1).padStart(2, '0');
+									const dd = String(now.getDate()).padStart(2, '0');
+									const hh = String(now.getHours()).padStart(2, '0');
+									const min = String(now.getMinutes()).padStart(2, '0');
+									const timestampPart = `${yyyy}${mm}${dd}-${hh}${min}`;
+									const fileName = `Limit-modules-selected-${selectedModules.length}-${timestampPart}.json`;
+
+									const dataText = JSON.stringify(data, null, 2);
+									if (window.data?.exportJsonToFile) {
+										const res = await window.data.exportJsonToFile({ defaultFileName: fileName, dataText });
+										if (res?.canceled) return;
+									} else {
+										const blob = new Blob([dataText], { type: 'application/json' });
+										const url = URL.createObjectURL(blob);
+										const a = document.createElement('a');
+										a.href = url;
+										a.download = fileName;
+										a.click();
+										URL.revokeObjectURL(url);
+									}
+
+									toast.success('Selected modules exported');
+								} catch (e) {
+									console.error(e);
+									toast.error('Failed to export selected modules');
+								}
+							}}
+						>
+							<Download className="h-4 w-4 mr-2" /> Export Selected ({selectedModuleIds.length})
+						</Button>
+					)}
 					<Button onClick={() => navigate('/modules/new')}>
 						<Plus className="h-4 w-4 mr-2" /> Create Module
 					</Button>
@@ -264,6 +330,17 @@ export default function ModulesPage() {
 							className="flex items-stretch justify-between px-6 py-4 rounded-xl shadow-sm hover:shadow-md transition-shadow bg-green-50 border border-green-200"
 						>
 							<div className="flex-1 pr-6 min-w-0">
+								<div className="mb-2 flex items-center gap-2">
+									<Checkbox
+										checked={selectedModuleIds.includes(m.id)}
+										onCheckedChange={(v: CheckedState) => {
+											setSelectedModuleIds((prev) =>
+												v === true ? Array.from(new Set([...prev, m.id])) : prev.filter((id) => id !== m.id)
+											);
+										}}
+									/>
+									<span className="text-xs text-muted-foreground">Select</span>
+								</div>
 								<div className="flex items-center gap-3">
 									<h3 className="text-4xl font-semibold text-foreground truncate">{m.title}</h3>
 									{m.type === "practice" && hasCompletedStudents && (
