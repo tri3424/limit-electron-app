@@ -1,7 +1,6 @@
 import { db } from './db';
 import { extractPlainText, stableHashString } from './semanticUtils';
-import { embedTextHybrid } from './hybridEmbedder';
-import { getHybridPg, type HybridDocType, type HybridSearchRow } from './hybridPglite';
+import type { HybridDocType, HybridSearchRow } from './hybridPglite';
 
 export type HybridSearchResult = {
 	type: HybridDocType;
@@ -51,6 +50,8 @@ async function upsertDoc(params: {
 	content: string;
 	updatedAt: number;
 }): Promise<void> {
+	const { getHybridPg } = await import('./hybridPglite');
+	const { embedTextHybrid } = await import('./hybridEmbedder');
 	const pg = await getHybridPg();
 	const q = (pg as any).query.bind(pg) as <T = any>(sql: string, params?: any[]) => Promise<{ rows: T[] }>;
 	const title = params.title || '';
@@ -109,6 +110,8 @@ async function upsertDoc(params: {
 export async function hybridIndexAll(): Promise<void> {
 	const questions = await db.questions.toArray();
 	const songs = await db.songs.toArray();
+	const modules = await db.modules.toArray();
+	const courses = await db.storyCourses.toArray();
 
 	for (const q of questions) {
 		const plain = extractPlainText(q.text || '').trim();
@@ -134,6 +137,133 @@ export async function hybridIndexAll(): Promise<void> {
 			updatedAt: s.updatedAt || s.createdAt || Date.now(),
 		});
 	}
+
+	for (const m of modules) {
+		await upsertDoc({
+			type: 'module',
+			id: m.id,
+			title: m.title || '',
+			subtitle: `${m.type || ''}${(m.tags || []).length ? ` • ${(m.tags || []).slice(0, 3).join(', ')}` : ''}`.trim(),
+			content: (m.description || '').trim(),
+			updatedAt: m.updatedAt || m.createdAt || Date.now(),
+		});
+	}
+
+	for (const c of courses) {
+		await upsertDoc({
+			type: 'course',
+			id: c.id,
+			title: c.title || '',
+			subtitle: c.description || '',
+			content: (c.description || '').trim(),
+			updatedAt: c.updatedAt || c.createdAt || Date.now(),
+		});
+	}
+}
+
+function includesAny(hay: string, needle: string): boolean {
+	return (hay || '').toLowerCase().includes((needle || '').toLowerCase());
+}
+
+async function fallbackSearch(queryRaw: string, opts?: { limit?: number }): Promise<HybridSearchResult[]> {
+	const q = (queryRaw || '').trim();
+	if (!q) return [];
+	const limit = opts?.limit ?? 30;
+
+	const out: HybridSearchResult[] = [];
+
+	// Songs
+	const songs = await db.songs.toArray();
+	for (const s of songs) {
+		if (out.length >= limit) break;
+		const hit = includesAny(s.title, q) || includesAny(s.singer, q) || includesAny(s.writer, q) || includesAny(s.lyrics, q);
+		if (!hit) continue;
+		out.push({
+			type: 'song',
+			id: s.id,
+			title: s.title || '',
+			subtitle: `${s.singer || ''}${s.writer ? ` • ${s.writer}` : ''}`.trim(),
+			preview: firstWords((s.lyrics || '').trim(), 5),
+			score: 1,
+		});
+	}
+
+	// Questions
+	const questions = await db.questions.toArray();
+	for (const qq of questions) {
+		if (out.length >= limit) break;
+		const plain = extractPlainText(qq.text || '').trim();
+		const exp = extractPlainText(qq.explanation || '').trim();
+		const code = qq.code ? String(qq.code) : '';
+		const tagStr = (qq.tags || []).join(' ');
+		const hit = includesAny(plain, q) || includesAny(exp, q) || includesAny(code, q) || includesAny(tagStr, q);
+		if (!hit) continue;
+		out.push({
+			type: 'question',
+			id: qq.id,
+			title: qq.code ? `Question ${qq.code}` : 'Question',
+			subtitle: (qq.tags || []).slice(0, 4).join(', '),
+			preview: firstWords(plain || exp, 5),
+			score: 1,
+		});
+	}
+
+	// Modules
+	const modules = await db.modules.toArray();
+	for (const m of modules) {
+		if (out.length >= limit) break;
+		const hit = includesAny(m.title, q) || includesAny(m.description || '', q) || includesAny((m.tags || []).join(' '), q);
+		if (!hit) continue;
+		out.push({
+			type: 'module',
+			id: m.id,
+			title: m.title || '',
+			subtitle: `${m.type || ''}${(m.tags || []).length ? ` • ${(m.tags || []).slice(0, 3).join(', ')}` : ''}`.trim(),
+			preview: firstWords((m.description || '').trim(), 5),
+			score: 1,
+		});
+	}
+
+	// Courses
+	const courses = await db.storyCourses.toArray();
+	for (const c of courses) {
+		if (out.length >= limit) break;
+		const hit = includesAny(c.title || '', q) || includesAny(c.description || '', q);
+		if (!hit) continue;
+		out.push({
+			type: 'course',
+			id: c.id,
+			title: c.title || '',
+			subtitle: c.description || '',
+			preview: firstWords((c.description || '').trim(), 5),
+			score: 1,
+		});
+	}
+
+	return out.slice(0, limit);
+}
+
+let pgliteDisabled = true;
+
+export async function omniSearch(queryRaw: string, opts?: { limit?: number }): Promise<HybridSearchResult[]> {
+	if (pgliteDisabled) return await fallbackSearch(queryRaw, opts);
+	try {
+		return await hybridSearch(queryRaw, opts);
+	} catch {
+		// Avoid repeated initialization attempts that can trigger aborted fetch streams.
+		pgliteDisabled = true;
+		return await fallbackSearch(queryRaw, opts);
+	}
+}
+
+export async function omniEnsureIndexedOnce(): Promise<void> {
+	if (pgliteDisabled) return;
+	try {
+		await hybridEnsureIndexedOnce();
+	} catch {
+		pgliteDisabled = true;
+		// Ignore: omniSearch will fall back to Dexie search.
+	}
 }
 
 export async function hybridSearch(queryRaw: string, opts?: { limit?: number }): Promise<HybridSearchResult[]> {
@@ -141,6 +271,8 @@ export async function hybridSearch(queryRaw: string, opts?: { limit?: number }):
 	if (!q) return [];
 	const limit = opts?.limit ?? 30;
 
+	const { getHybridPg } = await import('./hybridPglite');
+	const { embedTextHybrid } = await import('./hybridEmbedder');
 	const pg = await getHybridPg();
 	const query = (pg as any).query.bind(pg) as <T = any>(sql: string, params?: any[]) => Promise<{ rows: T[] }>;
 	const emb = await embedTextHybrid(q);
@@ -201,6 +333,7 @@ export async function hybridSearch(queryRaw: string, opts?: { limit?: number }):
 }
 
 export async function hybridEnsureIndexedOnce(): Promise<void> {
+	const { getHybridPg } = await import('./hybridPglite');
 	const pg = await getHybridPg();
 	await pg.exec(`CREATE TABLE IF NOT EXISTS hybrid_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);`);
 	const existingRaw = await (pg as any).query(`SELECT value FROM hybrid_meta WHERE key = 'indexed_v1'`, []);

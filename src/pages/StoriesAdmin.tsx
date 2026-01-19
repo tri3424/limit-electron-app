@@ -1,7 +1,7 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { v4 as uuidv4 } from 'uuid';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { db, type StoryCourse, type StoryChapter } from '@/lib/db';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -25,11 +25,28 @@ import { Pencil, Plus, Trash2, BarChart3 } from 'lucide-react';
 import { toast } from 'sonner';
 
 export default function StoriesAdmin() {
+	const location = useLocation();
 	const navigate = useNavigate();
+
+	const highlightCourseId = useMemo(() => {
+		try {
+			return new URLSearchParams(location.search).get('highlight');
+		} catch {
+			return null;
+		}
+	}, [location.search]);
 	const courses = useLiveQuery(async () => {
 		const all = await db.storyCourses.orderBy('createdAt').reverse().toArray();
 		return all;
 	}, [], [] as StoryCourse[]);
+
+	useEffect(() => {
+		if (!highlightCourseId) return;
+		window.setTimeout(() => {
+			const el = document.getElementById(`course-row-${highlightCourseId}`);
+			el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+		}, 0);
+	}, [highlightCourseId, courses]);
 
 	const chapters = useLiveQuery(async () => {
 		const all = await db.storyChapters.toArray();
@@ -221,7 +238,11 @@ export default function StoriesAdmin() {
 									courses.map((c) => {
 										const chs = courseToChapters.get(c.id) || [];
 										return (
-											<TableRow key={c.id}>
+											<TableRow
+												key={c.id}
+												id={`course-row-${c.id}`}
+												className={highlightCourseId === c.id ? 'bg-accent/40' : undefined}
+											>
 												<TableCell className="min-w-0">
 													<div className="font-medium">{c.title}</div>
 													{c.description ? <div className="text-xs text-muted-foreground">{c.description}</div> : null}

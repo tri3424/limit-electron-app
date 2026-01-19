@@ -1,15 +1,24 @@
 import { useMemo } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { db, type StoryCourse, type StoryChapter } from '@/lib/db';
 import { Card } from '@/components/ui/card';
 import { useAuth } from '@/contexts/AuthContext';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 
 export default function Stories() {
+	const location = useLocation();
 	const navigate = useNavigate();
 	const { user } = useAuth();
 	const userId = user?.id || '';
+
+	const highlightCourseId = useMemo(() => {
+		try {
+			return new URLSearchParams(location.search).get('highlight');
+		} catch {
+			return null;
+		}
+	}, [location.search]);
 
 	const courses = useLiveQuery(async () => {
 		const all = await db.storyCourses.toArray();
@@ -43,6 +52,14 @@ export default function Stories() {
 		return map;
 	}, [chapters]);
 
+	useMemo(() => {
+		if (!highlightCourseId) return;
+		window.setTimeout(() => {
+			const el = document.getElementById(`course-row-${highlightCourseId}`);
+			el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+		}, 0);
+	}, [highlightCourseId, courses]);
+
 	return (
 		<div className="max-w-6xl mx-auto space-y-6 py-8">
 			<Card className="p-0 overflow-hidden">
@@ -61,7 +78,11 @@ export default function Stories() {
 									const chs = courseToChapters.get(c.id) || [];
 									const isLocked = false;
 									return (
-										<TableRow key={c.id} className={isLocked ? 'bg-[#eef6e4]' : undefined}>
+										<TableRow
+											key={c.id}
+											id={`course-row-${c.id}`}
+											className={highlightCourseId === c.id ? 'bg-accent/40' : isLocked ? 'bg-[#eef6e4]' : undefined}
+										>
 											<TableCell className="text-sm">{idx + 1}</TableCell>
 											<TableCell className="text-sm">{c.title}</TableCell>
 											<TableCell className="text-right text-sm">

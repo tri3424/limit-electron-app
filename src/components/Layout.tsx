@@ -7,7 +7,8 @@ import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
 import { db } from '@/lib/db';
 import { CommandDialog, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
-import { hybridEnsureIndexedOnce, hybridSearch } from '@/lib/hybridSearch';
+import { omniEnsureIndexedOnce, omniSearch } from '@/lib/hybridSearch';
+import type { HybridDocType } from '@/lib/hybridPglite';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import AudioPlayer from '@/components/AudioPlayer';
@@ -46,7 +47,7 @@ export function Layout({ children }: LayoutProps) {
 	const [omniOpen, setOmniOpen] = useState(false);
 	const [omniQuery, setOmniQuery] = useState('');
 	const [omniLoading, setOmniLoading] = useState(false);
-	const [omniResults, setOmniResults] = useState<Array<{ type: 'song' | 'question'; id: string; title: string; subtitle: string; preview: string }>>(
+	const [omniResults, setOmniResults] = useState<Array<{ type: HybridDocType; id: string; title: string; subtitle: string; preview: string }>>(
 		[],
 	);
 	const [previewQuestionId, setPreviewQuestionId] = useState<string | null>(null);
@@ -95,7 +96,7 @@ export function Layout({ children }: LayoutProps) {
 		if (!omniOpen) return;
 		if (!indexedOnceRef.current) {
 			indexedOnceRef.current = true;
-			void hybridEnsureIndexedOnce().catch((e) => console.error(e));
+			void omniEnsureIndexedOnce();
 		}
 	}, [omniOpen]);
 
@@ -111,7 +112,7 @@ export function Layout({ children }: LayoutProps) {
 		const t = window.setTimeout(() => {
 			void (async () => {
 					try {
-						const res = await hybridSearch(q, { limit: 40 });
+						const res = await omniSearch(q, { limit: 40 });
 						if (!alive) return;
 						const filtered = res;
 						setOmniResults(
@@ -134,6 +135,8 @@ export function Layout({ children }: LayoutProps) {
 
 	const songs = useMemo(() => omniResults.filter((r) => r.type === 'song'), [omniResults]);
 	const questions = useMemo(() => omniResults.filter((r) => r.type === 'question'), [omniResults]);
+	const modules = useMemo(() => omniResults.filter((r) => r.type === 'module'), [omniResults]);
+	const courses = useMemo(() => omniResults.filter((r) => r.type === 'course'), [omniResults]);
 
 	const closeOmni = () => {
 		setOmniOpen(false);
@@ -255,7 +258,7 @@ export function Layout({ children }: LayoutProps) {
 			}}
 		>
 			<CommandInput
-				placeholder={isAdmin ? 'Search songs and questions…' : 'Search songs…'}
+				placeholder={isAdmin ? 'Search songs, questions, modules, courses…' : 'Search songs and courses…'}
 				className="command-input"
 				value={omniQuery}
 				onValueChange={setOmniQuery}
@@ -281,7 +284,7 @@ export function Layout({ children }: LayoutProps) {
 								<Button
 									variant="outline"
 									size="sm"
-									className="ml-2"
+									className="ml-2 bg-background text-foreground border-border/70 hover:bg-primary/10 hover:text-foreground hover:border-primary/40"
 									onClick={(e) => {
 										e.preventDefault();
 										e.stopPropagation();
@@ -314,7 +317,7 @@ export function Layout({ children }: LayoutProps) {
 								<Button
 									variant="outline"
 									size="sm"
-									className="ml-2"
+									className="ml-2 bg-background text-foreground border-border/70 hover:bg-primary/10 hover:text-foreground hover:border-primary/40"
 									onClick={(e) => {
 										e.preventDefault();
 										e.stopPropagation();
@@ -323,6 +326,72 @@ export function Layout({ children }: LayoutProps) {
 									}}
 								>
 									View
+								</Button>
+							</CommandItem>
+						))}
+					</CommandGroup>
+				) : null}
+				{isAdmin && modules.length ? (
+					<CommandGroup heading="Modules">
+						{modules.map((r) => (
+							<CommandItem
+								key={`module-${r.id}`}
+								value={`${r.title} ${r.subtitle}`}
+								onSelect={() => {
+									closeOmni();
+									navigate(`/modules?highlight=${encodeURIComponent(r.id)}`);
+								}}
+							>
+								<Search className="mr-2 h-4 w-4" />
+								<div className="min-w-0 flex-1">
+									<div className="truncate">{r.title}</div>
+									{r.preview ? <div className="truncate text-xs text-muted-foreground">{r.preview}</div> : null}
+								</div>
+								<Button
+									variant="outline"
+									size="sm"
+									className="ml-2 bg-background text-foreground border-border/70 hover:bg-primary/10 hover:text-foreground hover:border-primary/40"
+									onClick={(e) => {
+										e.preventDefault();
+										e.stopPropagation();
+										closeOmni();
+										navigate(`/modules?highlight=${encodeURIComponent(r.id)}`);
+									}}
+								>
+									Go
+								</Button>
+							</CommandItem>
+						))}
+					</CommandGroup>
+				) : null}
+				{courses.length ? (
+					<CommandGroup heading="Courses">
+						{courses.map((r) => (
+							<CommandItem
+								key={`course-${r.id}`}
+								value={`${r.title} ${r.subtitle}`}
+								onSelect={() => {
+									closeOmni();
+									navigate(`${isAdmin ? '/stories-admin' : '/stories'}?highlight=${encodeURIComponent(r.id)}`);
+								}}
+							>
+								<Search className="mr-2 h-4 w-4" />
+								<div className="min-w-0 flex-1">
+									<div className="truncate">{r.title}</div>
+									{r.preview ? <div className="truncate text-xs text-muted-foreground">{r.preview}</div> : null}
+								</div>
+								<Button
+									variant="outline"
+									size="sm"
+									className="ml-2 bg-background text-foreground border-border/70 hover:bg-primary/10 hover:text-foreground hover:border-primary/40"
+									onClick={(e) => {
+										e.preventDefault();
+										e.stopPropagation();
+										closeOmni();
+										navigate(`${isAdmin ? '/stories-admin' : '/stories'}?highlight=${encodeURIComponent(r.id)}`);
+									}}
+								>
+									Go
 								</Button>
 							</CommandItem>
 						))}
@@ -347,14 +416,6 @@ export function Layout({ children }: LayoutProps) {
 
           {/* Right: primary navigation and user info */}
           <div className="flex items-center gap-2">
-            <Button
-              variant="outline"
-              className="h-10 px-4 bg-primary/90 border-0 text-primary-foreground hover:bg-primary shadow-sm"
-              onClick={openOmniAndFocus}
-            >
-              <Search className="h-4 w-4 mr-2" />
-              Search
-            </Button>
             {primaryNav.length > 0 ? (
               <nav className="flex items-center gap-1 rounded-full bg-black/10 px-1 md:px-2 py-1">
                 {primaryNav.map((item) => {

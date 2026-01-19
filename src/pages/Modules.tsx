@@ -4,7 +4,8 @@ import { db, Question, Tag, User } from '@/lib/db';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { useNavigate } from 'react-router-dom';
+import { cn } from '@/lib/utils';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { Eye, Pencil, RefreshCw, Trash2, Plus, BarChart3, Download } from 'lucide-react';
 import { deleteModule, resetModuleProgress } from '@/lib/modules';
 import { Input } from '@/components/ui/input';
@@ -37,7 +38,16 @@ import {
 export default function ModulesPage() {
 	const modules = useLiveQuery(() => db.modules.toArray(), []);
 	const users = useLiveQuery(() => db.users.toArray(), []) as User[] | undefined;
+	const location = useLocation();
 	const navigate = useNavigate();
+
+	const highlightModuleId = useMemo(() => {
+		try {
+			return new URLSearchParams(location.search).get('highlight');
+		} catch {
+			return null;
+		}
+	}, [location.search]);
 
 	const [selectedModuleIds, setSelectedModuleIds] = useState<string[]>([]);
 
@@ -142,6 +152,13 @@ export default function ModulesPage() {
 	useEffect(() => {
 		db.tags.toArray().then(setAvailableTags);
 	}, []);
+
+	useEffect(() => {
+		if (!highlightModuleId) return;
+		const el = document.getElementById(`module-card-${highlightModuleId}`);
+		if (!el) return;
+		el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+	}, [highlightModuleId, modules]);
 
 	useEffect(() => {
 		(async () => {
@@ -337,7 +354,11 @@ export default function ModulesPage() {
 					return (
 						<Card
 							key={m.id}
-							className="flex items-stretch justify-between px-6 py-4 rounded-xl shadow-sm hover:shadow-md transition-shadow bg-green-50 border border-green-200"
+							id={`module-card-${m.id}`}
+							className={cn(
+								"flex items-stretch justify-between px-6 py-4 rounded-xl shadow-sm hover:shadow-md transition-shadow bg-green-50 border border-green-200",
+								highlightModuleId === m.id && "ring-2 ring-primary ring-offset-2",
+							)}
 						>
 							<div className="flex-1 pr-6 min-w-0">
 								<div className="mb-2 flex items-center gap-2">
