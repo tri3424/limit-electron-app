@@ -22,6 +22,16 @@ import { summarizeDifficulty } from '@/lib/intelligenceEngine';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { v4 as uuidv4 } from 'uuid';
+import {
+	AlertDialog,
+	AlertDialogAction,
+	AlertDialogCancel,
+	AlertDialogContent,
+	AlertDialogDescription as AlertDialogDescriptionUi,
+	AlertDialogFooter,
+	AlertDialogHeader,
+	AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 
 export default function Questions() {
   const location = useLocation();
@@ -630,18 +640,17 @@ export default function Questions() {
         )}
 
         {/* Bulk/Single Delete Modal */}
-        <Dialog open={!!confirmDeleteIds} onOpenChange={(open) => { if (!open) setConfirmDeleteIds(null); }}>
-          <DialogContent className="max-w-md">
-            <DialogHeader>
-              <DialogTitle>Delete Question{(confirmDeleteIds || []).length > 1 ? 's' : ''}</DialogTitle>
-              <DialogDescription>
+        <AlertDialog open={!!confirmDeleteIds} onOpenChange={(open) => { if (!open) setConfirmDeleteIds(null); }}>
+          <AlertDialogContent className="max-w-md">
+            <AlertDialogHeader>
+              <AlertDialogTitle>Delete Question{(confirmDeleteIds || []).length > 1 ? 's' : ''}</AlertDialogTitle>
+              <AlertDialogDescriptionUi>
                 This action cannot be undone. {confirmDeleteIds?.length || 0} item(s) will be permanently removed.
-              </DialogDescription>
-            </DialogHeader>
-            <DialogFooter>
-              <Button variant="outline" onClick={() => setConfirmDeleteIds(null)}>Cancel</Button>
-              <Button
-                variant="destructive"
+              </AlertDialogDescriptionUi>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel onClick={() => setConfirmDeleteIds(null)}>Cancel</AlertDialogCancel>
+              <AlertDialogAction
                 onClick={async () => {
                   const ids = confirmDeleteIds || [];
                   for (const id of ids) {
@@ -652,10 +661,10 @@ export default function Questions() {
                 }}
               >
                 Delete
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </div>
     </div>
   );

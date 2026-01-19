@@ -21,6 +21,16 @@ import { CustomTimePicker } from '@/components/CustomTimePicker';
 import { TruncatedQuestionText } from '@/components/TruncatedQuestionText';
 import { MatchingQuestionView } from '@/components/MatchingQuestionView';
 import { prepareContentForDisplay } from '@/lib/contentFormatting';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription as AlertDialogDescriptionUi,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 
 function formatLocalDateTime(ms: number): string {
 	const d = new Date(ms);
@@ -649,20 +659,27 @@ export default function ModuleEditor() {
 				</Card>
 			</div>
 			{/* Delete Module Confirmation Modal */}
-			<Dialog open={deleteOpen} onOpenChange={setDeleteOpen}>
-				<DialogContent className="max-w-md">
-					<DialogHeader>
-						<DialogTitle>Delete Module</DialogTitle>
-						<DialogDescription>This action cannot be undone. Are you sure you want to delete this module? Questions will be preserved.</DialogDescription>
-					</DialogHeader>
-					<DialogFooter>
-						<Button variant="outline" onClick={() => setDeleteOpen(false)}>Cancel</Button>
-						<Button variant="destructive" onClick={async () => { await handleDelete(); setDeleteOpen(false); }}>
+			<AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
+				<AlertDialogContent className="max-w-md">
+					<AlertDialogHeader>
+						<AlertDialogTitle>Delete Module</AlertDialogTitle>
+						<AlertDialogDescriptionUi>
+							This action cannot be undone. Are you sure you want to delete this module? Questions will be preserved.
+						</AlertDialogDescriptionUi>
+					</AlertDialogHeader>
+					<AlertDialogFooter>
+						<AlertDialogCancel onClick={() => setDeleteOpen(false)}>Cancel</AlertDialogCancel>
+						<AlertDialogAction
+							onClick={async () => {
+								await handleDelete();
+								setDeleteOpen(false);
+							}}
+						>
 							Delete
-						</Button>
-					</DialogFooter>
-				</DialogContent>
-			</Dialog>
+						</AlertDialogAction>
+					</AlertDialogFooter>
+				</AlertDialogContent>
+			</AlertDialog>
 
 			{/* Question Details Modal */}
 			<Dialog open={!!openQuestion} onOpenChange={(open) => { if (!open) setOpenQuestion(null); }}>

@@ -6,7 +6,10 @@ import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { toast } from 'sonner';
-import { attachAssignmentToAttempt, createStoryAttemptForAssignmentRetry, forfeitStoryChapterAttempt } from '@/lib/stories';
+import {
+	attachAssignmentToAttempt,
+	getStoryFeedbackActions,
+} from '@/lib/stories';
 import { useAuth } from '@/contexts/AuthContext';
 
 function pendingKey(userId: string, chapterId: string) {
@@ -15,6 +18,28 @@ function pendingKey(userId: string, chapterId: string) {
 
 function assignmentLockKey(userId: string, chapterId: string) {
 	return `story:assignment_lock:${userId}:${chapterId}`;
+}
+
+function assignmentAttemptsKey(userId: string, chapterId: string) {
+	return `story:assignment_attempts_used:${userId}:${chapterId}`;
+}
+
+function readAssignmentAttemptsUsed(userId: string, chapterId: string): number {
+	try {
+		const raw = localStorage.getItem(assignmentAttemptsKey(userId, chapterId));
+		const n = Number(raw || 0);
+		return Number.isFinite(n) ? Math.max(0, n) : 0;
+	} catch {
+		return 0;
+	}
+}
+
+function writeAssignmentAttemptsUsed(userId: string, chapterId: string, next: number) {
+	try {
+		localStorage.setItem(assignmentAttemptsKey(userId, chapterId), String(next));
+	} catch {
+		// ignore
+	}
 }
 
 function skipRestoreKey(userId: string, chapterId: string) {
@@ -59,6 +84,7 @@ export default function StoryChapterAssignment() {
 	const [submitting, setSubmitting] = useState(false);
 	const [submittedAttempt, setSubmittedAttempt] = useState<StoryChapterAttempt | null>(null);
 	const [revealAnswers, setRevealAnswers] = useState(false);
+	const [assignmentAttemptsUsed, setAssignmentAttemptsUsed] = useState(0);
 	const [skipForfeit, setSkipForfeit] = useState(false);
 	const mountedAtRef = useRef<number>(Date.now());
 	const skipForfeitRef = useRef<boolean>(false);
@@ -90,6 +116,11 @@ export default function StoryChapterAssignment() {
 	useEffect(() => {
 		isChapterCompletedRef.current = !!(progress && (progress as any).completedAt);
 	}, [progress]);
+
+	useEffect(() => {
+		if (!userId || !chapterId) return;
+		setAssignmentAttemptsUsed(readAssignmentAttemptsUsed(userId, chapterId));
+	}, [userId, chapterId]);
 
 	const isChapterCompleted = !!(progress && (progress as any).completedAt);
 
@@ -167,6 +198,12 @@ export default function StoryChapterAssignment() {
 		} catch {
 			// ignore
 		}
+		try {
+			localStorage.removeItem(assignmentAttemptsKey(userId, chapterId));
+		} catch {
+			// ignore
+		}
+		setAssignmentAttemptsUsed(0);
 		setAttemptId('');
 		setSubmittedAttempt(null);
 		setAssignmentAnswers({});
@@ -181,9 +218,8 @@ export default function StoryChapterAssignment() {
 	}, [statements]);
 	const maxAttempts = 3;
 	const effectiveAttemptsUsed = useMemo(() => {
-		if (typeof attemptsUsedCount === 'number' && Number.isFinite(attemptsUsedCount)) return attemptsUsedCount;
-		return Math.max(submittedAttempt?.attemptNo ?? 0, latestAttempt?.attemptNo ?? 0);
-	}, [attemptsUsedCount, submittedAttempt?.attemptNo, latestAttempt?.attemptNo]);
+		return Math.max(0, Number.isFinite(assignmentAttemptsUsed) ? assignmentAttemptsUsed : 0);
+	}, [assignmentAttemptsUsed]);
 
 	useEffect(() => {
 		if (!chapterId || !userId) return;
@@ -203,11 +239,18 @@ export default function StoryChapterAssignment() {
 			toast.error('Please submit the story first');
 			return;
 		}
+		if (effectiveAttemptsUsed >= maxAttempts) {
+			toast.error('No attempts remaining');
+			return;
+		}
 		setSkipForfeit(true);
 		setSubmitting(true);
 		try {
 			const res = await attachAssignmentToAttempt({ attemptId, chapter, assignmentAnswers });
 			setSubmittedAttempt(res);
+			const nextUsed = Math.min(maxAttempts, Math.max(0, effectiveAttemptsUsed) + 1);
+			writeAssignmentAttemptsUsed(userId, chapter.id, nextUsed);
+			setAssignmentAttemptsUsed(nextUsed);
 			localStorage.removeItem(pendingKey(userId, chapter.id));
 			toast.success('Submitted');
 		} catch (e) {
@@ -231,8 +274,14 @@ export default function StoryChapterAssignment() {
 		return Math.max(0, maxAttempts - used);
 	}, [effectiveAttemptsUsed]);
 
-	const canSeeAnswers = !!submittedAttempt && (assignmentAccuracyPercent >= 75 || attemptsRemaining === 0);
-	const canRetry = !!submittedAttempt && attemptsRemaining > 0;
+	const feedbackActions = submittedAttempt
+		? getStoryFeedbackActions({
+			scorePercent: assignmentAccuracyPercent,
+			attemptsUsed: effectiveAttemptsUsed,
+			maxAttempts,
+			hasSeenAnswers: revealAnswers,
+		})
+		: null;
 
 	useEffect(() => {
 		setRevealAnswers(false);
@@ -247,22 +296,15 @@ export default function StoryChapterAssignment() {
 		}
 		setSkipForfeit(true);
 		try {
-			const now = Date.now();
-			const next = await createStoryAttemptForAssignmentRetry({
-				userId,
-				username,
-				chapter,
-				previousAttemptId: attemptId,
-			});
-			setAttemptId(next.id);
 			setSubmittedAttempt(null);
 			setAssignmentAnswers({});
-			setStartedAt(now);
+			setStartedAt(Date.now());
+			setRevealAnswers(false);
 			try {
 				const payload: Pending & { attemptId: string } = {
-					startedAt: now,
+					startedAt: Date.now(),
 					blankAnswers,
-					attemptId: next.id,
+					attemptId,
 				};
 				localStorage.setItem(pendingKey(userId, chapter.id), JSON.stringify(payload));
 			} catch {
@@ -320,16 +362,24 @@ export default function StoryChapterAssignment() {
 			if (!ch) return;
 			if (isChapterCompletedRef.current) return;
 			if (!attemptIdRef.current) return;
-			// If the learner leaves Assignment without submitting/completing, record a 0% attempt.
+			// If the learner leaves Assignment without submitting/completing, consume an ASSIGNMENT attempt
+			// (independent from passage attempts) and store an all-wrong assignment result.
 			if (submittedAttemptRef.current) return;
 			try {
 				setTimeout(() => {
 					try {
-						void forfeitStoryChapterAttempt({
-							userId,
-							username,
+						const used = readAssignmentAttemptsUsed(userId, ch.id);
+						if (used >= maxAttempts) return;
+						writeAssignmentAttemptsUsed(userId, ch.id, Math.min(maxAttempts, used + 1));
+
+						const wrongAnswers: Record<string, StoryAssignmentAnswer> = {};
+						for (const s of ch.assignment?.statements || []) {
+							wrongAnswers[s.id] = s.correct === 'yes' ? 'no' : 'yes';
+						}
+						void attachAssignmentToAttempt({
+							attemptId: attemptIdRef.current,
 							chapter: ch,
-							includeAssignment: true,
+							assignmentAnswers: wrongAnswers,
 						});
 					} catch {
 						// ignore
@@ -427,14 +477,14 @@ export default function StoryChapterAssignment() {
 								<div className="text-4xl font-bold">{assignmentAccuracyPercent}%</div>
 							</div>
 							<div className="flex gap-2">
-								{canRetry && !revealAnswers && assignmentAccuracyPercent < 100 ? (
+								{feedbackActions?.showRetry && !revealAnswers ? (
 									<Button variant="outline" onClick={onRetry} className="flex-1">Retry</Button>
 								) : null}
-								{canSeeAnswers && !revealAnswers ? (
+								{feedbackActions?.showSeeAnswers && !revealAnswers ? (
 									<Button variant="outline" onClick={() => setRevealAnswers(true)} className="flex-1">See Answers</Button>
 								) : null}
-								{canSeeAnswers && revealAnswers ? (
-									<Button onClick={onComplete} className="flex-1">Complete</Button>
+								{feedbackActions?.showNext ? (
+									<Button onClick={onComplete} className="flex-1">Next</Button>
 								) : null}
 							</div>
 						</>

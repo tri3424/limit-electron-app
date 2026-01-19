@@ -421,10 +421,10 @@ async function resizeImageDataUrl(dataUrl: string, maxW: number, maxH: number): 
 
 function buildDefaultOptions(): DraftOption[] {
   return [
-    { id: uuidv4(), label: 'A', text: 'Option A' },
-    { id: uuidv4(), label: 'B', text: 'Option B' },
-    { id: uuidv4(), label: 'C', text: 'Option C' },
-    { id: uuidv4(), label: 'D', text: 'Option D' },
+    { id: uuidv4(), label: 'A', text: 'a) Option A' },
+    { id: uuidv4(), label: 'B', text: 'b) Option B' },
+    { id: uuidv4(), label: 'C', text: 'c) Option C' },
+    { id: uuidv4(), label: 'D', text: 'd) Option D' },
   ];
 }
 
@@ -441,7 +441,11 @@ function normalizeOptionLabel(label: string): string {
 }
 
 function isDefaultOptionText(text: string, label: string) {
-  return String(text || '').trim().toLowerCase() === `option ${String(label || '').trim().toLowerCase()}`;
+
+  const t = String(text || '').trim().toLowerCase();
+  const lbl = String(label || '').trim().toLowerCase();
+  const lettered = `${lbl}) option ${lbl}`;
+  return t === `option ${lbl}` || t === lettered;
 }
 
 function buildOptionsFromParsed(parsed: ScreenshotQuestionDraft): DraftOption[] {
@@ -477,6 +481,8 @@ export default function ScreenshotToQuestionModal({ files, onApply }: Props) {
   const [correctOptionId, setCorrectOptionId] = useState<string | null>(null);
   const [rawLines, setRawLines] = useState<string[]>([]);
   const [detectedMcq, setDetectedMcq] = useState(false);
+
+  const [selectedOcrText, setSelectedOcrText] = useState('');
 
   const [imageUrls, setImageUrls] = useState<string[]>([]);
   const [attachedQuestionImages, setAttachedQuestionImages] = useState<string[]>([]);
@@ -586,7 +592,8 @@ export default function ScreenshotToQuestionModal({ files, onApply }: Props) {
     const next = drafts[clamp(draftIndex, 0, drafts.length - 1)];
     if (!next) return;
     const state = draftUi[draftIndex];
-    if (state) {
+    const uiLooksForDifferentDraftSet = draftUi.length !== drafts.length;
+    if (state && !uiLooksForDifferentDraftSet) {
       setDraftQuestion(state.question);
       setDraftOptions(state.options);
       setCorrectOptionId(state.correctOptionId);
@@ -596,7 +603,7 @@ export default function ScreenshotToQuestionModal({ files, onApply }: Props) {
     } else {
       applyParsedDraft(next);
     }
-  }, [draftIndex, drafts]);
+  }, [draftIndex, drafts, draftUi]);
 
   useEffect(() => {
     if (!files.length) return;
@@ -689,6 +696,64 @@ export default function ScreenshotToQuestionModal({ files, onApply }: Props) {
     } catch (e: any) {
       console.error(e);
       toast.error(e?.message ? String(e.message) : 'OCR failed');
+    } finally {
+      setBusy(false);
+      setProgress(null);
+    }
+  };
+
+  const runCropOcrAndAppend = async (target: 'question' | { optionId: string }) => {
+    if (!cropRect) return;
+    if (!imageUrls[activeIndex]) return;
+    const imgEl = imgRef.current;
+    if (!imgEl) return;
+
+    try {
+      setBusy(true);
+      setProgress(null);
+      const blob = await cropImageDataUrl(imageUrls[activeIndex], cropRect, imgEl);
+      const res = await recognizeImageText(blob, {
+        lang: 'eng',
+        onProgress: setProgress,
+      });
+
+      let html: string;
+      if (inferFormatting) {
+        const { data } = await blobToImageData(blob);
+        html = richHtmlFromTesseractWithDecorations(res.raw, data, {
+          inferUnderlineStrike: true,
+          experimentalBoldItalic,
+        });
+      } else {
+        const text = normalizeOcrTextToParagraphs(res.text);
+        html = ocrTextToRichHtml(text);
+      }
+
+      if (target === 'question') {
+        setDraftQuestion((prev) => {
+          const base = String(prev || '').trim();
+          const next = base ? `${base}<p></p>${html}` : html;
+          syncDraftUiAtIndex(draftIndex, { question: next });
+          return next;
+        });
+      } else {
+        setDraftOptions((prev) => {
+          const next = prev.map((o) => {
+            if (o.id !== target.optionId) return o;
+            const base = String(o.text || '').trim();
+            return { ...o, text: base ? `${base}<p></p>${html}` : html };
+          });
+          syncDraftUiAtIndex(draftIndex, { options: next });
+          return next;
+        });
+      }
+
+      setCropMode(false);
+      setCropRect(null);
+      setCropAssignTarget(null);
+    } catch (e: any) {
+      console.error(e);
+      toast.error(e?.message ? String(e.message) : 'Region OCR failed');
     } finally {
       setBusy(false);
       setProgress(null);
@@ -905,8 +970,54 @@ export default function ScreenshotToQuestionModal({ files, onApply }: Props) {
     setCropAssignTarget('question');
   };
 
+  const isMcqDraft = draftOptions.length >= 2;
+
+  const selectedOcrHtml = useMemo(() => {
+    const t = normalizeOcrTextToParagraphs(selectedOcrText || '').trim();
+    if (!t) return '';
+    return ocrTextToRichHtml(t);
+  }, [selectedOcrText]);
+
+  const assignSelectedOcrToQuestion = () => {
+    if (!selectedOcrHtml) return;
+    setDraftQuestion(selectedOcrHtml);
+    syncDraftUiAtIndex(draftIndex, { question: selectedOcrHtml });
+  };
+
+  const appendSelectedOcrToQuestion = () => {
+    if (!selectedOcrHtml) return;
+    setDraftQuestion((prev) => {
+      const base = String(prev || '').trim();
+      const next = base ? `${base}<p></p>${selectedOcrHtml}` : selectedOcrHtml;
+      syncDraftUiAtIndex(draftIndex, { question: next });
+      return next;
+    });
+  };
+
+  const assignSelectedOcrToOption = (optionId: string) => {
+    if (!selectedOcrHtml) return;
+    setDraftOptions((prev) => {
+      const next = prev.map((o) => (o.id === optionId ? { ...o, text: selectedOcrHtml } : o));
+      syncDraftUiAtIndex(draftIndex, { options: next });
+      return next;
+    });
+  };
+
+  const appendSelectedOcrToOption = (optionId: string) => {
+    if (!selectedOcrHtml) return;
+    setDraftOptions((prev) => {
+      const next = prev.map((o) => {
+        if (o.id !== optionId) return o;
+        const base = String(o.text || '').trim();
+        return { ...o, text: base ? `${base}<p></p>${selectedOcrHtml}` : selectedOcrHtml };
+      });
+      syncDraftUiAtIndex(draftIndex, { options: next });
+      return next;
+    });
+  };
+
   const pasteToInputs = ({ close }: { close: boolean }) => {
-    if (!detectedMcq) {
+    if (!isMcqDraft) {
       toast.error('No MCQ options detected. Screenshot → Question only works for MCQ.');
       return;
     }
@@ -930,7 +1041,7 @@ export default function ScreenshotToQuestionModal({ files, onApply }: Props) {
         : '';
       return { id: o.id, html: `${base}${imgs}` };
     });
-    const correctIds = detectedMcq && correctOptionId ? [correctOptionId] : [];
+    const correctIds = isMcqDraft && correctOptionId ? [correctOptionId] : [];
 
     onApply({
       questionHtml: qHtml,
@@ -939,6 +1050,8 @@ export default function ScreenshotToQuestionModal({ files, onApply }: Props) {
       questionImageDataUrls: attachedQuestionImages,
       optionImageDataUrls,
     });
+
+    toast.success('Applied OCR draft');
 
     if (close) {
       // no-op for inline tool
@@ -953,15 +1066,14 @@ export default function ScreenshotToQuestionModal({ files, onApply }: Props) {
   };
 
   const disablePaste =
-    !detectedMcq ||
+    !isMcqDraft ||
     !stripHtmlToText(draftQuestion).trim() ||
-    draftOptions.length < 2 ||
     draftOptions.some((o) => !stripHtmlToText(o.text).trim() && !(o.attachedImages ?? []).length);
 
   if (!files.length) return null;
 
   return (
-    <div className="rounded-lg border bg-background/50 p-4 space-y-4">
+    <div className="rounded-lg bg-background/50 p-4 space-y-4">
       <div className="flex items-start justify-between gap-3">
         <div>
           <div className="text-sm font-medium">Screenshot → Question</div>
@@ -981,11 +1093,11 @@ export default function ScreenshotToQuestionModal({ files, onApply }: Props) {
         <div
           className={
             showScreenshotPanel
-              ? 'rounded-lg border bg-background/50 overflow-hidden flex flex-col flex-shrink-0'
-              : 'rounded-lg border bg-background/50 overflow-hidden flex flex-col flex-shrink-0'
+              ? 'rounded-lg bg-muted/10 overflow-hidden flex flex-col flex-shrink-0'
+              : 'rounded-lg bg-muted/10 overflow-hidden flex flex-col flex-shrink-0'
           }
         >
-            <div className="p-3 border-b flex items-center gap-2">
+            <div className="p-3 flex items-center gap-2">
               <div className="font-medium text-sm">Screenshot</div>
               <div className="ml-auto flex items-center gap-2">
                 <Button type="button" size="sm" variant="outline" onClick={() => setShowScreenshotPanel((v) => !v)}>
@@ -1051,7 +1163,7 @@ export default function ScreenshotToQuestionModal({ files, onApply }: Props) {
                     {files.map((_, i) => (
                       <TabsContent key={i} value={String(i)} className="mt-0">
                         <div
-                          className="relative rounded-md border bg-muted/10"
+                          className="relative rounded-md bg-background/60"
                           onMouseDown={onImageMouseDown}
                           onMouseMove={onImageMouseMove}
                           onMouseUp={onImageMouseUp}
@@ -1076,7 +1188,7 @@ export default function ScreenshotToQuestionModal({ files, onApply }: Props) {
                         )}
                         </div>
                         {cropMode && cropRect && i === activeIndex && (
-                          <div className="mt-3 rounded-md border bg-muted/10 p-3 space-y-2">
+                          <div className="mt-3 rounded-md bg-muted/10 p-3 space-y-2">
                             <div className="text-xs text-muted-foreground">
                               Region selected. Assign via buttons or shortcuts:
                               <div className="mt-1">
@@ -1106,6 +1218,9 @@ export default function ScreenshotToQuestionModal({ files, onApply }: Props) {
                               <Button type="button" size="sm" onClick={() => void runCropOcrAndAssign('question')} disabled={busy}>
                                 Assign to question
                               </Button>
+                              <Button type="button" size="sm" variant="outline" onClick={() => void runCropOcrAndAppend('question')} disabled={busy}>
+                                Append to question
+                              </Button>
                               <Button type="button" size="sm" variant="outline" onClick={() => void attachCropAsQuestionImage()} disabled={busy}>
                                 Attach crop as image
                               </Button>
@@ -1113,6 +1228,35 @@ export default function ScreenshotToQuestionModal({ files, onApply }: Props) {
                                 Insert into question
                               </Button>
                             </div>
+
+							<div className="flex flex-wrap gap-2">
+								{draftOptions.map((o) => (
+									<Button
+										key={`assign-${o.id}`}
+										type="button"
+										size="sm"
+										variant="outline"
+										onClick={() => void runCropOcrAndAssign({ optionId: o.id })}
+										disabled={busy}
+									>
+										Assign to {o.label}
+									</Button>
+								))}
+							</div>
+							<div className="flex flex-wrap gap-2">
+								{draftOptions.map((o) => (
+									<Button
+										key={`append-${o.id}`}
+										type="button"
+										size="sm"
+										variant="outline"
+										onClick={() => void runCropOcrAndAppend({ optionId: o.id })}
+										disabled={busy}
+									>
+										Append to {o.label}
+									</Button>
+								))}
+							</div>
                           </div>
                         )}
                       </TabsContent>
@@ -1122,6 +1266,99 @@ export default function ScreenshotToQuestionModal({ files, onApply }: Props) {
               </div>
             ) : null}
           </div>
+
+			<div className="rounded-lg bg-muted/10 p-3">
+				<div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+					<div className="space-y-2">
+						<div className="flex items-center gap-2">
+							<div className="text-sm font-medium">Raw OCR text</div>
+							<Button
+								type="button"
+								size="sm"
+								variant="outline"
+								onClick={() => setSelectedOcrText('')}
+								disabled={!selectedOcrText}
+							>
+								Clear selection
+							</Button>
+						</div>
+						<div
+							className="rounded-md bg-background/60 border p-3 text-sm whitespace-pre-wrap select-text"
+							onMouseUp={() => {
+								const t = window.getSelection?.()?.toString() ?? '';
+								setSelectedOcrText(t);
+							}}
+						>
+							{rawLines && rawLines.length ? rawLines.join('\n') : 'No OCR text available.'}
+						</div>
+						{selectedOcrText ? (
+							<div className="text-xs text-muted-foreground">
+								Selected: <span className="font-mono">{selectedOcrText.length}</span> chars
+							</div>
+						) : (
+							<div className="text-xs text-muted-foreground">Highlight any text above to enable Insert/Append.</div>
+						)}
+					</div>
+
+					<div className="space-y-4">
+						<div className="space-y-2">
+							<div className="flex items-center justify-between gap-2">
+								<Label className="text-sm">Question</Label>
+								<div className="flex items-center gap-2">
+									<Button type="button" size="sm" variant="outline" onClick={assignSelectedOcrToQuestion} disabled={!selectedOcrHtml}>
+										Insert
+									</Button>
+									<Button type="button" size="sm" variant="outline" onClick={appendSelectedOcrToQuestion} disabled={!selectedOcrHtml}>
+										Append
+									</Button>
+								</div>
+							</div>
+							<textarea
+								className="w-full min-h-[120px] rounded-md border bg-background/60 p-3 text-sm"
+								value={draftQuestion}
+								onChange={(e) => {
+									const next = e.target.value;
+									setDraftQuestion(next);
+									syncDraftUiAtIndex(draftIndex, { question: next });
+								}}
+							/>
+						</div>
+
+						<div className="space-y-2">
+							<Label className="text-sm">Options</Label>
+							<div className="space-y-3">
+								{draftOptions.map((o) => (
+									<div key={o.id} className="rounded-md border bg-background/40 p-3 space-y-2">
+										<div className="flex items-center justify-between gap-2">
+											<div className="text-sm font-medium">{o.label}</div>
+											<div className="flex items-center gap-2">
+												<Button type="button" size="sm" variant="outline" onClick={() => assignSelectedOcrToOption(o.id)} disabled={!selectedOcrHtml}>
+													Insert
+												</Button>
+												<Button type="button" size="sm" variant="outline" onClick={() => appendSelectedOcrToOption(o.id)} disabled={!selectedOcrHtml}>
+													Append
+												</Button>
+											</div>
+									</div>
+									<textarea
+										className="w-full min-h-[70px] rounded-md border bg-background/60 p-2 text-sm"
+										value={o.text}
+										onChange={(e) => {
+											const nextText = e.target.value;
+											setDraftOptions((prev) => {
+												const next = prev.map((x) => (x.id === o.id ? { ...x, text: nextText } : x));
+												syncDraftUiAtIndex(draftIndex, { options: next });
+												return next;
+											});
+										}}
+									/>
+									</div>
+								))}
+							</div>
+						</div>
+					</div>
+				</div>
+			</div>
         
         <div className="flex-shrink-0 flex items-center justify-end gap-2 pt-2">
           {drafts.length > 1 && (

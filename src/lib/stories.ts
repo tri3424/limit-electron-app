@@ -63,6 +63,10 @@ export function scoreAssignment(statementCorrect: StoryAssignmentAnswer, answer:
 	return statementCorrect === answer;
 }
 
+function oppositeYesNo(v: StoryAssignmentAnswer): StoryAssignmentAnswer {
+	return v === 'yes' ? 'no' : 'yes';
+}
+
 export async function submitStoryChapterAttempt(input: {
 	userId: string;
 	username?: string;
@@ -93,11 +97,11 @@ export async function submitStoryChapterAttempt(input: {
 	const assignment = assignmentStatements.length
 		? assignmentStatements
 				.map((s) => {
-					const ans = (input.assignmentAnswers?.[s.id] ?? '') as StoryAssignmentAnswer;
-					if (ans !== 'yes' && ans !== 'no') return null;
-					return { statementId: s.id, answer: ans, correct: scoreAssignment(s.correct, ans) };
+					const raw = (input.assignmentAnswers?.[s.id] ?? '') as any;
+					const answered = raw === 'yes' || raw === 'no';
+					const ans: StoryAssignmentAnswer = answered ? raw : oppositeYesNo(s.correct);
+					return { statementId: s.id, answer: ans, correct: answered ? scoreAssignment(s.correct, ans) : false, unanswered: !answered } as any;
 				})
-				.filter(Boolean)
 		: undefined;
 
 	const correctParts =
@@ -130,6 +134,55 @@ export async function submitStoryChapterAttempt(input: {
 
 	await db.storyAttempts.add(row);
 	return row;
+}
+
+export type StoryFeedbackActions = {
+	showRetry: boolean;
+	showNext: boolean;
+	showSeeAnswers: boolean;
+};
+
+export function getStoryFeedbackActions(input: {
+	scorePercent: number;
+	attemptsUsed: number;
+	maxAttempts?: number;
+	hasSeenAnswers?: boolean;
+}): StoryFeedbackActions {
+	const maxAttempts = typeof input.maxAttempts === 'number' && Number.isFinite(input.maxAttempts) ? input.maxAttempts : 3;
+	const attemptsUsed = Math.max(0, Number.isFinite(input.attemptsUsed) ? input.attemptsUsed : 0);
+	const score = Math.max(0, Math.min(100, Number.isFinite(input.scorePercent) ? input.scorePercent : 0));
+	const hasSeenAnswers = !!input.hasSeenAnswers;
+
+	// Once answers are revealed, do not allow retries (to prevent rewriting with the key).
+	// Allow forward progress.
+	if (hasSeenAnswers) {
+		return { showRetry: false, showNext: true, showSeeAnswers: false };
+	}
+
+	// Perfect score: allow immediate progression.
+	if (score === 100) {
+		return { showRetry: false, showNext: true, showSeeAnswers: false };
+	}
+
+	// After max attempts: no more retries, allow forward progress and answers.
+	if (attemptsUsed >= maxAttempts) {
+		// Next is only allowed after answers are revealed for non-perfect scores.
+		return { showRetry: false, showNext: false, showSeeAnswers: true };
+	}
+
+	// Encourage refinement but prevent progression until mastery.
+	if (score > 75) {
+		return { showRetry: true, showNext: false, showSeeAnswers: true };
+	}
+
+	// Borderline pass: allow proceed OR improve OR review.
+	if (score >= 70) {
+		// Next is only allowed after answers are revealed for non-perfect scores.
+		return { showRetry: true, showNext: false, showSeeAnswers: true };
+	}
+
+	// Below 70: prompt retry only.
+	return { showRetry: true, showNext: false, showSeeAnswers: false };
 }
 
 export async function forfeitStoryChapterAttempt(input: {
@@ -211,11 +264,11 @@ export async function attachAssignmentToAttempt(input: {
 	const assignment = assignmentStatements.length
 		? assignmentStatements
 				.map((s) => {
-					const ans = (input.assignmentAnswers?.[s.id] ?? '') as StoryAssignmentAnswer;
-					if (ans !== 'yes' && ans !== 'no') return null;
-					return { statementId: s.id, answer: ans, correct: scoreAssignment(s.correct, ans) };
+					const raw = (input.assignmentAnswers?.[s.id] ?? '') as any;
+					const answered = raw === 'yes' || raw === 'no';
+					const ans: StoryAssignmentAnswer = answered ? raw : oppositeYesNo(s.correct);
+					return { statementId: s.id, answer: ans, correct: answered ? scoreAssignment(s.correct, ans) : false, unanswered: !answered } as any;
 				})
-				.filter(Boolean)
 		: undefined;
 
 	const correctParts =

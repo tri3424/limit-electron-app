@@ -528,18 +528,47 @@ export function generateClockReadingQuestion(input: {
   }
 
   // duration_hm
+  const startTime = `${pad2(startH24b)}:${pad2(startMbFixed)}`;
+  const endTime = `${pad2(endH24b)}:${pad2(endMb)}`;
+  const nextFullHourH24 = (startH24b + (startMbFixed === 0 ? 0 : 1)) % 24;
+  const minutesToNextHour = startMbFixed === 0 ? 0 : 60 - startMbFixed;
+  const fullHoursBetween = Math.max(0, durH - (minutesToNextHour > 0 ? 1 : 0));
+
   const explanationSteps = [
     {
+      katex: String.raw`\text{Write the times down}`,
+      text: `Start = ${startTime} (${amPm}), End = ${endTime} (${amPm}). We want the time difference.`,
+    },
+    {
       katex: String.raw`\text{Count full hours first}`,
-      text: `From the start time to the next full hour is one part; then keep counting hours until you reach the end hour.`,
+      text:
+        minutesToNextHour === 0
+          ? `Because the start time is on the hour, we can count full hours directly.`
+          : `From ${startTime} to the next full hour is ${minutesToNextHour} minutes.`,
+    },
+    {
+      katex: String.raw`\text{Count full hours}`,
+      text:
+        durH === 0
+          ? `There are no full hours in the duration.`
+          : minutesToNextHour === 0
+            ? `Full hours = ${durH}.`
+            : `After reaching the next hour, count the full hours: ${fullHoursBetween} full hour${fullHoursBetween === 1 ? '' : 's'}.`,
     },
     {
       katex: String.raw`\text{Then count remaining minutes}`,
-      text: `After counting full hours, count the remaining minutes using the minute hand position.`,
+      text:
+        durM === 0
+          ? `Remaining minutes = 0.`
+          : `Remaining minutes = ${durM} minutes.`,
     },
     {
-      katex: String.raw`\text{Final duration}`,
-      text: `The activity lasted ${durH} hour${durH === 1 ? '' : 's'} and ${durM} minute${durM === 1 ? '' : 's'}.`,
+      katex: String.raw`\text{Combine}`,
+      text: `Duration = ${durH} hour${durH === 1 ? '' : 's'} and ${durM} minute${durM === 1 ? '' : 's'}.`,
+    },
+    {
+      katex: String.raw`\text{Convert to minutes (optional check)}`,
+      text: `${durH}×60 + ${durM} = ${durH * 60} + ${durM} = ${delta} minutes.`,
     },
   ];
 

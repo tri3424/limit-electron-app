@@ -57,16 +57,12 @@ export default function StoryChapterEditor() {
 		setSaving(true);
 		try {
 			const blanks = scanBlanksFromHtml(storyHtml || '');
-			if (!blanks.length) {
-				toast.error('Add at least one blank by selecting a word and clicking the blanks button.');
-				return;
-			}
 			const next: Partial<StoryChapter> = {
 				title: title.trim() || 'Untitled',
 				order: Number(order) || 1,
 				visible,
 				storyHtml,
-				fillBlanks: { blanks },
+				fillBlanks: blanks.length ? { blanks } : undefined,
 				assignment: assignmentEnabled
 					? {
 						statements: (statements || []).filter((s) => s.text.trim().length > 0),

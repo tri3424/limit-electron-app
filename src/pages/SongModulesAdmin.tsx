@@ -15,6 +15,16 @@ import { Pencil, Trash2, BarChart3, Eye, Play, Pause } from 'lucide-react';
 import { toast } from 'sonner';
 import AudioPlayer from '@/components/AudioPlayer';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import {
+	AlertDialog,
+	AlertDialogAction,
+	AlertDialogCancel,
+	AlertDialogContent,
+	AlertDialogDescription as AlertDialogDescriptionUi,
+	AlertDialogFooter,
+	AlertDialogHeader,
+	AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 
 export default function SongModulesAdmin() {
 	const songs = useLiveQuery(async () => {
@@ -848,16 +858,17 @@ export default function SongModulesAdmin() {
 			</Dialog>
 
 			{/* Delete module */}
-			<Dialog open={!!deleteId} onOpenChange={(open) => { if (!open) setDeleteId(null); }}>
-				<DialogContent className="max-w-md">
-					<DialogHeader>
-						<DialogTitle>Delete module</DialogTitle>
-						<DialogDescription>This only deletes the module. It will not delete songs.</DialogDescription>
-					</DialogHeader>
-					<DialogFooter>
-						<Button variant="outline" onClick={() => setDeleteId(null)}>Cancel</Button>
-						<Button
-							variant="destructive"
+			<AlertDialog open={!!deleteId} onOpenChange={(open) => { if (!open) setDeleteId(null); }}>
+				<AlertDialogContent className="max-w-md">
+					<AlertDialogHeader>
+						<AlertDialogTitle>Delete module</AlertDialogTitle>
+						<AlertDialogDescriptionUi>
+							This only deletes the module. It will not delete songs.
+						</AlertDialogDescriptionUi>
+					</AlertDialogHeader>
+					<AlertDialogFooter>
+						<AlertDialogCancel onClick={() => setDeleteId(null)}>Cancel</AlertDialogCancel>
+						<AlertDialogAction
 							onClick={async () => {
 								if (!deleteId) return;
 								try {
@@ -871,10 +882,10 @@ export default function SongModulesAdmin() {
 							}}
 						>
 							Delete
-						</Button>
-					</DialogFooter>
-				</DialogContent>
-			</Dialog>
+						</AlertDialogAction>
+					</AlertDialogFooter>
+				</AlertDialogContent>
+			</AlertDialog>
 		</div>
 	);
 }

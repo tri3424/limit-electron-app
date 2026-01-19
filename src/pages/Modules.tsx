@@ -23,6 +23,16 @@ import { renderTypingAnswerMathToHtml } from '@/components/TypingAnswerMathInput
 import { copyTextToClipboard } from '@/utils/codeBlockCopy';
 import { areAllQuestionsCompleted } from '@/lib/completedQuestions';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import {
+	AlertDialog,
+	AlertDialogAction,
+	AlertDialogCancel,
+	AlertDialogContent,
+	AlertDialogDescription as AlertDialogDescriptionUi,
+	AlertDialogFooter,
+	AlertDialogHeader,
+	AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 
 export default function ModulesPage() {
 	const modules = useLiveQuery(() => db.modules.toArray(), []);
@@ -559,18 +569,17 @@ export default function ModulesPage() {
 			</Dialog>
 
 			{/* Refresh Module Confirmation */}
-			<Dialog open={!!refreshId} onOpenChange={(open) => { if (!open) setRefreshId(null); }}>
-				<DialogContent className="max-w-md">
-					<DialogHeader>
-						<DialogTitle>Refresh Module Progress</DialogTitle>
-						<DialogDescription>
-							This will delete all attempts, integrity logs, and stats for this module, but keep the module and its questions.
-						</DialogDescription>
-					</DialogHeader>
-					<DialogFooter>
-						<Button variant="outline" onClick={() => setRefreshId(null)}>Cancel</Button>
-						<Button
-							variant="destructive"
+			<AlertDialog open={!!refreshId} onOpenChange={(open) => { if (!open) setRefreshId(null); }}>
+				<AlertDialogContent className="max-w-md">
+					<AlertDialogHeader>
+						<AlertDialogTitle>Refresh Module Progress</AlertDialogTitle>
+						<AlertDialogDescriptionUi>
+							This action cannot be undone. This will delete all attempts, integrity logs, and stats for this module, but keep the module and its questions.
+						</AlertDialogDescriptionUi>
+					</AlertDialogHeader>
+					<AlertDialogFooter>
+						<AlertDialogCancel onClick={() => setRefreshId(null)}>Cancel</AlertDialogCancel>
+						<AlertDialogAction
 							onClick={async () => {
 								if (!refreshId) return;
 								await resetModuleProgress(refreshId);
@@ -579,10 +588,10 @@ export default function ModulesPage() {
 							}}
 						>
 							Refresh
-						</Button>
-					</DialogFooter>
-				</DialogContent>
-			</Dialog>
+						</AlertDialogAction>
+					</AlertDialogFooter>
+				</AlertDialogContent>
+			</AlertDialog>
 			{/* Stats Question Detail Modal */}
 			<Dialog open={!!openStatDetail} onOpenChange={(open) => { if (!open) setOpenStatDetail(null); }}>
 				<DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
@@ -933,22 +942,28 @@ export default function ModulesPage() {
 			</Dialog>
 
 			{/* Delete Confirmation Modal */}
-			<Dialog open={!!deleteId} onOpenChange={(open) => { if (!open) setDeleteId(null); }}>
-				<DialogContent className="max-w-md">
-					<DialogHeader>
-						<DialogTitle>Delete Module</DialogTitle>
-						<DialogDescription>
+			<AlertDialog open={!!deleteId} onOpenChange={(open) => { if (!open) setDeleteId(null); }}>
+				<AlertDialogContent className="max-w-md">
+					<AlertDialogHeader>
+						<AlertDialogTitle>Delete Module</AlertDialogTitle>
+						<AlertDialogDescriptionUi>
 							This action cannot be undone. Are you sure you want to delete this module?
-						</DialogDescription>
-					</DialogHeader>
-					<DialogFooter>
-						<Button variant="outline" onClick={() => setDeleteId(null)}>Cancel</Button>
-						<Button variant="destructive" onClick={async () => { if (!deleteId) return; await deleteModule(deleteId); setDeleteId(null); }}>
+						</AlertDialogDescriptionUi>
+					</AlertDialogHeader>
+					<AlertDialogFooter>
+						<AlertDialogCancel onClick={() => setDeleteId(null)}>Cancel</AlertDialogCancel>
+						<AlertDialogAction
+							onClick={async () => {
+								if (!deleteId) return;
+								await deleteModule(deleteId);
+								setDeleteId(null);
+							}}
+						>
 							Delete
-						</Button>
-					</DialogFooter>
-				</DialogContent>
-			</Dialog>
+						</AlertDialogAction>
+					</AlertDialogFooter>
+				</AlertDialogContent>
+			</AlertDialog>
 
 			{/* Stats Dialog */}
 			<Dialog open={statsOpen} onOpenChange={(open) => {
@@ -1123,18 +1138,17 @@ export default function ModulesPage() {
 					</div>
 				</DialogContent>
 			</Dialog>
-			<Dialog open={clearStatsConfirmOpen} onOpenChange={setClearStatsConfirmOpen}>
-				<DialogContent className="max-w-md">
-					<DialogHeader>
-						<DialogTitle>Clear All Stats Data</DialogTitle>
-						<DialogDescription>
-							This will delete all saved daily stats across all modules. Your modules and questions will not be affected.
-						</DialogDescription>
-					</DialogHeader>
-					<DialogFooter>
-						<Button variant="outline" onClick={() => setClearStatsConfirmOpen(false)}>Cancel</Button>
-						<Button
-							variant="destructive"
+			<AlertDialog open={clearStatsConfirmOpen} onOpenChange={setClearStatsConfirmOpen}>
+				<AlertDialogContent className="max-w-md">
+					<AlertDialogHeader>
+						<AlertDialogTitle>Are you absolutely sure?</AlertDialogTitle>
+						<AlertDialogDescriptionUi>
+							This action cannot be undone. This will delete all saved daily stats across all modules. Your modules and questions will not be affected.
+						</AlertDialogDescriptionUi>
+					</AlertDialogHeader>
+					<AlertDialogFooter>
+						<AlertDialogCancel onClick={() => setClearStatsConfirmOpen(false)}>Cancel</AlertDialogCancel>
+						<AlertDialogAction
 							onClick={async () => {
 								await clearAllDailyStats();
 								setStatsDates([]);
@@ -1145,10 +1159,10 @@ export default function ModulesPage() {
 							}}
 						>
 							Clear
-						</Button>
-					</DialogFooter>
-				</DialogContent>
-			</Dialog>
+						</AlertDialogAction>
+					</AlertDialogFooter>
+				</AlertDialogContent>
+			</AlertDialog>
 		</div>
 	);
 }

@@ -87,7 +87,7 @@ export default function StoriesAdminCourse() {
 			});
 			setOpen(false);
 			setChapterTitle('');
-			navigate(`/stories-admin/chapter/${id}/edit`);
+			navigate(`/stories-admin/course/${courseId}`);
 		} catch (e) {
 			console.error(e);
 			toast.error('Failed to create chapter');

@@ -1856,7 +1856,6 @@ export default function Settings() {
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction
               onClick={handleDeleteUser}
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >
               Delete
             </AlertDialogAction>
@@ -1897,7 +1896,7 @@ export default function Settings() {
           </div>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={handleClearAllData} className="bg-destructive text-destructive-foreground">
+            <AlertDialogAction onClick={handleClearAllData}>
               Delete Everything
             </AlertDialogAction>
           </AlertDialogFooter>
@@ -2872,7 +2871,6 @@ function DatabaseExplorer() {
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
               onClick={async () => {
                 await handleBulkDeleteVisible();
                 setShowBulkDeleteDialog(false);

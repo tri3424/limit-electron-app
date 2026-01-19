@@ -3833,7 +3833,24 @@ export default function Practice() {
                           >
                             <Katex latex={s.katex} displayMode />
                           </div>
-                          <div className="tk-wp-expl-text text-lg leading-relaxed text-foreground">{s.text}</div>
+                          <div className="tk-wp-expl-text text-lg leading-relaxed text-foreground">
+                            {(() => {
+                              const text = String(s.text ?? '');
+                              if (!(question as any).generatorParams?.circularMeasure) return text;
+                              // Render simple exponent tokens (e.g. r^2, AB^2) as KaTeX so superscripts display correctly.
+                              const hasCaretExponent = /\b[A-Za-z]{1,6}\^\d+\b/.test(text);
+                              if (!hasCaretExponent) return text;
+                              const parts = text.split(/(\b[A-Za-z]{1,6}\^\d+\b)/g);
+                              return (
+                                <span>
+                                  {parts.filter((p) => p.length > 0).map((p, i) => {
+                                    const isMath = /^\b[A-Za-z]{1,6}\^\d+\b$/.test(p);
+                                    return isMath ? <Katex key={i} latex={p} /> : <span key={i}>{p}</span>;
+                                  })}
+                                </span>
+                              );
+                            })()}
+                          </div>
                         </div>
                       ))}
 

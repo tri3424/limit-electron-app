@@ -8,7 +8,12 @@ import { Input } from '@/components/ui/input';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { useAuth } from '@/contexts/AuthContext';
 import { toast } from 'sonner';
-import { getLockedBlankIds, getNextAttemptNo, isCorrectFillBlankAnswer, submitStoryChapterAttempt } from '@/lib/stories';
+import {
+	getLockedBlankIds,
+	getNextAttemptNo,
+	getStoryFeedbackActions,
+	submitStoryChapterAttempt,
+} from '@/lib/stories';
 
 function parseStoryHtmlToNodes(html: string): { parts: Array<{ kind: 'text'; value: string } | { kind: 'blank'; id: string; correct: string }> } {
 	if (typeof window === 'undefined' || typeof DOMParser === 'undefined') {
@@ -117,36 +122,11 @@ export default function StoryChapterRunner() {
 	const attemptsUsed = attempts?.length || 0;
 	const attemptsRemaining = Math.max(0, maxAttempts - attemptsUsed);
 	const lastAttempt = attempts && attempts.length ? attempts[attempts.length - 1] : null;
-	const lastAccuracy = submittedAttempt?.accuracyPercent ?? lastAttempt?.accuracyPercent;
-
-	const canRetry = (() => {
-		if (attemptsUsed >= maxAttempts) return false;
-		if (submittedAttempt) {
-			// if just submitted, allow retry only if not passed threshold
-			return submittedAttempt.accuracyPercent < 75;
-		}
-		return true;
-	})();
-
-	const canProceedNow = (() => {
-		// If accuracy >= 75 then allow proceed/complete immediately.
-		// If below 75, allow proceed only after final attempt.
-		if (typeof lastAccuracy !== 'number') return false;
-		if (lastAccuracy >= 75) return true;
-		return attemptsUsed >= maxAttempts;
-	})();
-
-	const showSeeAnswers = (() => {
-		// Only after final allowed attempt OR when accuracy>75 but <100.
-		if (!submittedAttempt && !lastAttempt) return false;
-		const a = submittedAttempt || lastAttempt;
-		if (!a) return false;
-		if (a.accuracyPercent === 100) return false;
-		if (a.accuracyPercent > 75) return true;
-		return attemptsUsed >= maxAttempts;
-	})();
-
-	const primaryActionLabel = hasAssignment ? 'Proceed' : 'Complete';
+	const displayAttempt = submittedAttempt ?? lastAttempt;
+	const displayScore = displayAttempt?.accuracyPercent ?? 0;
+	const feedbackActions = displayAttempt
+		? getStoryFeedbackActions({ scorePercent: displayScore, attemptsUsed, maxAttempts, hasSeenAnswers: revealAnswers })
+		: null;
 
 	const onSubmit = async () => {
 		if (!userId || !chapter) {
@@ -252,7 +232,7 @@ export default function StoryChapterRunner() {
 							return <span key={idx}>{p.value}</span>;
 						}
 						const locked = lockedBlankIds.includes(p.id);
-						const showCorrect = revealAnswers && (attemptsUsed >= maxAttempts);
+						const showCorrect = revealAnswers;
 						return (
 							<span key={idx} className="inline-flex items-center gap-2 mx-1 my-1">
 								<Input
@@ -307,26 +287,14 @@ export default function StoryChapterRunner() {
 							<div className="text-3xl font-bold">{submittedAttempt.accuracyPercent}%</div>
 						</div>
 						<div className="flex flex-wrap gap-2 justify-end">
-							{showSeeAnswers ? (
-								<Button
-									variant="outline"
-									onClick={() => {
-										const allow = (attemptsUsed >= maxAttempts);
-										if (!allow) return;
-										setRevealAnswers(true);
-									}}
-									disabled={attemptsUsed < maxAttempts}
-								>
-									See Answers
-								</Button>
+							{feedbackActions?.showRetry ? (
+								<Button onClick={onRetry}>Retry</Button>
 							) : null}
-							{submittedAttempt.accuracyPercent < 75 && attemptsUsed < maxAttempts ? (
-								<Button onClick={onRetry} disabled={!canRetry}>Retry</Button>
+							{feedbackActions?.showSeeAnswers ? (
+								<Button variant="outline" onClick={() => setRevealAnswers(true)}>See Answers</Button>
 							) : null}
-							{submittedAttempt.accuracyPercent === 100 ? (
-								<Button onClick={onProceed}>{primaryActionLabel}</Button>
-							) : canProceedNow ? (
-								<Button onClick={onProceed}>{primaryActionLabel}</Button>
+							{feedbackActions?.showNext ? (
+								<Button onClick={onProceed}>Next</Button>
 							) : null}
 						</div>
 					</>

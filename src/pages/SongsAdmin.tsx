@@ -18,6 +18,16 @@ import { toast } from "sonner";
 import AudioPlayer from "@/components/AudioPlayer";
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useLocation } from 'react-router-dom';
+import {
+	AlertDialog,
+	AlertDialogAction,
+	AlertDialogCancel,
+	AlertDialogContent,
+	AlertDialogDescription as AlertDialogDescriptionUi,
+	AlertDialogFooter,
+	AlertDialogHeader,
+	AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 
 async function fileToBase64(file: File): Promise<string> {
 	return new Promise((resolve, reject) => {
@@ -1550,23 +1560,19 @@ export default function SongsAdmin() {
 				</DialogContent>
 			</Dialog>
 
-			<Dialog
-				open={!!deleteTarget}
-				onOpenChange={(open) => {
-					if (!open) setDeleteTarget(null);
-				}}
-			>
-				<DialogContent className="max-w-md">
-					<DialogHeader>
-						<DialogTitle>Delete song</DialogTitle>
-						<DialogDescription>This will remove the song from the list and delete its audio file.</DialogDescription>
-					</DialogHeader>
-					<DialogFooter>
-						<Button variant="outline" onClick={() => setDeleteTarget(null)} disabled={deleting}>
+			<AlertDialog open={!!deleteTarget} onOpenChange={(open) => { if (!open) setDeleteTarget(null); }}>
+				<AlertDialogContent className="max-w-md">
+					<AlertDialogHeader>
+						<AlertDialogTitle>Delete song</AlertDialogTitle>
+						<AlertDialogDescriptionUi>
+							This will remove the song from the list and delete its audio file.
+						</AlertDialogDescriptionUi>
+					</AlertDialogHeader>
+					<AlertDialogFooter>
+						<AlertDialogCancel onClick={() => setDeleteTarget(null)} disabled={deleting}>
 							Cancel
-						</Button>
-						<Button
-							variant="destructive"
+						</AlertDialogCancel>
+						<AlertDialogAction
 							disabled={!deleteTarget || deleting}
 							onClick={async () => {
 								if (!deleteTarget) return;
@@ -1587,10 +1593,10 @@ export default function SongsAdmin() {
 							}}
 						>
 							{deleting ? "Deleting..." : "Delete"}
-						</Button>
-					</DialogFooter>
-				</DialogContent>
-			</Dialog>
+						</AlertDialogAction>
+					</AlertDialogFooter>
+				</AlertDialogContent>
+			</AlertDialog>
 		</div>
 	);
 }

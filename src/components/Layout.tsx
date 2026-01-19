@@ -8,6 +8,10 @@ import { useAuth } from '@/contexts/AuthContext';
 import { db } from '@/lib/db';
 import { CommandDialog, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
 import { hybridEnsureIndexedOnce, hybridSearch } from '@/lib/hybridSearch';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import AudioPlayer from '@/components/AudioPlayer';
+import { prepareContentForDisplay } from '@/lib/contentFormatting';
 import {
 	DropdownMenu,
 	DropdownMenuContent,
@@ -42,10 +46,24 @@ export function Layout({ children }: LayoutProps) {
 	const [omniOpen, setOmniOpen] = useState(false);
 	const [omniQuery, setOmniQuery] = useState('');
 	const [omniLoading, setOmniLoading] = useState(false);
-	const [omniResults, setOmniResults] = useState<Array<{ type: 'song' | 'question'; id: string; title: string; subtitle: string }>>(
+	const [omniResults, setOmniResults] = useState<Array<{ type: 'song' | 'question'; id: string; title: string; subtitle: string; preview: string }>>(
 		[],
 	);
+	const [previewQuestionId, setPreviewQuestionId] = useState<string | null>(null);
+	const [previewSongId, setPreviewSongId] = useState<string | null>(null);
+	const [hearOpen, setHearOpen] = useState(false);
 	const indexedOnceRef = useRef(false);
+
+	const previewQuestion = useLiveQuery(
+		() => (previewQuestionId ? db.questions.get(previewQuestionId) : Promise.resolve(undefined)),
+		[previewQuestionId],
+		undefined,
+	);
+	const previewSong = useLiveQuery(
+		() => (previewSongId ? db.songs.get(previewSongId) : Promise.resolve(undefined)),
+		[previewSongId],
+		undefined,
+	);
 
 	const newErrorReportCount = useLiveQuery(
 		() => isAdmin ? db.errorReports.where('status').equals('new').count() : Promise.resolve(0),
@@ -53,13 +71,21 @@ export function Layout({ children }: LayoutProps) {
 		0
 	);
 
+	const openOmniAndFocus = () => {
+		setOmniOpen(true);
+		window.setTimeout(() => {
+			const input = document.querySelector<HTMLInputElement>('input.command-input');
+			input?.focus();
+		}, 0);
+	};
+
 	useEffect(() => {
 		const onKeyDown = (e: KeyboardEvent) => {
 			const isK = e.key.toLowerCase() === 'k';
 			const wants = isK && (e.metaKey || e.ctrlKey);
 			if (!wants) return;
 			e.preventDefault();
-			setOmniOpen(true);
+			openOmniAndFocus();
 		};
 		window.addEventListener('keydown', onKeyDown);
 		return () => window.removeEventListener('keydown', onKeyDown);
@@ -84,17 +110,17 @@ export function Layout({ children }: LayoutProps) {
 		setOmniLoading(true);
 		const t = window.setTimeout(() => {
 			void (async () => {
-				try {
-					const res = await hybridSearch(q, { limit: 40 });
-					if (!alive) return;
-					const filtered = res;
-					setOmniResults(
-						filtered.map((r) => ({ type: r.type, id: r.id, title: r.title, subtitle: r.subtitle })),
-					);
-				} catch (e) {
-					console.error(e);
-					if (!alive) return;
-					setOmniResults([]);
+					try {
+						const res = await hybridSearch(q, { limit: 40 });
+						if (!alive) return;
+						const filtered = res;
+						setOmniResults(
+							filtered.map((r) => ({ type: r.type, id: r.id, title: r.title, subtitle: r.subtitle, preview: r.preview })),
+						);
+					} catch (e) {
+						console.error(e);
+						if (!alive) return;
+						setOmniResults([]);
 				} finally {
 					if (alive) setOmniLoading(false);
 				}
@@ -109,7 +135,14 @@ export function Layout({ children }: LayoutProps) {
 	const songs = useMemo(() => omniResults.filter((r) => r.type === 'song'), [omniResults]);
 	const questions = useMemo(() => omniResults.filter((r) => r.type === 'question'), [omniResults]);
 
-  const logoSrc = `${import.meta.env.BASE_URL}favicon.ico`;
+	const closeOmni = () => {
+		setOmniOpen(false);
+		setOmniQuery('');
+		setOmniResults([]);
+		setOmniLoading(false);
+	};
+
+	const logoSrc = `${import.meta.env.BASE_URL}favicon.ico`;
 
   const adminNavigation = [
     { name: 'Home', href: HOME_ROUTE, icon: Home },
@@ -150,6 +183,66 @@ export function Layout({ children }: LayoutProps) {
   
   	return (
 		<div className={cn("flex flex-col min-h-[100dvh]", isModuleRunner ? "bg-white" : "bg-background")}>
+			<Dialog open={!!previewQuestionId} onOpenChange={(open) => { if (!open) setPreviewQuestionId(null); }}>
+				<DialogContent className="max-w-4xl">
+					<DialogHeader>
+						<DialogTitle>{previewQuestion?.code ? `Question ${previewQuestion.code}` : 'Question'}</DialogTitle>
+						<DialogDescription>Preview</DialogDescription>
+					</DialogHeader>
+					<ScrollArea className="max-h-[70vh]">
+						<div className="space-y-4 pr-2">
+							{previewQuestion ? (
+								<div className="prose max-w-none content-html" dangerouslySetInnerHTML={{ __html: prepareContentForDisplay(previewQuestion.text || '') }} />
+							) : (
+								<div className="text-sm text-muted-foreground">Loading…</div>
+							)}
+						</div>
+					</ScrollArea>
+					<DialogFooter>
+						<Button variant="outline" onClick={() => setPreviewQuestionId(null)}>Close</Button>
+					</DialogFooter>
+				</DialogContent>
+			</Dialog>
+
+			<Dialog open={!!previewSongId} onOpenChange={(open) => { if (!open) { setPreviewSongId(null); setHearOpen(false); } }}>
+				<DialogContent className="max-w-2xl">
+					<DialogHeader>
+						<DialogTitle>{previewSong?.title || 'Song'}</DialogTitle>
+						<DialogDescription>{previewSong?.singer ? `Singer: ${previewSong.singer}` : 'Preview'}</DialogDescription>
+					</DialogHeader>
+					<div className="space-y-3">
+						{previewSong?.lyrics ? (
+							<div className="whitespace-pre-wrap border rounded-md bg-muted/30 p-4 text-sm leading-relaxed max-h-[40vh] overflow-y-auto overflow-x-hidden">
+								{previewSong.lyrics}
+							</div>
+						) : (
+							<div className="text-sm text-muted-foreground">No lyrics.</div>
+						)}
+					</div>
+					<DialogFooter>
+						<Button variant="outline" onClick={() => setPreviewSongId(null)}>Close</Button>
+						<Button onClick={() => setHearOpen(true)} disabled={!previewSong}>Hear</Button>
+					</DialogFooter>
+				</DialogContent>
+			</Dialog>
+
+			<Dialog open={hearOpen} onOpenChange={(open) => { if (!open) setHearOpen(false); }}>
+				<DialogContent className="max-w-lg">
+					<DialogHeader>
+						<DialogTitle>{previewSong?.title || 'Hear song'}</DialogTitle>
+						<DialogDescription>Audio playback</DialogDescription>
+					</DialogHeader>
+					{previewSong ? (
+						<AudioPlayer src={previewSong.audioFileUrl} trackTitle={previewSong.title || 'Song'} />
+					) : (
+						<div className="text-sm text-muted-foreground">No song selected.</div>
+					)}
+					<DialogFooter>
+						<Button variant="outline" onClick={() => setHearOpen(false)}>Close</Button>
+					</DialogFooter>
+				</DialogContent>
+			</Dialog>
+
       <CommandDialog
 			open={omniOpen}
 			onOpenChange={(open) => {
@@ -176,15 +269,28 @@ export function Layout({ children }: LayoutProps) {
 								key={`song-${r.id}`}
 								value={`${r.title} ${r.subtitle}`}
 								onSelect={() => {
-									setOmniOpen(false);
-									navigate(isAdmin ? `/songs-admin?songId=${encodeURIComponent(r.id)}` : `/songs?songId=${encodeURIComponent(r.id)}`);
+									closeOmni();
+									setPreviewSongId(r.id);
 								}}
 							>
 								<Search className="mr-2 h-4 w-4" />
 								<div className="min-w-0 flex-1">
 									<div className="truncate">{r.title}</div>
-									{r.subtitle ? <div className="truncate text-xs text-muted-foreground">{r.subtitle}</div> : null}
+									{r.preview ? <div className="truncate text-xs text-muted-foreground">{r.preview}</div> : null}
 								</div>
+								<Button
+									variant="outline"
+									size="sm"
+									className="ml-2"
+									onClick={(e) => {
+										e.preventDefault();
+										e.stopPropagation();
+										closeOmni();
+										setPreviewSongId(r.id);
+									}}
+								>
+									View
+								</Button>
 							</CommandItem>
 						))}
 					</CommandGroup>
@@ -196,15 +302,28 @@ export function Layout({ children }: LayoutProps) {
 								key={`question-${r.id}`}
 								value={`${r.title} ${r.subtitle}`}
 								onSelect={() => {
-									setOmniOpen(false);
-									navigate(`/questions/edit/${r.id}`);
+									closeOmni();
+									setPreviewQuestionId(r.id);
 								}}
 							>
 								<Search className="mr-2 h-4 w-4" />
 								<div className="min-w-0 flex-1">
 									<div className="truncate">{r.title}</div>
-									{r.subtitle ? <div className="truncate text-xs text-muted-foreground">{r.subtitle}</div> : null}
+									{r.preview ? <div className="truncate text-xs text-muted-foreground">{r.preview}</div> : null}
 								</div>
+								<Button
+									variant="outline"
+									size="sm"
+									className="ml-2"
+									onClick={(e) => {
+										e.preventDefault();
+										e.stopPropagation();
+										closeOmni();
+										setPreviewQuestionId(r.id);
+									}}
+								>
+									View
+								</Button>
 							</CommandItem>
 						))}
 					</CommandGroup>
@@ -228,6 +347,14 @@ export function Layout({ children }: LayoutProps) {
 
           {/* Right: primary navigation and user info */}
           <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              className="h-10 px-4 bg-primary/90 border-0 text-primary-foreground hover:bg-primary shadow-sm"
+              onClick={openOmniAndFocus}
+            >
+              <Search className="h-4 w-4 mr-2" />
+              Search
+            </Button>
             {primaryNav.length > 0 ? (
               <nav className="flex items-center gap-1 rounded-full bg-black/10 px-1 md:px-2 py-1">
                 {primaryNav.map((item) => {
@@ -293,13 +420,7 @@ export function Layout({ children }: LayoutProps) {
                       })}
 
                       <DropdownMenuSeparator />
-                      <DropdownMenuItem onSelect={() => {
-                        setOmniOpen(true);
-                        window.setTimeout(() => {
-                          const input = document.querySelector<HTMLInputElement>('input.command-input');
-                          input?.focus();
-                        }, 0);
-                      }}>
+                      <DropdownMenuItem onSelect={openOmniAndFocus}>
                         <Search className="h-4 w-4 mr-2" />
                         Search
                       </DropdownMenuItem>

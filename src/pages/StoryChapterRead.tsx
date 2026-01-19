@@ -6,7 +6,7 @@ import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { toast } from 'sonner';
-import { getLockedBlankIds, submitStoryChapterAttempt } from '@/lib/stories';
+import { getLockedBlankIds, getStoryFeedbackActions, submitStoryChapterAttempt } from '@/lib/stories';
 import { useAuth } from '@/contexts/AuthContext';
 
 function parseStoryHtmlToParts(html: string): Array<{ kind: 'text'; value: string } | { kind: 'blank'; id: string; correct: string }> {
@@ -55,6 +55,10 @@ function assignmentLockKey(userId: string, chapterId: string) {
 	return `story:assignment_lock:${userId}:${chapterId}`;
 }
 
+function assignmentAttemptsKey(userId: string, chapterId: string) {
+	return `story:assignment_attempts_used:${userId}:${chapterId}`;
+}
+
 type Pending = { startedAt: number; blankAnswers: Record<string, string> };
 
 export default function StoryChapterRead() {
@@ -92,6 +96,11 @@ export default function StoryChapterRead() {
 		if (progress) return;
 		try {
 			localStorage.removeItem(assignmentLockKey(userId, chapterId));
+		} catch {
+			// ignore
+		}
+		try {
+			localStorage.removeItem(assignmentAttemptsKey(userId, chapterId));
 		} catch {
 			// ignore
 		}
@@ -249,7 +258,14 @@ export default function StoryChapterRead() {
 		return Math.round((correct / total) * 100);
 	})();
 
-	const canSeeAnswers = !!displayAttempt && ((blanksAccuracyPercent ?? 0) >= 75 || attemptsRemaining === 0);
+	const feedbackActions = displayAttempt
+		? getStoryFeedbackActions({
+			scorePercent: blanksAccuracyPercent ?? 0,
+			attemptsUsed: effectiveAttemptsUsed,
+			maxAttempts,
+			hasSeenAnswers: revealAnswers,
+		})
+		: null;
 
 	const onSubmit = async () => {
 		if (!userId || !chapter) return;
@@ -303,7 +319,7 @@ export default function StoryChapterRead() {
 	const onProceed = () => {
 		if (!courseId || !chapterId) return;
 		setSkipForfeit(true);
-		if (hasAssignment) {
+		if (hasAssignment && !isFinalized) {
 			try {
 				if (userId) localStorage.setItem(assignmentLockKey(userId, chapterId), '1');
 			} catch {
@@ -413,16 +429,14 @@ export default function StoryChapterRead() {
 					<div className="flex items-center gap-2 shrink-0">
 						{isChapterCompleted ? null : displayAttempt ? (
 							<>
-								{attemptsRemaining > 0 && !isFinalized && !revealAnswers && (blanksAccuracyPercent ?? 0) < 100 ? (
+								{feedbackActions?.showRetry ? (
 									<Button variant="outline" onClick={onRetry}>Retry</Button>
 								) : null}
-								{canSeeAnswers && !revealAnswers ? (
+								{feedbackActions?.showSeeAnswers && !revealAnswers ? (
 									<Button variant="outline" onClick={() => setRevealAnswers(true)}>See Answers</Button>
 								) : null}
-								{canSeeAnswers && revealAnswers && hasAssignment && !isFinalized ? (
-									<Button onClick={onProceed}>Proceed</Button>
-								) : canSeeAnswers && revealAnswers && !hasAssignment ? (
-									<Button onClick={onProceed}>Complete</Button>
+								{feedbackActions?.showNext ? (
+									<Button onClick={onProceed}>Next</Button>
 								) : null}
 							</>
 						) : (

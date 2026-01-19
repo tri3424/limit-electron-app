@@ -8,8 +8,16 @@ export type HybridSearchResult = {
 	id: string;
 	title: string;
 	subtitle: string;
+	preview: string;
 	score: number;
 };
+
+function firstWords(text: string, maxWords: number): string {
+	const s = String(text || '').trim();
+	if (!s) return '';
+	const tokens = s.split(/\s+/).filter(Boolean);
+	return tokens.slice(0, Math.max(0, maxWords)).join(' ');
+}
 
 function rrfMerge(params: {
 	fts: Array<{ key: string; rank: number }>;
@@ -185,6 +193,7 @@ export async function hybridSearch(queryRaw: string, opts?: { limit?: number }):
 				id,
 				title: row?.title || '',
 				subtitle: row?.subtitle || '',
+				preview: firstWords(row?.content || '', 5),
 				score,
 			};
 		})
