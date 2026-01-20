@@ -11,6 +11,7 @@ export type PracticeTopicId =
   | 'division'
   | 'fractions'
   | 'indices'
+  | 'logarithms'
   | 'permutation_combination'
   | 'polynomials'
   | 'simultaneous_equations'
@@ -98,6 +99,13 @@ export const PRACTICE_TOPICS: PracticeTopic[] = [
     id: 'indices',
     title: 'Indices',
     description: 'Use index laws to find the final exponent.',
+    enabled: true,
+    difficulties: ['easy', 'medium', 'hard'],
+  },
+  {
+    id: 'logarithms',
+    title: 'Logarithms',
+    description: 'Convert between logarithmic and exponential forms and evaluate logs.',
     enabled: true,
     difficulties: ['easy', 'medium', 'hard'],
   },

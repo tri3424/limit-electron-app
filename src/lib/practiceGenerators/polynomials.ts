@@ -43,7 +43,11 @@ function latexCoeff(n: number) {
 }
 
 function latexTerm(coeff: string, power: number) {
-  if (power === 0) return coeff || '1';
+  if (power === 0) {
+    if (!coeff) return '1';
+    if (coeff === '-') return '-1';
+    return coeff;
+  }
   if (power === 1) return `${coeff}x`;
   return `${coeff}x^{${power}}`;
 }

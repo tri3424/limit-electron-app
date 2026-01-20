@@ -5,6 +5,7 @@ import { generateGraphTrigonometryMcq } from '@/lib/practiceGraph/generateGraphT
 import { generateGraphUnitCircleMcq } from '@/lib/practiceGraph/generateGraphUnitCircle';
 import { generateDifferentiationQuestion } from '@/lib/practiceGenerators/differentiation';
 import { generateIntegrationQuestion } from '@/lib/practiceGenerators/integration';
+import { generateLogarithmsQuestion, type LogarithmsQuestion } from '@/lib/practiceGenerators/logarithms';
 import { generateCircularMeasureProblem } from '@/lib/practiceGenerators/circularMeasure';
 import { generateWordProblemQuestion, WordProblemQuestion, WordProblemVariantId } from '@/lib/practiceGenerators/wordProblems';
 import { generatePolynomialsQuestion } from '@/lib/practiceGenerators/polynomials';
@@ -53,6 +54,7 @@ export type PracticeTopicId =
   | 'division'
   | 'fractions'
   | 'indices'
+  | 'logarithms'
   | 'permutation_combination'
   | 'polynomials'
   | 'simultaneous_equations'
@@ -205,6 +207,7 @@ export type PracticeQuestion =
   | FractionsQuestion
   | SimultaneousQuestion
   | IndicesQuestion
+  | LogarithmsQuestion
   | PermutationCombinationPracticeQuestion
   | PolynomialsQuestion
   | FactorisationQuestion
@@ -615,6 +618,7 @@ export function generatePracticeQuestion(input: {
   seed: number;
   avoidVariantId?: string;
   variantWeights?: Record<string, number>;
+  answerKindByVariant?: Record<string, string>;
 }): PracticeQuestion {
   switch (input.topicId) {
     case 'clock_reading':
@@ -646,6 +650,13 @@ export function generatePracticeQuestion(input: {
         seed: input.seed,
         variantWeights: input.variantWeights,
       });
+    case 'logarithms':
+      return generateLogarithmsQuestion({
+        seed: input.seed,
+        difficulty: input.difficulty,
+        variantWeights: input.variantWeights,
+        answerKindByVariant: input.answerKindByVariant as any,
+      }) as any;
     case 'permutation_combination': {
       const q = generatePermutationCombinationQuestion({
         seed: input.seed,

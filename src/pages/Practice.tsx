@@ -40,6 +40,35 @@ const PRACTICE_VARIANTS: Partial<Record<PracticeTopicId, string[]>> = {
   clock_reading: ['read_time', 'end_time_ampm', 'end_time_24h', 'duration_hm', 'duration_minutes'],
   linear_equations: ['linear'],
   indices: ['mul', 'div', 'pow'],
+  logarithms: [
+    'exp_to_log',
+    'exp_to_log_const',
+    'exp_to_log_two_vars',
+    'exp_to_log_ab_c',
+    'single_log_sum',
+    'single_log_diff',
+    'single_log_power',
+    'single_log_coeff_sum',
+    'single_log_coeff_diff',
+    'single_log_const_plus',
+    'single_log_const_minus',
+    'single_log_then_simplify',
+    'solve_nested_log',
+    'log_to_exp_basic',
+    'log_to_exp_frac',
+    'log_to_exp_zero',
+    'log_to_exp_var_rhs',
+    'solve_log_basic',
+    'solve_log_linear',
+    'solve_log_zero',
+    'evaluate_decimal',
+    'evaluate_root',
+    'simplify_log_power',
+    'log_to_exp',
+    'solve_exp_3sf',
+    'evaluate_integer',
+    'evaluate_fraction',
+  ],
   fractions: ['simplify_fraction', 'add_sub_fractions', 'fraction_of_number', 'mixed_to_improper'],
   algebraic_factorisation: ['simple', 'x2', 'x3', 'x3_3term', 'gcf_binomial', 'gcf_quadratic'],
   simultaneous_equations: ['two_var', 'three_var'],
@@ -873,6 +902,7 @@ export default function Practice() {
   const generateNext = (seedValue: number) => {
     const freq = (settings as any)?.practiceFrequencies?.byUserKey?.[userKey] ?? null;
     const topicVariantWeights = (freq?.topicVariantWeights ?? {}) as Record<string, Record<string, number>>;
+    const topicVariantAnswerKinds = (freq?.topicVariantAnswerKinds ?? {}) as Record<string, Record<string, string>>;
     const mixedModuleItemWeights = (freq?.mixedModuleItemWeights ?? {}) as Record<string, Record<number, number>>;
 
     const adminFilterOverridesFrequencies = Boolean(isAdmin && activeTopicScope);
@@ -1080,6 +1110,7 @@ export default function Practice() {
                 seed,
                 avoidVariantId,
                 variantWeights: effectiveWeightsForTopic,
+                answerKindByVariant: topicVariantAnswerKinds?.[item.topicId],
               }),
             item.topicId === 'word_problems' ? acceptWordProblem : undefined,
             { strict: strictTopic }
@@ -1170,6 +1201,7 @@ export default function Practice() {
               seed,
               avoidVariantId,
               variantWeights: effectiveWeightsForTopic,
+              answerKindByVariant: topicVariantAnswerKinds?.[item.topicId],
             }),
           item.topicId === 'word_problems' ? acceptWordProblem : undefined,
           { strict: strictMixed || strictTopic }
@@ -1227,6 +1259,7 @@ export default function Practice() {
           seed,
           avoidVariantId,
           variantWeights: effectiveWeightsForTopic,
+          answerKindByVariant: topicVariantAnswerKinds?.[topicId],
         }),
       topicId === 'word_problems' ? acceptWordProblem : undefined,
       { strict }
@@ -1892,7 +1925,7 @@ export default function Practice() {
     const fromBasic = parseFraction(cleaned);
     if (fromBasic) return fromBasic;
 
-    const m = cleaned.match(/^\\frac\{(-?\d+)\}\{(\d+)\}$/);
+    const m = cleaned.match(/^\\(?:frac|dfrac|tfrac)\{(-?\d+)\}\{(\d+)\}$/);
     if (m) {
       const n = Number(m[1]);
       const d = Number(m[2]);
@@ -1900,10 +1933,19 @@ export default function Practice() {
       return { n, d };
     }
 
-    const m2 = cleaned.match(/^-\\frac\{(\d+)\}\{(\d+)\}$/);
+    const m2 = cleaned.match(/^-\\(?:frac|dfrac|tfrac)\{(\d+)\}\{(\d+)\}$/);
     if (m2) {
       const n = -Number(m2[1]);
       const d = Number(m2[2]);
+      if (!Number.isFinite(n) || !Number.isFinite(d) || d === 0) return null;
+      return { n, d };
+    }
+
+    // Support compact forms like \frac12 or -\frac12
+    const m3 = cleaned.match(/^\\(?:frac|dfrac|tfrac)(-?\d+)(\d+)$/);
+    if (m3) {
+      const n = Number(m3[1]);
+      const d = Number(m3[2]);
       if (!Number.isFinite(n) || !Number.isFinite(d) || d === 0) return null;
       return { n, d };
     }
@@ -2139,6 +2181,103 @@ export default function Practice() {
           if (q.expectedNormalized.includes(c)) return true;
         }
         return false;
+      }
+      case 'logarithms': {
+        const lg = q as any;
+        const variantId = String(lg.variantId ?? '');
+        const raw1 = String(answer1 ?? '').trim();
+        const expectedNum = (typeof lg.expectedNumber === 'number' && Number.isFinite(lg.expectedNumber))
+          ? Number(lg.expectedNumber)
+          : null;
+
+        if (expectedNum !== null && raw1) {
+          const n = Number(raw1);
+          if (!Number.isNaN(n) && Math.abs(n - expectedNum) < 1e-9) return true;
+        }
+
+        const isConvertToLog = [
+          'exp_to_log',
+          'exp_to_log_const',
+          'exp_to_log_two_vars',
+          'exp_to_log_ab_c',
+        ].includes(variantId);
+
+				const isConvertToExp = [
+					'log_to_exp_basic',
+					'log_to_exp_frac',
+					'log_to_exp_zero',
+					'log_to_exp_var_rhs',
+					'log_to_exp',
+				].includes(variantId);
+
+        if (isConvertToLog && Array.isArray(lg.expectedParts) && lg.expectedParts.length === 3) {
+          const normalize = (raw: string) => String(raw ?? '')
+            .trim()
+            .replace(/[−–]/g, '-')
+            .replace(/\s+/g, '')
+            .toLowerCase();
+          const inputs = [answer1, answer2, answer3].map((x) => normalize(String(x ?? '')));
+          const expected = (lg.expectedParts as any[]).map((x) => normalize(String(x ?? '')));
+          if (inputs.some((s) => !s)) return false;
+          return inputs[0] === expected[0] && inputs[1] === expected[1] && inputs[2] === expected[2];
+        }
+
+				if (isConvertToExp && Array.isArray(lg.expectedParts) && lg.expectedParts.length === 3) {
+					const normalize = (raw: string) => String(raw ?? '')
+						.trim()
+						.replace(/[−–]/g, '-')
+						.replace(/\s+/g, '')
+						.replace(/\\left/g, '')
+						.replace(/\\right/g, '')
+						.replace(/[()]/g, '')
+						.replace(/\\(?:frac|dfrac|tfrac)\{([^}]*)\}\{([^}]*)\}/g, '$1/$2')
+						.replace(/\\(?:frac|dfrac|tfrac)(-?\d+)(\d+)/g, '$1/$2')
+						.replace(/\{([^}]*)\}/g, '$1')
+						.toLowerCase();
+					const inputs = [answer1, answer2, answer3].map((x) => normalize(String(x ?? '')));
+					const expected = (lg.expectedParts as any[]).map((x) => normalize(String(x ?? '')));
+					if (inputs.some((s) => !s)) return false;
+					return inputs[0] === expected[0] && inputs[1] === expected[1] && inputs[2] === expected[2];
+				}
+
+        if (lg.answerKind === 'integer') {
+          const raw = raw1;
+          if (!raw) return false;
+          if (!/^-?\d+$/.test(raw)) return false;
+          return expectedNum !== null ? Number(raw) === expectedNum : Number(raw) === Number(lg.expectedNumber);
+        }
+
+        if (lg.answerKind === 'decimal_3sf') {
+          const raw = raw1;
+          if (!raw) return false;
+          const n = Number(raw);
+          if (Number.isNaN(n)) return false;
+          return expectedNum !== null
+            ? Math.abs(n - expectedNum) < 1e-9
+            : Math.abs(n - Number(lg.expectedNumber)) < 1e-9;
+        }
+
+        // text fallback: compare normalized latex-ish string (be tolerant to optional parentheses)
+        const expectedFrac = parseFractionFromMathRaw(String(lg.expectedLatex ?? ''));
+        const userFrac = parseFractionFromMathRaw(String(answer1 ?? ''));
+        if (expectedFrac && userFrac) return fractionsEqual(expectedFrac, userFrac);
+
+        const normLatex = (s: string) => String(s ?? '')
+          .trim()
+          .replace(/[−–]/g, '-')
+          .replace(/\s+/g, '')
+          .replace(/\\left/g, '')
+          .replace(/\\right/g, '')
+          .replace(/[()]/g, '')
+          .replace(/\\(?:frac|dfrac|tfrac)\{([^}]*)\}\{([^}]*)\}/g, '$1/$2')
+          .replace(/\\(?:frac|dfrac|tfrac)(-?\d+)(\d+)/g, '$1/$2')
+          .replace(/\{([^}]*)\}/g, '$1')
+          .replace(/\\cdot/g, '')
+          .replace(/\*/g, '')
+          .toLowerCase();
+        const normalized = normLatex(String(answer1 ?? ''));
+        const expectedLatex = normLatex(String(lg.expectedLatex ?? ''));
+        return normalized.length > 0 && normalized === expectedLatex;
       }
       case 'calculus': {
         const cq = q as any;
@@ -3595,10 +3734,83 @@ export default function Practice() {
                         </div>
                       );
                     })()
-                  ) : (
-                    (question as PracticeQuestion).kind === 'word_problem'
-                      && (question as any).answerKind === 'rational'
-                      && !!(question as any).expectedFraction ? (
+                  					) : (question as any).kind === 'logarithms'
+					&& ['log_to_exp_basic', 'log_to_exp_frac', 'log_to_exp_zero', 'log_to_exp_var_rhs', 'log_to_exp'].includes(String((question as any).variantId)) ? (
+					<div className="w-full flex justify-center">
+						<div className="flex items-baseline gap-4">
+							<div className="flex items-start">
+								<Input
+									value={answer1}
+									inputMode="text"
+									onChange={(e) => setAnswer1(e.target.value)}
+									disabled={submitted}
+									className="h-12 w-16 text-3xl font-normal text-center py-1 rounded-none"
+									aria-label="Base"
+								/>
+								<Input
+									value={answer2}
+									inputMode="text"
+									onChange={(e) => setAnswer2(e.target.value)}
+									disabled={submitted}
+									className="h-9 w-16 text-xl font-normal text-center py-0.5 rounded-none ml-2 -translate-y-3"
+									aria-label="Exponent"
+								/>
+							</div>
+							<span className="text-3xl font-semibold select-none">=</span>
+							<Input
+								value={answer3}
+								inputMode="text"
+								onChange={(e) => setAnswer3(e.target.value)}
+								disabled={submitted}
+								className="h-12 w-28 text-3xl font-normal text-center py-1 rounded-none"
+								aria-label="Right-hand side"
+							/>
+						</div>
+					</div>
+				) : (question as any).kind === 'logarithms'
+					&& ['exp_to_log', 'exp_to_log_const', 'exp_to_log_two_vars', 'exp_to_log_ab_c'].includes(String((question as any).variantId)) ? (
+					<div className="w-full flex justify-center">
+						<div className="flex items-baseline gap-4">
+							<span className="text-4xl font-semibold select-none leading-none">
+								<Katex latex={String.raw`\log`} displayMode={false} />
+							</span>
+							<Input
+								value={answer1}
+								inputMode="text"
+								onChange={(e) => setAnswer1(e.target.value)}
+								disabled={submitted}
+								className="h-9 w-16 text-xl font-normal text-center py-0.5 align-baseline relative -ml-1 translate-y-3 rounded-none"
+								aria-label="Log base"
+							/>
+							<Input
+								value={answer2}
+								inputMode="text"
+								onChange={(e) => setAnswer2(e.target.value)}
+								disabled={submitted}
+								className="h-12 w-40 text-3xl font-normal text-center py-1 rounded-none"
+								aria-label="Log argument"
+							/>
+							<span className="text-3xl font-semibold select-none">=</span>
+							<Input
+								value={answer3}
+								inputMode="text"
+								onChange={(e) => setAnswer3(e.target.value)}
+								disabled={submitted}
+								className="h-12 w-28 text-3xl font-normal text-center py-1 rounded-none"
+								aria-label="Result"
+							/>
+						</div>
+					</div>
+				) : (question as any).kind === 'logarithms' && String((question as any).answerKind) === 'text' ? (
+					<MathLiveInput
+						value={answer1}
+						onChange={setAnswer1}
+						disabled={submitted}
+						className={'text-2xl font-normal text-left tk-expr-input'}
+					/>
+				) : (question as PracticeQuestion).kind === 'word_problem'
+						&& (question as any).answerKind === 'rational'
+						&& !!(question as any).expectedFraction ? (
                       <div className="w-full flex justify-center">
                         <div className="w-56">
                           <Input
@@ -3668,7 +3880,6 @@ export default function Practice() {
                       disabled={submitted}
                       className="h-12 text-2xl font-normal text-center py-1"
                     />
-                    )
                   )}
                 </div>
               )}
@@ -3895,17 +4106,17 @@ export default function Practice() {
                           <div className="tk-wp-expl-text text-lg leading-relaxed text-foreground">
                             {(() => {
                               const s = String((question as GraphPracticeQuestion).katexExplanation.commonMistake!.text ?? '');
-                              const hasLatex = /\\frac\{|\^\{|\^\d|_\{|\\int\b|\\cdot\b/.test(s);
+                              const hasLatex = /\\frac\{|\\sqrt\b|\^\{|\^\d|_\{|\\log\b|\\log_\{|\\int\b|\\cdot\b/.test(s);
                               if (!hasLatex) return s;
 
                               const parts = s.split(
-                                /(\\frac\{[^}]+\}\{[^}]+\}|\\cdot|\\int\b|-?\d*x\^\{\d+\}|x\^\{\d+\}|-?\d*x\^\d+|x\^\d+)/g
+                                /(\\frac\{[^}]+\}\{[^}]+\}|\\sqrt\{[^}]+\}|\\sqrt\[[^\]]+\]\{[^}]+\}|\\cdot|\\log_\{[^}]+\}\([^)]*\)|\\log_\{[^}]+\}|\\log\b|\\int\b|-?\d*x\^\{\d+\}|x\^\{\d+\}|-?\d*x\^\d+|x\^\d+)/g
                               );
                               return (
                                 <span>
                                   {parts.filter((p) => p.length > 0).map((p, i) => {
                                     const isMath =
-                                      /^(\\frac\{[^}]+\}\{[^}]+\}|\\cdot|\\int\b|-?\d*x\^\{\d+\}|x\^\{\d+\}|-?\d*x\^\d+|x\^\d+)$/.test(p);
+                                      /^(\\frac\{[^}]+\}\{[^}]+\}|\\sqrt\{[^}]+\}|\\sqrt\[[^\]]+\]\{[^}]+\}|\\cdot|\\log_\{[^}]+\}\([^)]*\)|\\log_\{[^}]+\}|\\log\b|\\int\b|-?\d*x\^\{\d+\}|x\^\{\d+\}|-?\d*x\^\d+|x\^\d+)$/.test(p);
                                     return isMath ? <Katex key={i} latex={p} /> : <span key={i}>{p}</span>;
                                   })}
                                 </span>

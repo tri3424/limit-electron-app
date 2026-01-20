@@ -383,6 +383,7 @@ export interface AppSettings {
       string,
       {
         topicVariantWeights?: Partial<Record<import('@/lib/practiceTopics').PracticeTopicId, Record<string, number>>>;
+        topicVariantAnswerKinds?: Partial<Record<import('@/lib/practiceTopics').PracticeTopicId, Record<string, string>>>;
         mixedModuleItemWeights?: Record<string, Record<number, number>>;
       }
     >;

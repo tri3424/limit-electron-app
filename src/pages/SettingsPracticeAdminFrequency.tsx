@@ -128,6 +128,41 @@ export default function SettingsPracticeAdminFrequency() {
           };
         }
 
+        if (t.id === 'logarithms') {
+          return {
+            ...base,
+            variants: [
+              { key: 'exp_to_log', label: 'Convert exponential -> logarithmic', defaultValue: 25 },
+              { key: 'exp_to_log_const', label: 'Convert exponential -> logarithmic (constant exponent)', defaultValue: 15 },
+              { key: 'exp_to_log_two_vars', label: 'Convert x^y = c -> log_x(c) = y', defaultValue: 12 },
+              { key: 'exp_to_log_ab_c', label: 'Convert a^b = c -> log_a(c) = b', defaultValue: 8 },
+              { key: 'single_log_sum', label: 'Single log (sum rule)', defaultValue: 14 },
+              { key: 'single_log_diff', label: 'Single log (difference rule)', defaultValue: 14 },
+              { key: 'single_log_power', label: 'Single log (power rule)', defaultValue: 12 },
+              { key: 'single_log_coeff_sum', label: 'Single log (coefficients, sum)', defaultValue: 10 },
+              { key: 'single_log_coeff_diff', label: 'Single log (coefficients, difference)', defaultValue: 10 },
+              { key: 'single_log_const_plus', label: 'Single log (constant ± log, plus)', defaultValue: 8 },
+              { key: 'single_log_const_minus', label: 'Single log (constant ± log, minus)', defaultValue: 8 },
+              { key: 'single_log_then_simplify', label: 'Single log then simplify', defaultValue: 10 },
+              { key: 'solve_nested_log', label: 'Solve nested logs', defaultValue: 10 },
+              { key: 'log_to_exp_basic', label: 'Convert log -> exp (basic)', defaultValue: 16 },
+              { key: 'log_to_exp_frac', label: 'Convert log -> exp (fraction exponent)', defaultValue: 10 },
+              { key: 'log_to_exp_zero', label: 'Convert log -> exp (log(1)=0)', defaultValue: 8 },
+              { key: 'log_to_exp_var_rhs', label: 'Convert log -> exp (variable RHS)', defaultValue: 8 },
+              { key: 'solve_log_basic', label: 'Solve log_a(x)=k', defaultValue: 16 },
+              { key: 'solve_log_linear', label: 'Solve log_a(mx+c)=k', defaultValue: 14 },
+              { key: 'solve_log_zero', label: 'Solve log_a(x)=0', defaultValue: 10 },
+              { key: 'evaluate_decimal', label: 'Evaluate log (decimal/fraction like 0.125)', defaultValue: 10 },
+              { key: 'evaluate_root', label: 'Evaluate log (root -> fraction exponent)', defaultValue: 10 },
+              { key: 'simplify_log_power', label: 'Simplify log_a(a^k)', defaultValue: 14 },
+              { key: 'solve_exp_3sf', label: 'Solve a^x = b (3 s.f.)', defaultValue: 20 },
+              { key: 'log_to_exp', label: 'Convert logarithmic -> exponential', defaultValue: 20 },
+              { key: 'evaluate_integer', label: 'Evaluate log (integer)', defaultValue: 25 },
+              { key: 'evaluate_fraction', label: 'Evaluate log (fraction input)', defaultValue: 10 },
+            ],
+          };
+        }
+
         if (t.id === 'clock_reading') {
           return {
             ...base,
@@ -249,6 +284,7 @@ export default function SettingsPracticeAdminFrequency() {
   const pf = (localSettings as any)?.practiceFrequencies?.byUserKey ?? {};
   const userCfg = pf[freqUserKey] ?? {};
   const tvw = (userCfg.topicVariantWeights ?? {}) as Record<string, Record<string, number>>;
+  const tvak = (userCfg.topicVariantAnswerKinds ?? {}) as Record<string, Record<string, string>>;
   const mmwAll = (userCfg.mixedModuleItemWeights ?? {}) as Record<string, Record<number, number>>;
 
   const setVariantWeight = async (topicId: string, variantKey: string, value: number) => {
@@ -259,6 +295,18 @@ export default function SettingsPracticeAdminFrequency() {
     nextTopic[variantKey] = value;
     (nextTvw as any)[topicId] = nextTopic;
     nextUser.topicVariantWeights = nextTvw;
+    next[freqUserKey] = nextUser;
+    await updatePracticeFrequencies(next);
+  };
+
+  const setVariantAnswerKind = async (topicId: string, variantKey: string, value: string) => {
+    const next = { ...pf };
+    const nextUser = { ...(next[freqUserKey] ?? {}) };
+    const nextTvak = { ...(nextUser.topicVariantAnswerKinds ?? {}) };
+    const nextTopic = { ...((nextTvak as any)[topicId] ?? {}) };
+    nextTopic[variantKey] = value;
+    (nextTvak as any)[topicId] = nextTopic;
+    nextUser.topicVariantAnswerKinds = nextTvak;
     next[freqUserKey] = nextUser;
     await updatePracticeFrequencies(next);
   };
@@ -338,15 +386,18 @@ export default function SettingsPracticeAdminFrequency() {
               <AccordionTrigger>{t.label}</AccordionTrigger>
               <AccordionContent>
                 <div className="space-y-4">
-                  {t.variants.map((v) => {
-                    const k = `${t.topicId}:${v.key}`;
-                    const persisted = Number((tvw as any)?.[t.topicId]?.[v.key] ?? v.defaultValue);
-                    const current = typeof freqDraftWeights[k] === 'number' ? freqDraftWeights[k]! : persisted;
+                  {(t.variants ?? []).map((v) => {
+                    const persisted = Number((tvw as any)?.[t.topicId]?.[v.key] ?? v.defaultValue ?? 0);
+                    const draftKey = `${t.topicId}:${v.key}`;
+                    const current = typeof (freqDraftWeights as any)[draftKey] === 'number'
+                      ? Number((freqDraftWeights as any)[draftKey])
+                      : persisted;
+                    const answerKind = String((tvak as any)?.[t.topicId]?.[v.key] ?? '');
                     return (
                       <div key={v.key} className="space-y-2">
                         <div className="flex items-center justify-between gap-3">
-                          <div className="text-sm text-foreground">{v.label}</div>
-                          <div className="text-xs text-muted-foreground tabular-nums">{Math.round(current)}</div>
+                          <div className="text-sm text-muted-foreground truncate">{v.label}</div>
+                          <div className="text-sm text-muted-foreground tabular-nums">{Math.round(current)}</div>
                         </div>
                         <Slider
                           value={[current]}
@@ -355,18 +406,40 @@ export default function SettingsPracticeAdminFrequency() {
                           step={1}
                           onValueChange={(vals) => {
                             const nextVal = Array.isArray(vals) ? Number(vals[0] ?? 0) : 0;
-                            setFreqDraftWeights((m) => ({ ...m, [k]: nextVal }));
+                            setFreqDraftWeights((m) => ({ ...m, [draftKey]: nextVal }));
                           }}
                           onValueCommit={(vals) => {
                             const nextVal = Array.isArray(vals) ? Number(vals[0] ?? 0) : 0;
                             setFreqDraftWeights((m) => {
                               const next = { ...m };
-                              delete next[k];
+                              delete (next as any)[draftKey];
                               return next;
                             });
                             void setVariantWeight(t.topicId, v.key, nextVal);
                           }}
                         />
+
+                        {t.topicId === 'logarithms' ? (
+                          <div className="flex items-center justify-between gap-3">
+                            <div className="text-sm text-muted-foreground">Answer style</div>
+                            <Select
+                              value={answerKind || '__default__'}
+                              onValueChange={(val) => {
+                                void setVariantAnswerKind(t.topicId, v.key, val === '__default__' ? '' : val);
+                              }}
+                            >
+                              <SelectTrigger className="w-40">
+                                <SelectValue placeholder="Default" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="__default__">Default</SelectItem>
+                                <SelectItem value="integer">Integer</SelectItem>
+                                <SelectItem value="rational">Fraction</SelectItem>
+                                <SelectItem value="decimal_3sf">Decimal</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
+                        ) : null}
                       </div>
                     );
                   })}
