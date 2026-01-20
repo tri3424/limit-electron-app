@@ -3,7 +3,7 @@ import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { v4 as uuidv4 } from 'uuid';
 import { ArrowLeft, Plus, X, Save, Sparkles, Upload, Loader2 } from 'lucide-react';
-import { db, Question, normalizeGlossaryMeaning, normalizeGlossaryWord } from '@/lib/db';
+import { db, Question } from '@/lib/db';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -17,7 +17,6 @@ import { toast } from 'sonner';
 import RichTextEditor from '@/components/RichTextEditor';
 import MathLiveInput from '@/components/MathLiveInput';
 import { invalidateTagModelCache } from '@/lib/tagLearning';
-import { syncQuestionGlossary } from '@/lib/glossary';
 import { recognizeImageText, type OfflineOcrProgress } from '@/lib/offlineOcr';
 import { parseScreenshotOcrToDrafts, parseScreenshotOcrToDraftsFromTesseract } from '@/lib/screenshotQuestionParser';
 import { ocrTextToRichHtml } from '@/lib/htmlDraft';
@@ -133,7 +132,6 @@ export default function CreateQuestion() {
   const [matchingHeading, setMatchingHeading] = useState('');
   const [matchingPairs, setMatchingPairs] = useState<{ leftId: string; leftText: string; rightId: string; rightText: string }[]>([]);
   const [explanation, setExplanation] = useState('');
-  const [glossaryEntries, setGlossaryEntries] = useState<Array<{ id: string; word: string; meaning: string }>>([]);
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [newTag, setNewTag] = useState('');
   const [selectTagValue, setSelectTagValue] = useState<string | undefined>(undefined);
@@ -197,20 +195,6 @@ export default function CreateQuestion() {
   }, [difficultyLevel]);
 
   const allTags = useLiveQuery(() => db.tags.toArray());
-  const globalGlossaryEntries = useLiveQuery(() => db.globalGlossary.toArray(), [], []);
-  const globalGlossaryMap = useMemo(() => {
-    const map = new Map<string, { word: string; meanings: string[] }>();
-    if (!globalGlossaryEntries) return map;
-    for (const entry of globalGlossaryEntries) {
-      if (!entry.word || !entry.meaning) continue;
-      const normalized = normalizeGlossaryWord(entry.word);
-      if (!normalized) continue;
-      const bucket = map.get(normalized) || { word: entry.word, meanings: [] };
-      bucket.meanings.push(entry.meaning);
-      map.set(normalized, bucket);
-    }
-    return map;
-  }, [globalGlossaryEntries]);
 
   // When editing, wait for existingQuestion to load and then hydrate form once
   useEffect(() => {
@@ -237,7 +221,6 @@ export default function CreateQuestion() {
     setMatchingHeading(existingQuestion.matching?.headingHtml || '');
     setMatchingPairs(existingQuestion.matching?.pairs || []);
     setExplanation(existingQuestion.explanation || '');
-    setGlossaryEntries(existingQuestion.glossary || []);
     setSelectedTags(existingQuestion.tags || []);
     const restoredLevel =
       existingQuestion.metadata?.difficultyLevel ??
@@ -293,22 +276,8 @@ export default function CreateQuestion() {
     }
   };
 
-  const handleAddGlossaryEntry = () => {
-    setGlossaryEntries(prev => [...prev, { id: uuidv4(), word: '', meaning: '' }]);
-  };
-
-  const handleGlossaryChange = (id: string, field: 'word' | 'meaning', value: string) => {
-    setGlossaryEntries(prev =>
-      prev.map(entry => (entry.id === id ? { ...entry, [field]: value } : entry))
-    );
-  };
-
   const handleDifficultyLevelChange = (value: number) => {
     setDifficultyLevel(value);
-  };
-
-  const handleRemoveGlossaryEntry = (id: string) => {
-    setGlossaryEntries(prev => prev.filter(entry => entry.id !== id));
   };
 
   const handleRemoveTag = (tag: string) => {
@@ -390,13 +359,6 @@ export default function CreateQuestion() {
       createdAt: existingQuestion?.metadata?.createdAt || now,
       updatedAt: now,
     };
-    const sanitizedGlossary = glossaryEntries
-      .map(entry => ({
-        id: entry.id,
-        word: entry.word.trim(),
-        meaning: entry.meaning.trim(),
-      }))
-      .filter(entry => entry.word && entry.meaning);
 
     const questionData: Question = {
       id: questionId,
@@ -411,7 +373,6 @@ export default function CreateQuestion() {
       tags: selectedTags,
       modules: existingQuestion?.modules || [],
       explanation: explanation.trim() || undefined,
-      glossary: sanitizedGlossary.length ? sanitizedGlossary : undefined,
       metadata: {
         ...metadataPayload,
       },
@@ -429,7 +390,6 @@ export default function CreateQuestion() {
           matching: questionData.matching,
           tags: questionData.tags,
           explanation: questionData.explanation,
-          glossary: questionData.glossary,
           metadata: {
             ...(existingQuestion?.metadata || {}),
             ...metadataPayload,
@@ -446,7 +406,6 @@ export default function CreateQuestion() {
           toast.success(`Auto-added to ${result.assigned.length} module${result.assigned.length > 1 ? 's' : ''}.`);
         }
       }
-      await syncQuestionGlossary(questionId, questionData.glossary || []);
       invalidateTagModelCache();
       navigate('/questions', { state: { scrollToQuestionId: questionId } });
     } catch (error) {
@@ -825,114 +784,6 @@ export default function CreateQuestion() {
               className="tk-explanation-editor"
             />
           </div>
-        </Card>
-
-        {/* Glossary */}
-        <Card className="p-6 space-y-4">
-          <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-            <div>
-              <Label className="text-base font-semibold">Glossary (Optional)</Label>
-              <p className="text-sm text-muted-foreground">
-                Add key words and their meanings. Learners can double-click a word while viewing the question to see its definition.
-              </p>
-            </div>
-            <Button type="button" variant="outline" onClick={handleAddGlossaryEntry}>
-              <Plus className="h-4 w-4 mr-2" />
-              Add Word
-            </Button>
-          </div>
-
-          {glossaryEntries.length === 0 ? (
-            <p className="text-sm text-muted-foreground border border-dashed rounded-md p-4 text-center">
-              No glossary entries yet. Click &ldquo;Add Word&rdquo; to include contextual meanings.
-            </p>
-          ) : (
-            <div className="space-y-4">
-              {glossaryEntries.map((entry) => {
-                const normalizedWord = normalizeGlossaryWord(entry.word);
-                const existingWordData = normalizedWord ? globalGlossaryMap.get(normalizedWord) : undefined;
-                const existingMeanings = existingWordData?.meanings || [];
-                const normalizedMeaning = normalizeGlossaryMeaning(entry.meaning);
-                const duplicateMeaning =
-                  normalizedMeaning &&
-                  existingMeanings.some(
-                    (meaning) => normalizeGlossaryMeaning(meaning) === normalizedMeaning
-                  );
-
-                return (
-                  <div key={entry.id} className="rounded-lg border p-4 space-y-3 bg-muted/10">
-                    <div className="flex flex-col gap-3 md:flex-row md:items-start">
-                      <div className="flex-1 space-y-2">
-                        <div>
-                          <Label className="text-xs font-semibold uppercase text-muted-foreground">Word or phrase</Label>
-                          <Input
-                            value={entry.word}
-                            onChange={(e) => handleGlossaryChange(entry.id, 'word', e.target.value)}
-                            placeholder="e.g., Photosynthesis"
-                          />
-                        </div>
-                        {existingWordData && existingWordData.meanings.length > 0 && (
-                          <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                            <Sparkles className="h-3 w-3 text-primary" />
-                            <span>
-                              Already defined in {existingWordData.meanings.length} other place{existingWordData.meanings.length > 1 ? 's' : ''}.
-                            </span>
-                          </div>
-                        )}
-                      </div>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon"
-                        className="self-start text-muted-foreground hover:text-destructive"
-                        onClick={() => handleRemoveGlossaryEntry(entry.id)}
-                        aria-label="Remove glossary entry"
-                      >
-                        <X className="h-4 w-4" />
-                      </Button>
-                    </div>
-                    <div className="space-y-2">
-                      <div>
-                        <Label className="text-xs font-semibold uppercase text-muted-foreground">Meaning</Label>
-                        <Textarea
-                          value={entry.meaning}
-                          onChange={(e) => handleGlossaryChange(entry.id, 'meaning', e.target.value)}
-                          placeholder="Provide a concise explanation or translation..."
-                          rows={3}
-                        />
-                      </div>
-                      {existingWordData && existingWordData.meanings.length > 0 && (
-                        <div className="rounded-md border border-dashed p-3 bg-background/70 text-xs text-muted-foreground space-y-1">
-                          <div className="font-semibold text-foreground text-sm">
-                            Existing meaning{existingWordData.meanings.length > 1 ? 's' : ''} for &ldquo;{existingWordData.word}&rdquo;
-                          </div>
-                          <ul className="list-disc pl-4 space-y-1">
-                            {existingWordData.meanings.map((meaning, idx) => {
-                              const isDuplicate = normalizeGlossaryMeaning(meaning) === normalizedMeaning;
-                              return (
-                                <li
-                                  key={`${meaning}-${idx}`}
-                                  className={isDuplicate ? 'text-destructive font-semibold' : undefined}
-                                >
-                                  {meaning}
-                                  {isDuplicate && ' (duplicate)'}
-                                </li>
-                              );
-                            })}
-                          </ul>
-                        </div>
-                      )}
-                      {duplicateMeaning && (
-                        <p className="text-xs text-destructive">
-                          This meaning already exists for the selected word. Consider keeping a single version to avoid duplicates.
-                        </p>
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
         </Card>
 
         {/* Difficulty & Tags */}

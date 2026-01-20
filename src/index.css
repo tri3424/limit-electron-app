@@ -236,6 +236,14 @@ All colors MUST be HSL.
   unicode-range: U+0980-09FF;
 }
 
+@font-face {
+  font-family: 'Rubik Doodle Shadow';
+  src: url('/RubikDoodleShadow-Regular.ttf') format('truetype');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
 @layer base {
   :root {
     /* Green color scheme matching Instructions and Start buttons */
@@ -419,6 +427,235 @@ All colors MUST be HSL.
     @apply max-w-full break-words;
     overflow-wrap: anywhere;
     word-break: break-word;
+  }
+
+  .tk-logo-font {
+    font-family: 'Rubik Doodle Shadow', ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+      'Segoe UI', Roboto, Helvetica, Arial, 'Apple Color Emoji', 'Segoe UI Emoji';
+    font-weight: 400;
+  }
+
+  .tk-logo-interactive {
+    display: inline-flex;
+    align-items: baseline;
+    position: relative;
+    overflow: hidden;
+    translate: 0 0;
+    transform-origin: center;
+    transition:
+      transform 220ms cubic-bezier(0.2, 0.9, 0.2, 1.2),
+      filter 240ms ease,
+      text-shadow 240ms ease;
+    will-change: transform, filter;
+    animation: tk-logo-float 2.8s ease-in-out infinite;
+  }
+
+  @keyframes tk-logo-float {
+    0%,
+    100% {
+      translate: 0 0;
+    }
+    50% {
+      translate: 0 -1px;
+    }
+  }
+
+  .tk-logo-interactive > span {
+    transition: transform 180ms ease, filter 200ms ease, text-shadow 200ms ease;
+    will-change: transform;
+  }
+
+  @keyframes tk-logo-letter-pop {
+    0% {
+      transform: translateY(0px) rotate(0deg) scale(1);
+    }
+    45% {
+      transform: translateY(-2px) rotate(var(--tk-rot, 0deg)) scale(1.05);
+    }
+    100% {
+      transform: translateY(-1px) rotate(calc(var(--tk-rot, 0deg) * 0.35)) scale(1.02);
+    }
+  }
+
+  .tk-logo-interactive:hover {
+    animation-play-state: paused;
+    transform: translateY(-2px) scale(1.045);
+    filter: drop-shadow(0 14px 24px rgba(0, 0, 0, 0.22));
+    text-shadow:
+      0 3px 14px rgba(0, 0, 0, 0.3),
+      0 0 18px rgba(255, 255, 255, 0.12);
+  }
+
+  .tk-logo-interactive:hover > span {
+    text-shadow: 0 0 14px rgba(255, 255, 255, 0.12);
+    animation: tk-logo-letter-pop 320ms cubic-bezier(0.2, 0.9, 0.2, 1.2) both;
+  }
+
+  .tk-logo-interactive:hover > span:nth-child(1) {
+    --tk-rot: -2deg;
+    animation-delay: 0ms;
+  }
+
+  .tk-logo-interactive:hover > span:nth-child(2) {
+    --tk-rot: 2deg;
+    animation-delay: 25ms;
+  }
+
+  .tk-logo-interactive:hover > span:nth-child(3) {
+    --tk-rot: -1deg;
+    animation-delay: 50ms;
+  }
+
+  .tk-logo-interactive:hover > span:nth-child(4) {
+    --tk-rot: 1deg;
+    animation-delay: 75ms;
+  }
+
+  .tk-logo-interactive:hover > span:nth-child(5) {
+    --tk-rot: -1deg;
+    animation-delay: 100ms;
+  }
+
+  .tk-logo-interactive:hover > span:nth-child(6) {
+    --tk-rot: 1deg;
+    animation-delay: 125ms;
+  }
+
+  .tk-logo-interactive:hover > span:nth-child(7) {
+    --tk-rot: -2deg;
+    animation-delay: 150ms;
+  }
+
+  .tk-logo-interactive:active {
+    animation-play-state: paused;
+    transform: translateY(-1px) scale(1.02);
+    filter: drop-shadow(0 10px 16px rgba(0, 0, 0, 0.18));
+  }
+
+  .tk-app-icon {
+    width: 28px;
+    height: 28px;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    grid-template-rows: 1fr 1fr;
+    gap: 2px;
+    padding: 0px;
+    border-radius: 4px;
+    background: transparent;
+    border: none;
+    box-shadow: none;
+    transition: transform 180ms ease;
+    will-change: transform;
+    overflow: hidden;
+    translate: 0 0;
+  }
+
+  @media (min-width: 768px) {
+    .tk-app-icon {
+      width: 32px;
+      height: 32px;
+    }
+  }
+
+  .tk-app-icon-tile {
+    border-radius: 2px;
+    box-shadow: none;
+    display: grid;
+    place-items: center;
+    font-weight: 900;
+    font-size: 14px;
+    line-height: 1;
+    color: rgba(15, 23, 42, 0.95);
+    transform: translate3d(var(--tk-x, 0px), var(--tk-y, 0px), 0);
+    will-change: transform;
+    animation: tk-app-icon-intro 520ms cubic-bezier(0.2, 0.9, 0.2, 1.2) both;
+  }
+
+  .tk-app-icon-tile-1 {
+    background: #22c55e;
+    --tk-x: -5px;
+    --tk-y: -5px;
+    animation-delay: 0ms;
+  }
+  .tk-app-icon-tile-2 {
+    background: #fbbf24;
+    --tk-x: 5px;
+    --tk-y: -5px;
+    animation-delay: 40ms;
+  }
+  .tk-app-icon-tile-3 {
+    background: #ef4444;
+    --tk-x: -5px;
+    --tk-y: 5px;
+    animation-delay: 80ms;
+  }
+  .tk-app-icon-tile-4 {
+    background: #3b82f6;
+    --tk-x: 5px;
+    --tk-y: 5px;
+    animation-delay: 120ms;
+  }
+
+  @keyframes tk-app-icon-intro {
+    0% {
+      transform: translate3d(var(--tk-x, 0px), var(--tk-y, 0px), 0) scale(0.9);
+      opacity: 0.8;
+    }
+    65% {
+      transform: translate3d(0px, 0px, 0) scale(1.06);
+      opacity: 1;
+    }
+    100% {
+      transform: translate3d(0px, 0px, 0) scale(1);
+      opacity: 1;
+    }
+  }
+
+  @keyframes tk-app-icon-converge {
+    0% {
+      transform: translate3d(0px, 0px, 0) scale(1);
+    }
+    45% {
+      transform: translate3d(calc(var(--tk-x, 0px) * 0.45), calc(var(--tk-y, 0px) * 0.45), 0) scale(1.05);
+    }
+    100% {
+      transform: translate3d(0px, 0px, 0) scale(1);
+    }
+  }
+
+  .tk-app-icon:hover {
+    transform: translateY(-1px) scale(1.02);
+  }
+
+  .tk-app-icon:hover .tk-app-icon-tile {
+    animation: tk-app-icon-converge 420ms cubic-bezier(0.2, 0.9, 0.2, 1.2) both;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .tk-app-icon {
+      transition: none;
+    }
+
+    .tk-app-icon-tile {
+      animation: none;
+      transform: none;
+    }
+
+    .tk-app-icon:hover .tk-app-icon-tile {
+      animation: none;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .tk-logo-interactive {
+      animation: none;
+      transition: none;
+    }
+
+    .tk-logo-interactive > span {
+      transition: none;
+      animation: none;
+    }
   }
 
   .tk-wp-expl-text,

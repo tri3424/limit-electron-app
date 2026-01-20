@@ -1,8 +1,8 @@
 {
-  "name": "limit",
+  "name": "mathink",
   "private": true,
   "version": "1.0.12",
-  "description": "Limit Desktop Application",
+  "description": "MathInk Desktop Application",
   "type": "module",
   "main": "electron/main.cjs",
   "author": "Subhadeep Choudhury",
@@ -126,9 +126,9 @@
     "wait-on": "^8.0.2"
   },
   "build": {
-    "appId": "com.subhadeep.limit",
-    "productName": "Limit",
-    "artifactName": "Limit-Setup-${version}.${ext}",
+    "appId": "com.subhadeep.mathink",
+    "productName": "MathInk",
+    "artifactName": "MathInk-Setup-${version}.${ext}",
     "directories": {
       "output": "dist",
       "buildResources": "build-resources"
@@ -164,7 +164,7 @@
       "perMachine": false,
       "allowToChangeInstallationDirectory": true,
       "runAfterFinish": true,
-      "shortcutName": "Limit Desktop",
+      "shortcutName": "MathInk Desktop",
       "installerIcon": "build/icon.ico",
       "uninstallerIcon": "build/icon.ico",
       "license": "build/terms-and-conditions.txt"

@@ -18,6 +18,7 @@ import { initializeSettings } from "./lib/db";
 import ModuleCreator from "./pages/ModuleCreator";
 import ModuleEditor from "./pages/ModuleEditor";
 import ModuleRunner from "./pages/ModuleRunner";
+import CustomDictionary from "./pages/CustomDictionary";
 import DailyLimitReached from "./pages/DailyLimitReached";
 import { HOME_ROUTE, LOGIN_ROUTE } from "./constants/routes";
 import { setupCodeBlockCopy } from "./utils/codeBlockCopy";
@@ -249,6 +250,16 @@ const App = () => {
         <ProtectedRoute requireAdmin>
           <Layout>
             <Settings />
+          </Layout>
+        </ProtectedRoute>
+      ),
+    },
+    {
+      path: "/settings/custom-dictionary",
+      element: (
+        <ProtectedRoute requireAdmin>
+          <Layout>
+            <CustomDictionary />
           </Layout>
         </ProtectedRoute>
       ),

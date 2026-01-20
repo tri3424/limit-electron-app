@@ -253,6 +253,16 @@ export default function ModuleRunner() {
 	const { id } = useParams();
 	const navigate = useNavigate();
 	const moduleEntity = useModule(id);
+
+	useEffect(() => {
+		if (typeof document === 'undefined') return;
+		const root = document.documentElement;
+		if (!root) return;
+		root.classList.toggle('is-exam', moduleEntity?.type === 'exam');
+		return () => {
+			root.classList.remove('is-exam');
+		};
+	}, [moduleEntity?.type]);
 	const globalGlossaryEntries = useLiveQuery(
 		() => db.globalGlossary.toArray(),
 		[],
@@ -1004,6 +1014,16 @@ function ExamSession({
 	// Ensure currentIndex is within bounds
 	const safeCurrentIndex = Math.min(Math.max(0, currentIndex), questions.length - 1);
 	const currentQuestion = questions[safeCurrentIndex];
+
+	useEffect(() => {
+		if (typeof document === 'undefined') return;
+		const root = document.documentElement;
+		if (!root) return;
+		root.classList.toggle('is-matching-question', currentQuestion?.type === 'matching');
+		return () => {
+			root.classList.remove('is-matching-question');
+		};
+	}, [currentQuestion?.type]);
 	const canReportIssue = moduleData.type === 'practice' || phase === 'review';
 	const examContentRef = useRef<HTMLDivElement | null>(null);
 	const [reportDialogOpen, setReportDialogOpen] = useState(false);

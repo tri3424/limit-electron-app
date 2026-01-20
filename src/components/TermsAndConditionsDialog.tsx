@@ -52,7 +52,7 @@ export function TermsAndConditionsDialog({ onAccepted }: TermsAndConditionsDialo
         <DialogHeader>
           <DialogTitle>Terms & Conditions</DialogTitle>
           <DialogDescription>
-            Please read and accept these Terms & Conditions to continue using Limit.
+            Please read and accept these Terms & Conditions to continue using MathInk.
           </DialogDescription>
         </DialogHeader>
 
@@ -61,7 +61,7 @@ export function TermsAndConditionsDialog({ onAccepted }: TermsAndConditionsDialo
             <div className="space-y-2">
               <div className="font-medium">1. Acceptance of Terms</div>
               <div>
-                By installing, accessing, or using the Limit desktop application ("App"), you
+                By installing, accessing, or using the MathInk desktop application ("App"), you
                 agree to be bound by these Terms & Conditions ("Terms"). If you do not agree,
                 do not use the App.
               </div>

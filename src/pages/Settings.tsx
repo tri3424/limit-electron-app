@@ -17,6 +17,7 @@ import {
 	Tag,
 	CalendarDays,
 	Music,
+	BookText,
 	Layers,
 	BarChart3,
 	Activity,
@@ -428,7 +429,7 @@ export default function Settings() {
       const min = String(now.getMinutes()).padStart(2, '0');
       const timestampPart = `${yyyy}${mm}${dd}-${hh}${min}`;
 
-      const fileName = `Limit-app-data-backup-${tagsPart}-${timestampPart}.json`;
+      const fileName = `MathInk-app-data-backup-${tagsPart}-${timestampPart}.json`;
 
       const dataText = JSON.stringify(data, null, 2);
       if (window.data?.exportJsonToFile) {
@@ -469,7 +470,7 @@ export default function Settings() {
       const hh = String(now.getHours()).padStart(2, '0');
       const min = String(now.getMinutes()).padStart(2, '0');
       const timestampPart = `${yyyy}${mm}${dd}-${hh}${min}`;
-      const fileName = `Limit-questions-only-${timestampPart}.json`;
+      const fileName = `MathInk-questions-only-${timestampPart}.json`;
       const dataText = JSON.stringify(data, null, 2);
       if (window.data?.exportJsonToFile) {
         const res = await window.data.exportJsonToFile({ defaultFileName: fileName, dataText });
@@ -519,7 +520,7 @@ export default function Settings() {
       const hh = String(now.getHours()).padStart(2, '0');
       const min = String(now.getMinutes()).padStart(2, '0');
       const timestampPart = `${yyyy}${mm}${dd}-${hh}${min}`;
-      const fileName = `Limit-modules-with-questions-${timestampPart}.json`;
+      const fileName = `MathInk-modules-with-questions-${timestampPart}.json`;
 
       const dataText = JSON.stringify(data, null, 2);
       if (window.data?.exportJsonToFile) {
@@ -987,6 +988,26 @@ export default function Settings() {
                     <Button onClick={() => navigate('/settings/practice-admin')}>
                       Open
                     </Button>
+                  </div>
+                </div>
+              </Card>
+
+            ) : null}
+
+            {isAdmin ? (
+              <Card className="p-6">
+                <div className="flex items-start justify-between gap-4">
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2">
+                      <BookText className="h-5 w-5 text-primary" />
+                      <h2 className="text-xl font-semibold text-foreground">Custom Dictionary</h2>
+                    </div>
+                    <p className="text-sm text-muted-foreground mt-1">
+                      Manage Bengali/English word meanings for click-to-lookup across the app.
+                    </p>
+                  </div>
+                  <div className="shrink-0">
+                    <Button onClick={() => navigate('/settings/custom-dictionary')}>Open</Button>
                   </div>
                 </div>
               </Card>

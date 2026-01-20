@@ -21,7 +21,7 @@ import {
 	AlertDialogHeader,
 	AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
-import { Pencil, Plus, Trash2, BarChart3 } from 'lucide-react';
+import { Pencil, Plus, Trash2, BarChart3, Users } from 'lucide-react';
 import { toast } from 'sonner';
 
 export default function StoriesAdmin() {
@@ -251,23 +251,30 @@ export default function StoriesAdmin() {
 												<TableCell className="text-right">{c.visible === false ? 'No' : 'Yes'}</TableCell>
 												<TableCell className="text-right">
 													<div className="flex justify-end gap-2">
-														<Button size="sm" variant="outline" onClick={() => navigate(`/stories-admin/course/${c.id}`)}>
-															<Pencil className="h-4 w-4 mr-2" /> Chapters
+														<Button
+															size="icon"
+															variant="outline"
+															aria-label="Chapters"
+															onClick={() => navigate(`/stories-admin/course/${c.id}`)}
+														>
+															<Pencil className="h-4 w-4" />
 														</Button>
 														<Button
-															size="sm"
+															size="icon"
 															variant="outline"
+															aria-label="Assign users"
 															onClick={() => {
 																setAssignCourseId(c.id);
 																setAssignSelected(Array.isArray(c.assignedUserIds) ? c.assignedUserIds : []);
 																setAssignOpen(true);
 															}}
 														>
-															<Pencil className="h-4 w-4 mr-2" /> Assign
+															<Users className="h-4 w-4" />
 														</Button>
 														<Button
-															size="sm"
-															variant="destructive"
+															size="icon"
+															variant="outline"
+															aria-label="Delete course"
 															onClick={async () => {
 																setDeleteCourseId(c.id);
 																setDeleteCourseTitle(c.title || '');

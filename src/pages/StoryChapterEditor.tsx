@@ -9,7 +9,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { ArrowLeft, Plus, Trash2 } from 'lucide-react';
+import { ArrowLeft, Plus, Save, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import RichTextEditor from '@/components/RichTextEditor';
 import { scanBlanksFromHtml } from '@/lib/stories';
@@ -72,6 +72,9 @@ export default function StoryChapterEditor() {
 			};
 			await db.storyChapters.update(chapter.id, next);
 			toast.success('Saved');
+			if (chapter.courseId) {
+				navigate(`/stories-admin/course/${chapter.courseId}`);
+			}
 		} catch (e) {
 			console.error(e);
 			toast.error('Failed to save');
@@ -82,20 +85,31 @@ export default function StoryChapterEditor() {
 
 	return (
 		<div className="max-w-6xl mx-auto space-y-6 py-8">
-			<div className="flex items-start justify-between gap-4">
-				<div className="min-w-0">
-					<div className="flex items-center gap-3">
-						<Button variant="outline" size="sm" onClick={() => navigate('/stories-admin')}>
-							<ArrowLeft className="h-4 w-4 mr-2" /> Back
-						</Button>
-						<h1 className="text-2xl font-bold text-foreground">Chapter Editor</h1>
+			<Card className="p-4">
+				<div className="flex items-start justify-between gap-4">
+					<div className="min-w-0">
+						<div className="flex items-center gap-2">
+							<Button
+								variant="outline"
+								size="icon"
+								aria-label="Back"
+								onClick={() => navigate(chapter.courseId ? `/stories-admin/course/${chapter.courseId}` : '/stories-admin')}
+							>
+								<ArrowLeft className="h-4 w-4" />
+							</Button>
+							<div className="min-w-0">
+								<h1 className="text-xl md:text-2xl font-bold text-foreground truncate">{chapter.title || 'Chapter'}</h1>
+								<div className="text-xs text-muted-foreground mt-1 truncate">{course?.title ?? chapter.courseId}</div>
+							</div>
+						</div>
 					</div>
-					<div className="text-xs text-muted-foreground mt-2">Course: {course?.title ?? chapter.courseId}</div>
+					<div className="flex gap-2">
+						<Button size="icon" aria-label="Save" onClick={onSave} disabled={saving}>
+							<Save className="h-4 w-4" />
+						</Button>
+					</div>
 				</div>
-				<div className="flex gap-2">
-					<Button onClick={onSave} disabled={saving}>{saving ? 'Saving…' : 'Save'}</Button>
-				</div>
-			</div>
+			</Card>
 
 			<Card className="p-5 space-y-4">
 				<div className="grid grid-cols-1 md:grid-cols-3 gap-3">

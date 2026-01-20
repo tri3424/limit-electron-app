@@ -58,7 +58,7 @@ function createWindow() {
     height: 800,
     minWidth: 900,
     minHeight: 600,
-    title: 'Limit',
+    title: 'MathInk',
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
@@ -104,7 +104,7 @@ function createWindow() {
     const indexPath = candidateIndexPaths.find((p) => fs.existsSync(p));
     if (!indexPath) {
       console.error('[startup] Could not find app-dist/index.html. Tried:', candidateIndexPaths);
-      mainWindow.loadURL('data:text/plain;charset=utf-8,' + encodeURIComponent('Limit failed to start: missing app-dist/index.html'));
+      mainWindow.loadURL('data:text/plain;charset=utf-8,' + encodeURIComponent('MathInk failed to start: missing app-dist/index.html'));
       return;
     }
 
@@ -213,7 +213,7 @@ app.on('ready', () => {
 		if (!mainWindow || mainWindow.isDestroyed()) {
 			throw new Error('Main window is not available');
 		}
-		const defaultFileName = payload && typeof payload.defaultFileName === 'string' ? payload.defaultFileName : 'Limit-backup.json';
+		const defaultFileName = payload && typeof payload.defaultFileName === 'string' ? payload.defaultFileName : 'MathInk-backup.json';
 		const dataText = payload && typeof payload.dataText === 'string' ? payload.dataText : '';
 		if (!dataText) throw new Error('Missing dataText');
 		const pick = await dialog.showSaveDialog(mainWindow, {

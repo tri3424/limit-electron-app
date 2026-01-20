@@ -79,6 +79,15 @@ export interface GlobalGlossaryEntry {
   updatedAt: number;
 }
 
+export interface CustomDictionaryEntry {
+  id: string;
+  word: string;
+  normalizedWord: string;
+  meaning: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
 // Module types
 export interface Module {
   id: string;
@@ -345,6 +354,17 @@ export interface User {
   id: string;
   username: string;
   password: string; // In production, this should be hashed
+  createdAt: number;
+}
+
+export interface AdminAccount {
+  id: string;
+  username: string;
+  secret: {
+    cipherTextB64: string;
+    ivB64: string;
+    saltB64: string;
+  };
   createdAt: number;
 }
 
@@ -702,6 +722,8 @@ export class ExamDatabase extends Dexie {
 	storyChapters!: Table<StoryChapter, string>;
 	storyAttempts!: Table<StoryChapterAttempt, string>;
 	storyChapterProgress!: Table<StoryChapterProgress, string>;
+	admins!: Table<AdminAccount, string>;
+	customDictionary!: Table<CustomDictionaryEntry, string>;
 
   constructor() {
     super('ExamDatabase');
@@ -1390,6 +1412,73 @@ export class ExamDatabase extends Dexie {
 			storyAttempts: 'id, userId, courseId, chapterId, date, attemptNo, submittedAt, [chapterId+userId], [userId+date], [chapterId+date], [chapterId+userId+attemptNo]',
 			storyChapterProgress: 'id, userId, courseId, chapterId, completedAt, [chapterId+userId], [courseId+userId]'
 		});
+
+		// v27: add admin accounts table
+		this.version(27).stores({
+			questions: 'id, type, *tags, *modules, metadata.createdAt',
+			modules: 'id, type, *tags, createdAt, visible, locked',
+			attempts: 'id, moduleId, type, startedAt, syncStatus',
+			integrityEvents: 'id, attemptId, type, timestamp',
+			tags: 'id, name',
+			semanticOntologyTags: 'id, kind, parentId, name, updatedAt',
+			semanticEmbeddings: 'id, [scope+scopeId], scope, scopeId, modelId, createdAt',
+			questionSemanticAnalyses: 'id, questionId, createdAt, [questionId+analysisVersion], [questionId+modelId], source',
+			questionSemanticOverrides: 'id, questionId, updatedAt, baseAnalysisId, [questionId+updatedAt]',
+			settings: 'id',
+			dailyStats: 'id, date, moduleId, [date+moduleId], [moduleId+date], moduleType, createdAt',
+			users: 'id, username',
+			admins: 'id, username, createdAt',
+			globalGlossary: 'id, normalizedWord, word',
+			intelligenceSignals: 'id, type, questionId, moduleId, [type+moduleId], [questionId+type]',
+			reviewInteractions: 'id, attemptId, moduleId, userId, questionId, timestamp, [attemptId+questionId], [moduleId+userId]',
+			errorReports: 'id, status, createdAt, updatedAt, moduleId, questionId, questionCode, reporterUserId, [status+createdAt]',
+			songs: 'id, visible, createdAt, updatedAt',
+			songModules: 'id, visible, createdAt, updatedAt',
+			songListeningEvents: 'id, date, timestamp, songModuleId, userId, songId, [date+songModuleId], [songModuleId+date], [songModuleId+userId], [songModuleId+songId]',
+			binaryAssets: 'id, kind, createdAt',
+			lyricsSource: 'id, normalizedEnglishTitle, createdAt, writer',
+			songSrtCues: 'id, songId, cueIndex, [songId+cueIndex], startMs, endMs, text',
+			practiceEvents:
+				'id, userId, questionId, shownAt, submittedAt, nextAt, mode, topicId, mixedModuleId, [userId+shownAt], [userId+submittedAt], [topicId+shownAt], [mode+shownAt]',
+			storyCourses: 'id, visible, createdAt, updatedAt',
+			storyChapters: 'id, courseId, order, visible, createdAt, updatedAt, [courseId+order]',
+			storyAttempts: 'id, userId, courseId, chapterId, date, attemptNo, submittedAt, [chapterId+userId], [userId+date], [chapterId+date], [chapterId+userId+attemptNo]',
+			storyChapterProgress: 'id, userId, courseId, chapterId, completedAt, [chapterId+userId], [courseId+userId]'
+		});
+
+		// v28: add custom dictionary table
+		this.version(28).stores({
+			questions: 'id, type, *tags, *modules, metadata.createdAt',
+			modules: 'id, type, *tags, createdAt, visible, locked',
+			attempts: 'id, moduleId, type, startedAt, syncStatus',
+			integrityEvents: 'id, attemptId, type, timestamp',
+			tags: 'id, name',
+			semanticOntologyTags: 'id, kind, parentId, name, updatedAt',
+			semanticEmbeddings: 'id, [scope+scopeId], scope, scopeId, modelId, createdAt',
+			questionSemanticAnalyses: 'id, questionId, createdAt, [questionId+analysisVersion], [questionId+modelId], source',
+			questionSemanticOverrides: 'id, questionId, updatedAt, baseAnalysisId, [questionId+updatedAt]',
+			settings: 'id',
+			dailyStats: 'id, date, moduleId, [date+moduleId], [moduleId+date], moduleType, createdAt',
+			users: 'id, username',
+			admins: 'id, username, createdAt',
+			customDictionary: 'id, normalizedWord, word, updatedAt, createdAt',
+			globalGlossary: 'id, normalizedWord, word',
+			intelligenceSignals: 'id, type, questionId, moduleId, [type+moduleId], [questionId+type]',
+			reviewInteractions: 'id, attemptId, moduleId, userId, questionId, timestamp, [attemptId+questionId], [moduleId+userId]',
+			errorReports: 'id, status, createdAt, updatedAt, moduleId, questionId, questionCode, reporterUserId, [status+createdAt]',
+			songs: 'id, visible, createdAt, updatedAt',
+			songModules: 'id, visible, createdAt, updatedAt',
+			songListeningEvents: 'id, date, timestamp, songModuleId, userId, songId, [date+songModuleId], [songModuleId+date], [songModuleId+userId], [songModuleId+songId]',
+			binaryAssets: 'id, kind, createdAt',
+			lyricsSource: 'id, normalizedEnglishTitle, createdAt, writer',
+			songSrtCues: 'id, songId, cueIndex, [songId+cueIndex], startMs, endMs, text',
+			practiceEvents:
+				'id, userId, questionId, shownAt, submittedAt, nextAt, mode, topicId, mixedModuleId, [userId+shownAt], [userId+submittedAt], [topicId+shownAt], [mode+shownAt]',
+			storyCourses: 'id, visible, createdAt, updatedAt',
+			storyChapters: 'id, courseId, order, visible, createdAt, updatedAt, [courseId+order]',
+			storyAttempts: 'id, userId, courseId, chapterId, date, attemptNo, submittedAt, [chapterId+userId], [userId+date], [chapterId+date], [chapterId+userId+attemptNo]',
+			storyChapterProgress: 'id, userId, courseId, chapterId, completedAt, [chapterId+userId], [courseId+userId]'
+		});
 	}
 }
 
@@ -1441,6 +1530,21 @@ export function normalizeGlossaryMeaning(value: string): string {
     ?.toLowerCase()
     .replace(/\s+/g, ' ')
     .trim() || '';
+}
+
+export function normalizeDictionaryWord(value: string): string {
+  const cleaned =
+    value
+      ?.toLowerCase()
+      .replace(/[^a-z0-9\u0980-\u09FF\s'-]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim() || '';
+  if (!cleaned) return '';
+  // Apply English stemming only when the token is purely Latin.
+  if (/^[a-z0-9\s'-]+$/.test(cleaned)) {
+    return stemWord(cleaned);
+  }
+  return cleaned;
 }
 
 // Initialize database

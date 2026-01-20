@@ -21,7 +21,7 @@ import {
  	AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { ArrowLeft, Plus, Pencil } from 'lucide-react';
+import { ArrowLeft, Plus, Pencil, Trash2, Eye } from 'lucide-react';
 import { toast } from 'sonner';
 
 export default function StoriesAdminCourse() {
@@ -53,6 +53,10 @@ export default function StoriesAdminCourse() {
 	const [viewOpen, setViewOpen] = useState(false);
 	const [viewChapter, setViewChapter] = useState<StoryChapter | null>(null);
 	const [viewTab, setViewTab] = useState<'story' | 'assignment'>('story');
+	const [deleteChapterOpen, setDeleteChapterOpen] = useState(false);
+	const [deleteChapterId, setDeleteChapterId] = useState<string | null>(null);
+	const [deleteChapterTitle, setDeleteChapterTitle] = useState('');
+	const [deletingChapter, setDeletingChapter] = useState(false);
 
 	const onCreateChapter = async () => {
 		if (!courseId) return;
@@ -91,6 +95,42 @@ export default function StoriesAdminCourse() {
 		} catch (e) {
 			console.error(e);
 			toast.error('Failed to create chapter');
+		}
+	};
+
+	const onDeleteChapter = async () => {
+		if (!courseId || !deleteChapterId) return;
+		setDeletingChapter(true);
+		try {
+			await db.transaction('rw', db.storyChapters, db.storyCourses, db.storyAttempts, db.storyChapterProgress, async () => {
+				const chapter = await db.storyChapters.get(deleteChapterId);
+				if (!chapter) return;
+				const attempts = await db.storyAttempts.where('chapterId').equals(deleteChapterId).toArray();
+				if (attempts.length) {
+					await db.storyAttempts.bulkDelete(attempts.map((a) => a.id));
+				}
+				const prog = await db.storyChapterProgress.where('chapterId').equals(deleteChapterId).toArray();
+				if (prog.length) {
+					await db.storyChapterProgress.bulkDelete(prog.map((p) => p.id));
+				}
+				await db.storyChapters.delete(deleteChapterId);
+				const c = await db.storyCourses.get(courseId);
+				if (c) {
+					await db.storyCourses.update(courseId, {
+						chapterIds: (c.chapterIds || []).filter((id) => id !== deleteChapterId),
+						updatedAt: Date.now(),
+					});
+				}
+			});
+			toast.success('Chapter deleted');
+			setDeleteChapterOpen(false);
+			setDeleteChapterId(null);
+			setDeleteChapterTitle('');
+		} catch (e) {
+			console.error(e);
+			toast.error('Failed to delete chapter');
+		} finally {
+			setDeletingChapter(false);
 		}
 	};
 
@@ -157,8 +197,8 @@ export default function StoriesAdminCourse() {
 			<div className="flex items-start justify-between gap-4">
 				<div className="min-w-0">
 					<div className="flex items-center gap-3">
-						<Button variant="outline" size="sm" onClick={() => navigate('/stories-admin')}>
-							<ArrowLeft className="h-4 w-4 mr-2" /> Back
+						<Button variant="outline" size="icon" aria-label="Back" onClick={() => navigate('/stories-admin')}>
+							<ArrowLeft className="h-4 w-4" />
 						</Button>
 						<h1 className="text-2xl font-bold text-foreground">{course?.title ?? 'Course'}</h1>
 					</div>
@@ -168,8 +208,8 @@ export default function StoriesAdminCourse() {
 					<Button variant="outline" onClick={() => setResetOpen(true)}>
 						Reset progress
 					</Button>
-					<Button onClick={() => setOpen(true)}>
-						<Plus className="h-4 w-4 mr-2" /> New chapter
+					<Button size="icon" aria-label="New chapter" onClick={() => setOpen(true)}>
+						<Plus className="h-4 w-4" />
 					</Button>
 				</div>
 			</div>
@@ -185,19 +225,37 @@ export default function StoriesAdminCourse() {
 									<div className="text-xs text-muted-foreground">Order: {ch.order} • Visible: {ch.visible === false ? 'No' : 'Yes'}</div>
 								</div>
 								<div className="flex gap-2">
-									<Button size="sm" variant="outline" onClick={() => navigate(`/stories-admin/chapter/${ch.id}/edit`)}>
-										<Pencil className="h-4 w-4 mr-2" /> Edit
+									<Button
+										size="icon"
+										variant="outline"
+										aria-label="Edit"
+										onClick={() => navigate(`/stories-admin/chapter/${ch.id}/edit`)}
+									>
+										<Pencil className="h-4 w-4" />
 									</Button>
 									<Button
-										size="sm"
+										size="icon"
 										variant="outline"
+										aria-label="Delete"
+										onClick={() => {
+											setDeleteChapterId(ch.id);
+											setDeleteChapterTitle(ch.title || 'Chapter');
+											setDeleteChapterOpen(true);
+										}}
+									>
+										<Trash2 className="h-4 w-4" />
+									</Button>
+									<Button
+										size="icon"
+										variant="outline"
+										aria-label="View"
 										onClick={() => {
 											setViewChapter(ch);
 											setViewTab('story');
 											setViewOpen(true);
 										}}
 									>
-										View
+										<Eye className="h-4 w-4" />
 									</Button>
 								</div>
 							</div>
@@ -401,6 +459,28 @@ export default function StoriesAdminCourse() {
 							disabled={resetting}
 						>
 							Reset
+						</AlertDialogAction>
+					</AlertDialogFooter>
+				</AlertDialogContent>
+			</AlertDialog>
+
+			<AlertDialog open={deleteChapterOpen} onOpenChange={setDeleteChapterOpen}>
+				<AlertDialogContent>
+					<AlertDialogHeader>
+						<AlertDialogTitle>Delete chapter</AlertDialogTitle>
+						<AlertDialogDescription className="mt-3">
+							Delete “{deleteChapterTitle}”? This will also remove related attempts/progress.
+						</AlertDialogDescription>
+					</AlertDialogHeader>
+					<AlertDialogFooter className="mt-6">
+						<AlertDialogCancel disabled={deletingChapter}>Cancel</AlertDialogCancel>
+						<AlertDialogAction
+							onClick={async () => {
+								await onDeleteChapter();
+							}}
+							disabled={deletingChapter}
+						>
+							{deletingChapter ? 'Deleting…' : 'Delete'}
 						</AlertDialogAction>
 					</AlertDialogFooter>
 				</AlertDialogContent>

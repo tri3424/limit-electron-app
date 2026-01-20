@@ -1,6 +1,7 @@
 import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { db } from '@/lib/db';
 import { LOGIN_ROUTE } from '@/constants/routes';
+import { verifyAdminCredentials } from '@/lib/adminVault';
 
 const ADMIN_USERNAME = 'Subhadeep.Choudhury';
 const ADMIN_PASSWORD = 'Yubi123454';
@@ -64,6 +65,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       localStorage.setItem('currentUser', JSON.stringify(adminUser));
       return true;
     }
+
+		// Check stored admin credentials (requires vault unlock)
+		try {
+			const isStoredAdminOk = await verifyAdminCredentials(username, password);
+			if (isStoredAdminOk) {
+				const adminUser: AuthUser = { username, role: 'admin' as UserRole };
+				setUser(adminUser);
+				localStorage.setItem('currentUser', JSON.stringify(adminUser));
+				return true;
+			}
+		} catch {
+			// ignore
+		}
 
     // Check student credentials
     const student = await db.users.where('username').equals(username).first();

@@ -1,11 +1,11 @@
 import { ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { Home, FileQuestion, Settings, Layers, LogOut, Music, ListMusic, Search, BookOpen, BookText, MoreHorizontal } from 'lucide-react';
+import { Home, FileQuestion, Settings, Layers, LogOut, Music, ListMusic, Search, BookOpen, BookText, LayoutGrid } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
-import { db } from '@/lib/db';
+import { db, normalizeDictionaryWord } from '@/lib/db';
 import { CommandDialog, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
 import { omniEnsureIndexedOnce, omniSearch } from '@/lib/hybridSearch';
 import type { HybridDocType } from '@/lib/hybridPglite';
@@ -37,6 +37,8 @@ export function Layout({ children }: LayoutProps) {
   const navigate = useNavigate();
   const { user, logout, isAdmin } = useAuth();
 
+	const [dictModal, setDictModal] = useState<{ word: string; meaning: string } | null>(null);
+
 	useEffect(() => {
 		if (typeof document === 'undefined') return;
 		const root = document.documentElement;
@@ -47,6 +49,7 @@ export function Layout({ children }: LayoutProps) {
 	const [omniOpen, setOmniOpen] = useState(false);
 	const [omniQuery, setOmniQuery] = useState('');
 	const [omniLoading, setOmniLoading] = useState(false);
+	const [omniSelectedValue, setOmniSelectedValue] = useState('');
 	const [omniResults, setOmniResults] = useState<Array<{ type: HybridDocType; id: string; title: string; subtitle: string; preview: string }>>(
 		[],
 	);
@@ -66,11 +69,76 @@ export function Layout({ children }: LayoutProps) {
 		undefined,
 	);
 
+	useEffect(() => {
+		if (!omniOpen) return;
+		setOmniSelectedValue('');
+	}, [omniOpen, omniQuery, omniResults.length]);
+
 	const newErrorReportCount = useLiveQuery(
 		() => isAdmin ? db.errorReports.where('status').equals('new').count() : Promise.resolve(0),
 		[isAdmin],
 		0
 	);
+
+	useEffect(() => {
+		if (typeof window === 'undefined' || typeof document === 'undefined') return;
+		const isEditableTarget = (target: EventTarget | null) => {
+			if (!(target instanceof HTMLElement)) return false;
+			if (target.closest('input, textarea, [contenteditable="true"]')) return true;
+			if (target.closest('button, a, [role="button"], [data-radix-collection-item]')) return true;
+			return false;
+		};
+		const isWordChar = (ch: string) => /[a-zA-Z0-9\u0980-\u09FF'-]/.test(ch);
+		const extractWordFromPoint = (e: MouseEvent): string => {
+			const selection = window.getSelection();
+			const selected = selection?.toString()?.trim() ?? '';
+			if (selected) return selected;
+			const anyDoc: any = document as any;
+			let range: Range | null = null;
+			if (typeof anyDoc.caretRangeFromPoint === 'function') {
+				range = anyDoc.caretRangeFromPoint(e.clientX, e.clientY);
+			} else if (typeof anyDoc.caretPositionFromPoint === 'function') {
+				const pos = anyDoc.caretPositionFromPoint(e.clientX, e.clientY);
+				if (pos) {
+					range = document.createRange();
+					range.setStart(pos.offsetNode, pos.offset);
+					range.setEnd(pos.offsetNode, pos.offset);
+				}
+			}
+			if (!range) return '';
+			const node = range.startContainer;
+			const offset = range.startOffset;
+			if (!(node instanceof Text)) return '';
+			const text = node.data ?? '';
+			if (!text) return '';
+			const idx = Math.min(Math.max(offset, 0), text.length);
+			let left = idx;
+			let right = idx;
+			while (left > 0 && isWordChar(text[left - 1])) left--;
+			while (right < text.length && isWordChar(text[right])) right++;
+			return text.slice(left, right).trim();
+		};
+		const onDblClickWordLookup = async (e: MouseEvent) => {
+			if (isEditableTarget(e.target)) return;
+			const root = document.documentElement;
+			if (root?.classList.contains('is-exam') || root?.classList.contains('is-matching-question')) return;
+			const word = extractWordFromPoint(e);
+			if (!word) return;
+			if (word.length > 64) return;
+			const normalized = normalizeDictionaryWord(word);
+			if (!normalized) return;
+			try {
+				const matches = await db.customDictionary.where('normalizedWord').equals(normalized).toArray();
+				if (!matches.length) return;
+				const best = matches[0];
+				setDictModal({ word: best.word, meaning: best.meaning });
+			} catch {
+				// ignore
+			}
+		};
+		document.addEventListener('dblclick', onDblClickWordLookup);
+		return () => document.removeEventListener('dblclick', onDblClickWordLookup);
+	}, []);
 
 	const openOmniAndFocus = () => {
 		setOmniOpen(true);
@@ -207,29 +275,7 @@ export function Layout({ children }: LayoutProps) {
 				</DialogContent>
 			</Dialog>
 
-			<Dialog open={!!previewSongId} onOpenChange={(open) => { if (!open) { setPreviewSongId(null); setHearOpen(false); } }}>
-				<DialogContent className="max-w-2xl">
-					<DialogHeader>
-						<DialogTitle>{previewSong?.title || 'Song'}</DialogTitle>
-						<DialogDescription>{previewSong?.singer ? `Singer: ${previewSong.singer}` : 'Preview'}</DialogDescription>
-					</DialogHeader>
-					<div className="space-y-3">
-						{previewSong?.lyrics ? (
-							<div className="whitespace-pre-wrap border rounded-md bg-muted/30 p-4 text-sm leading-relaxed max-h-[40vh] overflow-y-auto overflow-x-hidden">
-								{previewSong.lyrics}
-							</div>
-						) : (
-							<div className="text-sm text-muted-foreground">No lyrics.</div>
-						)}
-					</div>
-					<DialogFooter>
-						<Button variant="outline" onClick={() => setPreviewSongId(null)}>Close</Button>
-						<Button onClick={() => setHearOpen(true)} disabled={!previewSong}>Hear</Button>
-					</DialogFooter>
-				</DialogContent>
-			</Dialog>
-
-			<Dialog open={hearOpen} onOpenChange={(open) => { if (!open) setHearOpen(false); }}>
+			<Dialog open={hearOpen} onOpenChange={(open) => { if (!open) { setHearOpen(false); setPreviewSongId(null); } }}>
 				<DialogContent className="max-w-lg">
 					<DialogHeader>
 						<DialogTitle>{previewSong?.title || 'Hear song'}</DialogTitle>
@@ -241,12 +287,12 @@ export function Layout({ children }: LayoutProps) {
 						<div className="text-sm text-muted-foreground">No song selected.</div>
 					)}
 					<DialogFooter>
-						<Button variant="outline" onClick={() => setHearOpen(false)}>Close</Button>
+						<Button variant="outline" onClick={() => { setHearOpen(false); setPreviewSongId(null); }}>Close</Button>
 					</DialogFooter>
 				</DialogContent>
 			</Dialog>
 
-      <CommandDialog
+      		<CommandDialog
 			open={omniOpen}
 			onOpenChange={(open) => {
 				setOmniOpen(open);
@@ -254,8 +300,10 @@ export function Layout({ children }: LayoutProps) {
 					setOmniQuery('');
 					setOmniResults([]);
 					setOmniLoading(false);
+					setOmniSelectedValue('');
 				}
 			}}
+			commandProps={{ value: omniSelectedValue, onValueChange: setOmniSelectedValue }}
 		>
 			<CommandInput
 				placeholder={isAdmin ? 'Search songs, questions, modules, courses…' : 'Search songs and courses…'}
@@ -274,6 +322,7 @@ export function Layout({ children }: LayoutProps) {
 								onSelect={() => {
 									closeOmni();
 									setPreviewSongId(r.id);
+									setHearOpen(true);
 								}}
 							>
 								<Search className="mr-2 h-4 w-4" />
@@ -290,6 +339,7 @@ export function Layout({ children }: LayoutProps) {
 										e.stopPropagation();
 										closeOmni();
 										setPreviewSongId(r.id);
+										setHearOpen(true);
 									}}
 								>
 									View
@@ -399,25 +449,50 @@ export function Layout({ children }: LayoutProps) {
 				) : null}
 			</CommandList>
 		</CommandDialog>
+
+		<Dialog open={!!dictModal} onOpenChange={(open) => (!open ? setDictModal(null) : null)}>
+			<DialogContent>
+				<DialogHeader>
+					<DialogTitle>{dictModal?.word ?? 'Meaning'}</DialogTitle>
+					<DialogDescription>
+						{dictModal?.meaning ?? ''}
+					</DialogDescription>
+				</DialogHeader>
+				<DialogFooter>
+					<Button variant="outline" onClick={() => setDictModal(null)}>
+						Close
+					</Button>
+				</DialogFooter>
+			</DialogContent>
+		</Dialog>
       {/* Top Navigation */}
       <header className="z-40 border-b border-border/70 bg-gradient-to-r from-primary via-accent to-primary text-primary-foreground shadow-sm backdrop-blur supports-[backdrop-filter]:bg-opacity-90">
         <div className="max-w-7xl mx-auto h-16 md:h-18 px-3 md:px-4 flex items-center justify-between">
           {/* Left: logo / brand */}
           <div className="flex items-center gap-2">
             <Link to={HOME_ROUTE} className="flex items-center gap-2">
-              <img
-                src={logoSrc}
-                alt="Limit logo"
-                className="h-7 w-7 md:h-8 md:w-8 rounded"
-              />
-              <span className="text-xl md:text-2xl font-semibold tracking-tight">Limit</span>
+              						<span className="tk-app-icon" aria-label="MathInk">
+							<span className="tk-app-icon-tile tk-app-icon-tile-1" aria-hidden="true">+</span>
+							<span className="tk-app-icon-tile tk-app-icon-tile-2" aria-hidden="true">−</span>
+							<span className="tk-app-icon-tile tk-app-icon-tile-3" aria-hidden="true">×</span>
+							<span className="tk-app-icon-tile tk-app-icon-tile-4" aria-hidden="true">=</span>
+						</span>
+						<span className="tk-logo-font tk-logo-interactive text-xl md:text-2xl font-extrabold tracking-tight drop-shadow-[0_2px_2px_rgba(0,0,0,0.35)]">
+							<span className="bg-gradient-to-b from-cyan-200 to-sky-200 bg-clip-text text-transparent">M</span>
+							<span className="bg-gradient-to-b from-emerald-200 to-lime-200 bg-clip-text text-transparent">a</span>
+                <span className="bg-gradient-to-b from-amber-200 to-yellow-200 bg-clip-text text-transparent">t</span>
+                <span className="bg-gradient-to-b from-orange-200 to-rose-200 bg-clip-text text-transparent">h</span>
+                <span className="bg-gradient-to-b from-violet-300 to-fuchsia-400 bg-clip-text text-transparent">I</span>
+                <span className="bg-gradient-to-b from-sky-200 to-cyan-200 bg-clip-text text-transparent">n</span>
+                <span className="bg-gradient-to-b from-emerald-200 to-teal-200 bg-clip-text text-transparent">k</span>
+              </span>
             </Link>
           </div>
 
           {/* Right: primary navigation and user info */}
           <div className="flex items-center gap-2">
             {primaryNav.length > 0 ? (
-              <nav className="flex items-center gap-1 rounded-full bg-black/10 px-1 md:px-2 py-1">
+              <nav className="flex items-center gap-1 rounded-lg bg-black/10 border border-white/15 px-1.5 md:px-2.5 py-1.5 shadow-sm">
                 {primaryNav.map((item) => {
                   const Icon = item.icon;
                   return (
@@ -427,10 +502,10 @@ export function Layout({ children }: LayoutProps) {
                           <Link
                             to={item.href}
                             className={cn(
-                              'inline-flex items-center gap-1 md:gap-2 px-2 md:px-4 py-2 rounded-full text-xs md:text-sm font-medium transition-all duration-200 ease-out',
+                              'inline-flex items-center gap-1.5 md:gap-2 px-2.5 md:px-4 py-2 rounded-md text-xs md:text-sm font-medium transition-all duration-200 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/35 focus-visible:ring-offset-0',
                               isActive(item.href)
                                 ? 'bg-white/95 text-foreground shadow-sm'
-                                : 'text-white/85 hover:bg-white/10 hover:text-white',
+                                : 'text-white/85 hover:bg-white/12 hover:text-white active:bg-white/15',
                             )}
                           >
                             <span className="relative inline-flex">
@@ -451,9 +526,10 @@ export function Layout({ children }: LayoutProps) {
                       <Button
                         variant="ghost"
                         size="sm"
-                        className="text-white/85 hover:bg-white/10 hover:text-white rounded-full"
+                        aria-label="More"
+                        className="inline-flex items-center gap-1.5 px-2.5 py-2 rounded-md text-xs md:text-sm font-medium text-white/85 hover:bg-white/12 hover:text-white active:bg-white/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/35"
                       >
-                        <MoreHorizontal className="h-4 w-4" />
+                        <LayoutGrid className="h-4 w-4" />
                         <span className="hidden sm:inline">More</span>
                       </Button>
                     </DropdownMenuTrigger>
