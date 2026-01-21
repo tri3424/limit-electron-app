@@ -390,6 +390,7 @@ export interface AppSettings {
   };
   practiceHistory?: {
     recentQuestionIds: string[];
+    recentQuestionKeys?: string[];
     recentWordProblemCategories: string[];
     updatedAt: number;
   };
@@ -1576,6 +1577,7 @@ export async function initializeSettings() {
       },
       practiceHistory: {
         recentQuestionIds: [],
+        recentQuestionKeys: [],
         recentWordProblemCategories: [],
         updatedAt: Date.now(),
       },
@@ -1674,7 +1676,16 @@ export async function initializeSettings() {
 		await db.settings.update('1', {
 			practiceHistory: {
 				recentQuestionIds: [],
+				recentQuestionKeys: [],
 				recentWordProblemCategories: [],
+				updatedAt: Date.now(),
+			},
+		});
+	} else if (!Array.isArray((existingSettings.practiceHistory as any).recentQuestionKeys)) {
+		await db.settings.update('1', {
+			practiceHistory: {
+				...(existingSettings.practiceHistory as any),
+				recentQuestionKeys: [],
 				updatedAt: Date.now(),
 			},
 		});

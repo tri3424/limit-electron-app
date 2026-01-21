@@ -1,6 +1,6 @@
 import { Fraction, fractionToLatex, normalizeFraction } from '@/lib/fraction';
 
-export type PracticeDifficulty = 'easy' | 'medium' | 'hard';
+export type PracticeDifficulty = 'easy' | 'medium' | 'hard' | 'ultimate';
 
 export type KatexExplanationBlock =
   | { kind: 'text'; content: string }

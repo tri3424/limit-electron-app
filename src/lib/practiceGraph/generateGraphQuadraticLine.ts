@@ -46,6 +46,12 @@ function parabolaToKatex(a: number, b: number, c: number) {
   return `y = ${aPart}${bPart}${cPart}`;
 }
 
+function nonZeroInt(rng: Rng, min: number, max: number) {
+  let v = 0;
+  for (let i = 0; i < 50 && v === 0; i++) v = rng.int(min, max);
+  return v === 0 ? (min === 0 ? 1 : min) : v;
+}
+
 function clamp(v: number, lo: number, hi: number) {
   return Math.max(lo, Math.min(hi, v));
 }
@@ -162,12 +168,14 @@ export function generateGraphQuadraticLineMcq(input: {
   })() as 'y_intercept_from_quadratic_equation' | 'mcq_quad_line';
 
   if (variant === 'y_intercept_from_quadratic_equation') {
-    const a = rng.next() < 0.5 ? 1 : -1;
-    const bRange = input.difficulty === 'easy' ? 3 : input.difficulty === 'medium' ? 5 : 7;
-    const cRange = input.difficulty === 'easy' ? 6 : input.difficulty === 'medium' ? 8 : 10;
+    const aMax = input.difficulty === 'easy' ? 4 : input.difficulty === 'medium' ? 7 : 10;
+    const a = nonZeroInt(rng, -aMax, aMax);
+    const bRange = input.difficulty === 'easy' ? 6 : input.difficulty === 'medium' ? 10 : 14;
+    const cRange = input.difficulty === 'easy' ? 10 : input.difficulty === 'medium' ? 14 : 20;
     const b = rng.int(-bRange, bRange);
     const c = rng.int(-cRange, cRange);
     const parabolaLatex = parabolaToKatex(a, b, c);
+    const parabolaPlain = parabolaLatex.replace(/x\^2/g, 'x²');
 
     return {
       kind: 'graph',
@@ -181,7 +189,7 @@ export function generateGraphQuadraticLineMcq(input: {
         parabola: { a, b, c },
         expectedValue: c,
       },
-      promptText: '',
+      promptText: `The graph is ${parabolaPlain}. Find the y-intercept value.`,
       promptKatex: String.raw`\text{The graph is }${parabolaLatex}\text{. Find the }y\text{-intercept value.}`,
       inputFields: [{ id: 'ans', label: 'y-intercept', kind: 'number' }],
       graphSpec: undefined,
@@ -189,7 +197,7 @@ export function generateGraphQuadraticLineMcq(input: {
       svgAltText: '',
       katexExplanation: {
         steps: [
-          { katex: parabolaLatex, text: 'A quadratic can be written as y = ax^2 + bx + c.' },
+          { katex: parabolaLatex, text: 'A quadratic can be written as y = ax² + bx + c.' },
           { katex: String.raw`\text{The }y\text{-intercept is the value of }y\text{ when }x=0.`, text: 'At the y-axis, x = 0.' },
           { katex: String.raw`x=0\;\Rightarrow\; y = a\cdot 0^2 + b\cdot 0 + c = c`, text: 'Substitute x = 0.' },
           { katex: String.raw`y\text{-intercept} = ${c}`, text: `So the y-intercept value is ${c}.` },
@@ -206,9 +214,10 @@ export function generateGraphQuadraticLineMcq(input: {
   const yMax = 10;
 
   // Pick parabola parameters
-  const a = rng.next() < 0.5 ? 1 : -1;
-  const bRange = input.difficulty === 'easy' ? 3 : input.difficulty === 'medium' ? 5 : 7;
-  const cRange = input.difficulty === 'easy' ? 6 : input.difficulty === 'medium' ? 8 : 10;
+  const aMax = input.difficulty === 'easy' ? 4 : input.difficulty === 'medium' ? 7 : 10;
+  const a = nonZeroInt(rng, -aMax, aMax);
+  const bRange = input.difficulty === 'easy' ? 6 : input.difficulty === 'medium' ? 10 : 14;
+  const cRange = input.difficulty === 'easy' ? 10 : input.difficulty === 'medium' ? 14 : 20;
   const b = rng.int(-bRange, bRange);
   const c = rng.int(-cRange, cRange);
 

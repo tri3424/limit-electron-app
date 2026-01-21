@@ -12,7 +12,7 @@ import { generatePolynomialsQuestion } from '@/lib/practiceGenerators/polynomial
 import { generatePermutationCombinationQuestion, PermutationCombinationQuestion, PermutationCombinationVariantId } from '@/lib/practiceGenerators/permutationCombination';
 import { generateClockReadingQuestion } from '@/lib/practiceGenerators/clockReading';
 
-export type PracticeDifficulty = 'easy' | 'medium' | 'hard';
+export type PracticeDifficulty = 'easy' | 'medium' | 'hard' | 'ultimate';
 
 export type PracticeGraphSpec = {
   width: number;
@@ -34,6 +34,12 @@ export type PracticeGraphSpec = {
 export type KatexExplanationBlock =
   | { kind: 'text'; content: string }
   | { kind: 'math'; content: string; displayMode?: boolean }
+  | {
+    kind: 'math_callout';
+    content: string;
+    callout: string;
+    displayMode?: boolean;
+  }
   | {
     kind: 'long_division';
     divisorLatex: string;
@@ -253,6 +259,7 @@ function nonZeroInt(rng: Rng, min: number, max: number) {
 function difficultyRange(difficulty: PracticeDifficulty) {
   if (difficulty === 'easy') return 5;
   if (difficulty === 'hard') return 15;
+  if (difficulty === 'ultimate') return 25;
   return 10;
 }
 
@@ -705,27 +712,28 @@ export function generatePracticeQuestion(input: {
     case 'graph_quadratic_line':
       return generateGraphQuadraticLineMcq({
         topicId: 'graph_quadratic_line',
-        difficulty: input.difficulty,
+        difficulty: (input.difficulty === 'ultimate' ? 'hard' : input.difficulty) as any,
         seed: input.seed,
         variantWeights: input.variantWeights,
       });
     case 'graph_straight_line':
       return generateGraphStraightLineMcq({
         topicId: 'graph_straight_line',
-        difficulty: input.difficulty,
+        difficulty: (input.difficulty === 'ultimate' ? 'hard' : input.difficulty) as any,
         seed: input.seed,
         variantWeights: input.variantWeights,
       });
     case 'graph_trigonometry': {
       const rng = mulberry32((input.seed ^ 0x9e3779b9) >>> 0);
       const weights = input.variantWeights;
+      const graphDifficulty = (input.difficulty === 'ultimate' ? 'hard' : input.difficulty) as any;
       const unitCircleWeight = typeof weights?.unit_circle === 'number'
         ? Math.max(0, weights.unit_circle)
         : (input.difficulty === 'easy' ? 75 : input.difficulty === 'medium' ? 70 : 65);
       const ratioQuadrantWeight = typeof weights?.ratio_quadrant === 'number' ? Math.max(0, weights.ratio_quadrant) : 10;
       const identitySimplifyWeight = typeof weights?.identity_simplify === 'number'
         ? Math.max(0, weights.identity_simplify)
-        : (input.difficulty === 'hard' ? 35 : 0);
+        : ((input.difficulty === 'hard' || input.difficulty === 'ultimate') ? 35 : 0);
 
       const total = unitCircleWeight + ratioQuadrantWeight + identitySimplifyWeight;
       const pick = total <= 0 ? 0 : rng.next() * total;
@@ -733,7 +741,7 @@ export function generatePracticeQuestion(input: {
       if (pick < unitCircleWeight) {
         return generateGraphUnitCircleMcq({
           topicId: 'graph_trigonometry',
-          difficulty: input.difficulty,
+          difficulty: graphDifficulty,
           seed: input.seed,
         });
       }
@@ -741,7 +749,7 @@ export function generatePracticeQuestion(input: {
       if (pick < unitCircleWeight + identitySimplifyWeight) {
         return generateGraphTrigonometryMcq({
           topicId: 'graph_trigonometry',
-          difficulty: input.difficulty,
+          difficulty: graphDifficulty,
           seed: input.seed,
           variantWeights: {
             ratio_quadrant: ratioQuadrantWeight,
@@ -752,7 +760,7 @@ export function generatePracticeQuestion(input: {
 
       return generateGraphTrigonometryMcq({
         topicId: 'graph_trigonometry',
-        difficulty: input.difficulty,
+        difficulty: graphDifficulty,
         seed: input.seed,
         // Forward internal weights for the non-unit-circle variants.
         variantWeights: {
@@ -764,7 +772,7 @@ export function generatePracticeQuestion(input: {
     case 'graph_unit_circle':
       return generateCircularMeasureGraphQuestion({
         topicId: 'graph_unit_circle',
-        difficulty: input.difficulty,
+        difficulty: (input.difficulty === 'ultimate' ? 'hard' : input.difficulty) as any,
         seed: input.seed,
         avoidKind: input.avoidVariantId as any,
         variantWeights: input.variantWeights,

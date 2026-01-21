@@ -1,6 +1,6 @@
 import { Fraction, fractionToLatex, normalizeFraction, parseFraction } from '@/lib/fraction';
 
-export type PracticeDifficulty = 'easy' | 'medium' | 'hard';
+export type PracticeDifficulty = 'easy' | 'medium' | 'hard' | 'ultimate';
 
 export type KatexExplanationBlock =
   | { kind: 'text'; content: string }
@@ -559,22 +559,24 @@ export function generateWordProblemQuestion(input: {
   }
 
   if (variantId === 'coordinate_intercept') {
-    // 10 variants total (sub = 0..9) with different equation forms.
     // The y-intercept is always found by setting x = 0 and computing y = f(0).
 
     const templates: Array<{
       kindLabel: string;
       latex: (p: any) => string;
       fn: (p: any) => (x: number) => number;
-      params: (difficulty: PracticeDifficulty) => any;
+      params: (difficulty: PracticeDifficulty, rng: Rng) => any;
     }> = [
       // 0) linear
       {
         kindLabel: 'line',
-        params: (d) => {
-          const mBank = d === 'easy' ? [2, 3, 4] : d === 'medium' ? [-5, -3, 2, 4, 6] : [-7, -5, -4, 3, 8];
-          const cBank = d === 'easy' ? [-6, -3, 4, 7] : d === 'medium' ? [-10, -6, -2, 3, 8] : [-12, -9, -4, 5, 11];
-          return { m: mBank[sub % mBank.length], c: cBank[sub % cBank.length] };
+        params: (d, rr) => {
+          const mMax = d === 'easy' ? 6 : d === 'medium' ? 9 : 12;
+          let m = 0;
+          for (let i = 0; i < 50 && m === 0; i++) m = rr.int(-mMax, mMax);
+          const cRange = d === 'easy' ? 10 : d === 'medium' ? 14 : 18;
+          const c = rr.int(-cRange, cRange);
+          return { m, c };
         },
         latex: ({ m, c }) => `y=${m}x${c >= 0 ? '+' : ''}${c}`,
         fn: ({ m, c }) => (x) => m * x + c,
@@ -582,10 +584,13 @@ export function generateWordProblemQuestion(input: {
       // 1) quadratic ax^2 + c
       {
         kindLabel: 'curve',
-        params: (d) => {
-          const aBank = d === 'easy' ? [1, 2] : d === 'medium' ? [-2, -1, 1, 3] : [-3, -2, 2, 4];
-          const cBank = d === 'easy' ? [-6, -2, 3, 7] : d === 'medium' ? [-10, -5, 4, 9] : [-12, -8, 5, 11];
-          return { a: aBank[sub % aBank.length], c: cBank[sub % cBank.length] };
+        params: (d, rr) => {
+          const aMax = d === 'easy' ? 4 : d === 'medium' ? 7 : 10;
+          let a = 0;
+          for (let i = 0; i < 50 && a === 0; i++) a = rr.int(-aMax, aMax);
+          const cRange = d === 'easy' ? 10 : d === 'medium' ? 14 : 18;
+          const c = rr.int(-cRange, cRange);
+          return { a, c };
         },
         latex: ({ a, c }) => `y=${a}x^2${c >= 0 ? '+' : ''}${c}`,
         fn: ({ a, c }) => (x) => a * x * x + c,
@@ -593,10 +598,13 @@ export function generateWordProblemQuestion(input: {
       // 2) cubic ax^3 + c
       {
         kindLabel: 'curve',
-        params: (d) => {
-          const aBank = d === 'easy' ? [1, 2] : d === 'medium' ? [-2, 1, 3] : [-3, -2, 2, 4];
-          const cBank = d === 'easy' ? [-5, 0, 6] : d === 'medium' ? [-9, -3, 4, 10] : [-12, -6, 5, 11];
-          return { a: aBank[sub % aBank.length], c: cBank[sub % cBank.length] };
+        params: (d, rr) => {
+          const aMax = d === 'easy' ? 3 : d === 'medium' ? 5 : 7;
+          let a = 0;
+          for (let i = 0; i < 50 && a === 0; i++) a = rr.int(-aMax, aMax);
+          const cRange = d === 'easy' ? 10 : d === 'medium' ? 14 : 18;
+          const c = rr.int(-cRange, cRange);
+          return { a, c };
         },
         latex: ({ a, c }) => `y=${a}x^3${c >= 0 ? '+' : ''}${c}`,
         fn: ({ a, c }) => (x) => a * x * x * x + c,
@@ -604,9 +612,10 @@ export function generateWordProblemQuestion(input: {
       // 3) absolute value |x| + c
       {
         kindLabel: 'graph',
-        params: (d) => {
-          const cBank = d === 'easy' ? [-4, 2, 6] : d === 'medium' ? [-7, -2, 3, 8] : [-10, -4, 5, 12];
-          return { c: cBank[sub % cBank.length] };
+        params: (d, rr) => {
+          const cRange = d === 'easy' ? 10 : d === 'medium' ? 14 : 18;
+          const c = rr.int(-cRange, cRange);
+          return { c };
         },
         latex: ({ c }) => `y=\\lvert x\\rvert${c >= 0 ? '+' : ''}${c}`,
         fn: ({ c }) => (x) => Math.abs(x) + c,
@@ -614,9 +623,10 @@ export function generateWordProblemQuestion(input: {
       // 4) shifted quadratic (x-2)^2 + c
       {
         kindLabel: 'curve',
-        params: (d) => {
-          const cBank = d === 'easy' ? [-6, -1, 4, 8] : d === 'medium' ? [-10, -4, 3, 9] : [-12, -7, 5, 11];
-          return { c: cBank[sub % cBank.length] };
+        params: (d, rr) => {
+          const cRange = d === 'easy' ? 10 : d === 'medium' ? 14 : 18;
+          const c = rr.int(-cRange, cRange);
+          return { c };
         },
         latex: ({ c }) => `y=(x-2)^2${c >= 0 ? '+' : ''}${c}`,
         fn: ({ c }) => (x) => (x - 2) * (x - 2) + c,
@@ -624,55 +634,91 @@ export function generateWordProblemQuestion(input: {
       // 5) reciprocal 2/(x+1) + c
       {
         kindLabel: 'graph',
-        params: (d) => {
-          const cBank = d === 'easy' ? [-4, 0, 5] : d === 'medium' ? [-7, -2, 3, 8] : [-10, -5, 4, 11];
-          return { c: cBank[sub % cBank.length] };
+        params: (d, rr) => {
+          const cRange = d === 'easy' ? 12 : d === 'medium' ? 16 : 20;
+          const c = rr.int(-cRange, cRange);
+          return { c };
         },
         latex: ({ c }) => `y=\\frac{2}{x+1}${c >= 0 ? '+' : ''}${c}`,
         fn: ({ c }) => (x) => 2 / (x + 1) + c,
       },
-      // 6) exponential 2^x + c
+      // 6) reciprocal k/(x+b) + c (choose k multiple of b so y-intercept is integer)
+      {
+        kindLabel: 'graph',
+        params: (d, rr) => {
+          const bChoices = d === 'easy' ? [1, 2] : d === 'medium' ? [1, 2, 4] : [1, 2, 3, 4];
+          const b = bChoices[rr.int(0, bChoices.length - 1)] ?? 1;
+          const kBase = d === 'easy' ? rr.int(1, 6) : d === 'medium' ? rr.int(2, 8) : rr.int(2, 12);
+          const k = kBase * b;
+          const cRange = d === 'easy' ? 12 : d === 'medium' ? 16 : 20;
+          const c = rr.int(-cRange, cRange);
+          const sgn = rr.int(0, 1) === 0 ? 1 : -1;
+          return { k: sgn * k, b, c };
+        },
+        latex: ({ k, b, c }) => `y=\\frac{${k}}{x+${b}}${c >= 0 ? '+' : ''}${c}`,
+        fn: ({ k, b, c }) => (x) => k / (x + b) + c,
+      },
+      // 7) reciprocal k/(x-b) + c (avoid division by zero at x=0)
+      {
+        kindLabel: 'graph',
+        params: (d, rr) => {
+          const bChoices = d === 'easy' ? [1, 2, 3] : d === 'medium' ? [1, 2, 3, 4] : [1, 2, 3, 4, 5];
+          const b = bChoices[rr.int(0, bChoices.length - 1)] ?? 1;
+          const kBase = d === 'easy' ? rr.int(1, 6) : d === 'medium' ? rr.int(2, 8) : rr.int(2, 12);
+          const k = kBase * b;
+          const cRange = d === 'easy' ? 12 : d === 'medium' ? 16 : 20;
+          const c = rr.int(-cRange, cRange);
+          const sgn = rr.int(0, 1) === 0 ? 1 : -1;
+          return { k: sgn * k, b, c };
+        },
+        latex: ({ k, b, c }) => `y=\\frac{${k}}{x-${b}}${c >= 0 ? '+' : ''}${c}`,
+        fn: ({ k, b, c }) => (x) => k / (x - b) + c,
+      },
+      // 8) exponential 2^x + c
       {
         kindLabel: 'curve',
-        params: (d) => {
-          const cBank = d === 'easy' ? [-2, 0, 3, 6] : d === 'medium' ? [-5, -1, 4, 8] : [-8, -3, 5, 10];
-          return { c: cBank[sub % cBank.length] };
+        params: (d, rr) => {
+          const cRange = d === 'easy' ? 10 : d === 'medium' ? 14 : 18;
+          const c = rr.int(-cRange, cRange);
+          return { c };
         },
         latex: ({ c }) => `y=2^x${c >= 0 ? '+' : ''}${c}`,
         fn: ({ c }) => (x) => Math.pow(2, x) + c,
       },
-      // 7) square root sqrt(x+4) + c
+      // 9) square root sqrt(x+4) + c
       {
         kindLabel: 'curve',
-        params: (d) => {
-          const cBank = d === 'easy' ? [-3, 0, 4] : d === 'medium' ? [-6, -2, 3, 7] : [-9, -4, 5, 10];
-          return { c: cBank[sub % cBank.length] };
+        params: (d, rr) => {
+          const cRange = d === 'easy' ? 10 : d === 'medium' ? 14 : 18;
+          const c = rr.int(-cRange, cRange);
+          return { c };
         },
         latex: ({ c }) => `y=\\sqrt{x+4}${c >= 0 ? '+' : ''}${c}`,
         fn: ({ c }) => (x) => Math.sqrt(Math.max(0, x + 4)) + c,
       },
-      // 8) sine sin(x) + c
+      // 10) sine sin(x) + c
       {
         kindLabel: 'curve',
-        params: (d) => {
-          const cBank = d === 'easy' ? [-2, 1, 4] : d === 'medium' ? [-5, -1, 3, 7] : [-8, -3, 5, 10];
-          return { c: cBank[sub % cBank.length] };
+        params: (d, rr) => {
+          const cRange = d === 'easy' ? 10 : d === 'medium' ? 14 : 18;
+          const c = rr.int(-cRange, cRange);
+          return { c };
         },
         latex: ({ c }) => `y=\\sin(x)${c >= 0 ? '+' : ''}${c}`,
         fn: ({ c }) => (x) => Math.sin(x) + c,
       },
-      // 9) mixed polynomial ax^2 + bx + c
+      // 11) mixed polynomial ax^2 + bx + c
       {
         kindLabel: 'curve',
-        params: (d) => {
-          const aBank = d === 'easy' ? [1, 2] : d === 'medium' ? [-2, -1, 1, 3] : [-3, -2, 2, 4];
-          const bBank = d === 'easy' ? [-3, -1, 2, 4] : d === 'medium' ? [-6, -3, 2, 5] : [-8, -5, 3, 7];
-          const cBank = d === 'easy' ? [-5, -2, 3, 7] : d === 'medium' ? [-9, -4, 4, 10] : [-12, -6, 5, 12];
-          return {
-            a: aBank[sub % aBank.length],
-            b: bBank[sub % bBank.length],
-            c: cBank[sub % cBank.length],
-          };
+        params: (d, rr) => {
+          const aMax = d === 'easy' ? 4 : d === 'medium' ? 7 : 10;
+          let a = 0;
+          for (let i = 0; i < 50 && a === 0; i++) a = rr.int(-aMax, aMax);
+          const bRange = d === 'easy' ? 8 : d === 'medium' ? 12 : 16;
+          const cRange = d === 'easy' ? 10 : d === 'medium' ? 14 : 18;
+          const b = rr.int(-bRange, bRange);
+          const c = rr.int(-cRange, cRange);
+          return { a, b, c };
         },
         latex: ({ a, b, c }) => {
           const bTerm = b === 0 ? '' : `${b >= 0 ? '+' : ''}${b}x`;
@@ -682,13 +728,15 @@ export function generateWordProblemQuestion(input: {
       },
     ];
 
-    const template = templates[sub];
-    const p = template.params(input.difficulty);
+    const templateIndex = rng.int(0, templates.length - 1);
+    const template = templates[templateIndex] ?? templates[0]!;
+    const paramsRng = mulberry32(((input.seed ^ 0x45d9f3b) + templateIndex * 101) >>> 0);
+    const p = template.params(input.difficulty, paramsRng);
     const eqLatex = template.latex(p);
     const fn = template.fn(p);
     const y0 = fn(0);
 
-    const askXIntercept = template.kindLabel === 'line' && (sub % 2 === 1);
+    const askXIntercept = template.kindLabel === 'line' && (rng.int(0, 1) === 1);
     const xIntercept = askXIntercept
       ? (() => {
           // only valid for the linear template where y = mx + c
@@ -819,7 +867,7 @@ export function generateWordProblemQuestion(input: {
     ];
 
     return mk({
-      idSuffix: `${sub}-coord`,
+      idSuffix: `${templateIndex}-coord-${stableId('coord', input.seed, JSON.stringify(p))}`,
       katexQuestion: q,
       katexExplanation: explWithGraph,
       answerKind: 'integer',
@@ -1195,26 +1243,17 @@ export function generateWordProblemQuestion(input: {
   }
 
   if (variantId === 'bus_pass_increases') {
-    // 10 deterministic variants. Vary start year, base cost, and annual % increases.
-    // Use friendly numbers so the final answer is usually an integer or a simple .00/.20/.25/.50/.75 style decimal.
-    // Percent increases are mostly 5/10/20 to keep multipliers simple.
-    const bank: Array<{ startYear: number; baseCost: number; increases: number[] }> = [
-      { startYear: 2022, baseCost: 50, increases: [10, 5] }, // 57.75
-      { startYear: 2021, baseCost: 40, increases: [10, 10] }, // 48.40
-      { startYear: 2020, baseCost: 60, increases: [5, 5] }, // 66.15
-      { startYear: 2019, baseCost: 80, increases: [20] }, // 96.00
-      { startYear: 2023, baseCost: 40, increases: [5] }, // 42.00
-      { startYear: 2018, baseCost: 100, increases: [10, 5, 5] }, // 121.28
-      { startYear: 2022, baseCost: 30, increases: [10, 20] }, // 39.60
-      { startYear: 2020, baseCost: 75, increases: [10, 10, 10] }, // 99.83
-      { startYear: 2021, baseCost: 120, increases: [5, 10] }, // 138.60
-      { startYear: 2017, baseCost: 50, increases: [20, 5] }, // 63.00
-    ];
-
-    const row = bank[sub];
-    const startYear = row.startYear;
-    const baseCost = row.baseCost;
-    const increases = row.increases;
+    // Seed-based generation (more variety than the old 10-row bank).
+    // Allow any integer percent increase (not restricted to 5s/10s), while keeping the final cost reasonable.
+    const rng2 = mulberry32((input.seed ^ 0x9e3779b9) >>> 0);
+    const startYear = 2017 + (rng2.int(0, 7)); // 2017..2024
+    const baseCost = rng2.int(30, 140);
+    const years = rng2.int(1, 4); // 1..4 yearly increases
+    const increases: number[] = Array.from({ length: years }, () => {
+      const lo = input.difficulty === 'easy' ? 3 : input.difficulty === 'medium' ? 2 : 1;
+      const hi = input.difficulty === 'easy' ? 15 : input.difficulty === 'medium' ? 22 : 30;
+      return rng2.int(lo, hi);
+    });
     const targetYear = startYear + increases.length;
 
     let value = baseCost;
@@ -1281,7 +1320,7 @@ export function generateWordProblemQuestion(input: {
     ];
 
     return mk({
-      idSuffix: `${sub}-${startYear}-${baseCost}-${increases.join('-')}`,
+      idSuffix: `${startYear}-${baseCost}-${increases.join('-')}`,
       promptText,
       katexQuestion: q,
       katexExplanation: expl,
@@ -1618,16 +1657,24 @@ export function generateWordProblemQuestion(input: {
     const isHigher = rng.int(0, 1) === 1;
     const tuesday = isHigher ? monday + delta : monday - delta;
 
-    const q = String.raw`\text{The temperature on Monday is }${monday}^{\circ}\text{C. The temperature on Tuesday is }${delta}^{\circ}\text{C ${isHigher ? 'higher' : 'lower'}. Work out the temperature on Tuesday.}`;
+    const noBreakNeg = (n: number) => {
+      if (n < 0) return `−\u2060${Math.abs(n)}`;
+      return String(n);
+    };
+
+    const mondayPrompt = `${noBreakNeg(monday)}°C`;
+    const mondayLatex = monday < 0 ? `(${monday})` : String(monday);
+
+    const q = String.raw`\text{The temperature on Monday is }${mondayLatex}^{\circ}\text{C. The temperature on Tuesday is }${delta}^{\circ}\text{C ${isHigher ? 'higher' : 'lower'}. Work out the temperature on Tuesday.}`;
     const working: KatexExplanationBlock[] = [
       { kind: 'text', content: `Translate the words into an operation: “${isHigher ? 'higher' : 'lower'}” means ${isHigher ? 'add' : 'subtract'}.` },
-      { kind: 'math', content: String.raw`\text{Tuesday} = ${monday} ${isHigher ? '+' : '-'} ${delta}`, displayMode: true },
+      { kind: 'math', content: String.raw`\text{Tuesday} = ${mondayLatex} ${isHigher ? '+' : '-'} ${delta}`, displayMode: true },
       { kind: 'text', content: 'Calculate.' },
-      { kind: 'math', content: String.raw`${monday} ${isHigher ? '+' : '-'} ${delta} = ${tuesday}`, displayMode: true },
+      { kind: 'math', content: String.raw`${mondayLatex} ${isHigher ? '+' : '-'} ${delta} = ${tuesday}`, displayMode: true },
     ];
     const expl = scaffoldExplanation({
       title: 'Number skill: integer change in temperature.',
-      givens: [`Monday = ${monday}°C`, `Tuesday is ${delta}°C ${isHigher ? 'higher' : 'lower'}`],
+      givens: [`Monday = ${mondayPrompt}`, `Tuesday is ${delta}°C ${isHigher ? 'higher' : 'lower'}`],
       goal: 'Find Tuesday’s temperature.',
       method: [
         isHigher
@@ -1643,7 +1690,7 @@ export function generateWordProblemQuestion(input: {
     });
     return mk({
       idSuffix: 'mini-temp',
-      promptText: `The temperature on Monday is ${monday}°C. The temperature on Tuesday is ${delta}°C ${isHigher ? 'higher' : 'lower'}. Work out the temperature on Tuesday.`,
+      promptText: `The temperature on Monday is ${mondayPrompt}. The temperature on Tuesday is ${delta}°C ${isHigher ? 'higher' : 'lower'}. Work out the temperature on Tuesday.`,
       katexQuestion: q,
       katexExplanation: expl,
       answerKind: 'integer',

@@ -471,6 +471,7 @@ export default function SettingsPracticeAdminMixedModules() {
                                 <SelectItem value="easy">Easy</SelectItem>
                                 <SelectItem value="medium">Medium</SelectItem>
                                 <SelectItem value="hard">Hard</SelectItem>
+                                <SelectItem value="ultimate">Ultimate</SelectItem>
                               </SelectContent>
                             </Select>
                           </div>
@@ -627,6 +628,7 @@ export default function SettingsPracticeAdminMixedModules() {
                                     <SelectItem value="easy">Easy</SelectItem>
                                     <SelectItem value="medium">Medium</SelectItem>
                                     <SelectItem value="hard">Hard</SelectItem>
+                                    <SelectItem value="ultimate">Ultimate</SelectItem>
                                   </SelectContent>
                                 </Select>
                               </div>
@@ -634,8 +636,8 @@ export default function SettingsPracticeAdminMixedModules() {
                           ) : null}
 
                           {p.difficultyMode === 'mix' ? (
-                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                              {(['easy', 'medium', 'hard'] as PracticeDifficulty[]).map((d) => (
+                            <div className="grid grid-cols-1 sm:grid-cols-4 gap-2">
+                              {(['easy', 'medium', 'hard', 'ultimate'] as PracticeDifficulty[]).map((d) => (
                                 <div key={d} className="space-y-1">
                                   <Label>{d}</Label>
                                   <Input

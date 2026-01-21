@@ -56,6 +56,7 @@
 /* Responsive math containers (used by <Katex />) */
 .tk-math-block {
   display: block;
+  width: 100%;
   max-width: 100%;
   text-align: center;
 }
@@ -68,6 +69,7 @@
 .tk-math-fit {
   display: inline-block;
   max-width: 100%;
+  min-width: 0;
   transform-origin: center left;
 }
 
@@ -99,12 +101,21 @@
 }
 
 .tk-math-scroll {
+  width: 100%;
   max-width: 100%;
   overflow-x: auto;
   overflow-y: hidden;
   position: relative;
   scrollbar-gutter: stable;
 }
+
+ .tk-prompt-inline-math {
+   line-height: 1;
+ }
+
+ .tk-prompt-inline-math .katex {
+   font-size: 1.08em;
+ }
 
 .tk-math-scroll::before,
 .tk-math-scroll::after {
@@ -396,6 +407,15 @@ All colors MUST be HSL.
     min-height: 100%;
     display: flex;
     flex-direction: column;
+  }
+
+  input:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='color']):not([type='file']),
+  textarea,
+  select {
+    border-radius: calc(var(--radius) + 0.125rem);
+    border-width: 1px;
+    border-style: solid;
+    border-color: hsl(var(--border) / 0.85);
   }
 
   [data-radix-scroll-area-viewport] {
@@ -869,18 +889,20 @@ All colors MUST be HSL.
   math-field.tk-expr-input {
     display: block;
     width: 100%;
-    min-height: 48px;
-    padding: 8px 12px;
-    border: 1px solid hsl(var(--border));
-    border-radius: calc(var(--radius) - 2px);
-    background: hsl(var(--background));
+    min-height: 40px;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
     color: hsl(var(--foreground));
-    caret-color: #000;
+    caret-color: #000 !important;
+    --caret-color: #000;
     box-sizing: border-box;
   }
 
   math-field {
-    caret-color: #000;
+    caret-color: #000 !important;
+    --caret-color: #000;
   }
 
   math-field.tk-expr-input:focus-within {

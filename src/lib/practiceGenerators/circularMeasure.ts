@@ -1,6 +1,6 @@
 import { buildCircularMeasureDiagramSvg } from '@/lib/circularMeasureSvg';
 
-export type CircularMeasureDifficulty = 'easy' | 'medium' | 'hard';
+export type CircularMeasureDifficulty = 'easy' | 'medium' | 'hard' | 'ultimate';
 
 export type CircularMeasureProblemKind =
   | 'arc_length_forward'
@@ -142,7 +142,8 @@ function piFracToDegrees(p: PiFraction): { deg: number; latex: string; plain: st
 function rndNiceRadius(rng: Rng, difficulty: CircularMeasureDifficulty): number {
   if (difficulty === 'easy') return rng.int(3, 10);
   if (difficulty === 'medium') return rng.int(4, 12);
-  return rng.int(5, 15);
+  if (difficulty === 'hard') return rng.int(5, 15);
+  return rng.int(6, 18);
 }
 
 function pickTheta(rng: Rng, difficulty: CircularMeasureDifficulty): PiFraction {

@@ -118,17 +118,18 @@ export default function MathLiveInput({ value, onChange, placeholder, className,
   return (
     <div
       ref={wrapperRef}
-      className={`w-full rounded-md border px-3 py-2 ${className ?? ''}`}
-      style={{ borderColor: 'rgba(0,0,0,0.22)', backgroundColor: '#ffffff', minHeight: 56, height: 'auto' }}
+      className={`w-full rounded-lg border border-border/85 bg-background px-3 py-1.5 shadow-sm hover:border-border focus-within:ring-2 focus-within:ring-inset focus-within:ring-ring/40 focus-within:border-ring/70 ${className ?? ''}`}
+      style={{ minHeight: 40, height: 'auto' }}
     >
       <math-field
+        className="tk-expr-input"
         ref={(node) => {
           ref.current = node as unknown as HTMLElement;
         }}
         virtual-keyboard-mode="off"
         smart-fence
         readOnly={!!disabled}
-        style={{ display: 'block', width: '100%', minHeight: 40, fontSize: '24px', lineHeight: '1.45' }}
+        style={{ display: 'block', width: '100%' }}
       />
     </div>
   );

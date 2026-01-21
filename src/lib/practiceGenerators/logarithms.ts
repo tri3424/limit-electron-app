@@ -37,7 +37,16 @@ export type LogarithmsVariantId =
   | 'single_log_const_plus'
   | 'single_log_const_minus'
   | 'single_log_then_simplify'
+  | 'solve_log_equation'
   | 'solve_nested_log'
+  | 'exp_inequality_log10'
+  | 'solve_exp_sub_u_ax'
+  | 'evaluate_ln_3sf'
+  | 'solve_ln_3sf'
+  | 'solve_abs_exp_unique'
+  | 'evaluate_e_3sf'
+  | 'solve_exp_ln_exact'
+  | 'exp_inequality_ln'
   | 'log_to_exp_basic'
   | 'log_to_exp_frac'
   | 'log_to_exp_zero'
@@ -53,7 +62,7 @@ export type LogarithmsVariantId =
   | 'evaluate_integer'
   | 'evaluate_fraction';
 
-export type LogarithmsAnswerKind = 'integer' | 'rational' | 'decimal_3sf' | 'text';
+export type LogarithmsAnswerKind = 'integer' | 'rational' | 'decimal_3sf' | 'decimal_4sf' | 'text';
 
 export type LogarithmsQuestion = {
   kind: 'logarithms';
@@ -63,6 +72,7 @@ export type LogarithmsQuestion = {
   id: string;
   seed: number;
   difficulty: PracticeDifficulty;
+  promptBlocks?: Array<{ kind: 'text' | 'math'; content: string }>;
   katexQuestion: string;
   katexExplanation: KatexExplanationBlock[];
   // Numeric answer shapes
@@ -79,6 +89,15 @@ function to3sf(x: number): number {
   if (ax === 0) return 0;
   const p = Math.floor(Math.log10(ax));
   const scale = Math.pow(10, 2 - p);
+  return Math.round(x * scale) / scale;
+}
+
+function to4sf(x: number): number {
+  if (!Number.isFinite(x)) return x;
+  const ax = Math.abs(x);
+  if (ax === 0) return 0;
+  const p = Math.floor(Math.log10(ax));
+  const scale = Math.pow(10, 3 - p);
   return Math.round(x * scale) / scale;
 }
 
@@ -131,7 +150,15 @@ export function generateLogarithmsQuestion(input: {
     const w6f = typeof w.single_log_const_plus === 'number' ? Math.max(0, w.single_log_const_plus) : 8;
     const w6g = typeof w.single_log_const_minus === 'number' ? Math.max(0, w.single_log_const_minus) : 8;
     const w6h = typeof w.single_log_then_simplify === 'number' ? Math.max(0, w.single_log_then_simplify) : 10;
+    const wSolveEq = typeof w.solve_log_equation === 'number' ? Math.max(0, w.solve_log_equation) : 12;
     const w7 = typeof w.solve_nested_log === 'number' ? Math.max(0, w.solve_nested_log) : 10;
+    const wSub = typeof w.solve_exp_sub_u_ax === 'number' ? Math.max(0, w.solve_exp_sub_u_ax) : 10;
+    const wLnEval = typeof w.evaluate_ln_3sf === 'number' ? Math.max(0, w.evaluate_ln_3sf) : 10;
+    const wLnSolve = typeof w.solve_ln_3sf === 'number' ? Math.max(0, w.solve_ln_3sf) : 10;
+    const wAbs = typeof w.solve_abs_exp_unique === 'number' ? Math.max(0, w.solve_abs_exp_unique) : 10;
+    const wEEval = typeof w.evaluate_e_3sf === 'number' ? Math.max(0, w.evaluate_e_3sf) : 10;
+    const wESolve = typeof w.solve_exp_ln_exact === 'number' ? Math.max(0, w.solve_exp_ln_exact) : 10;
+    const wELneq = typeof w.exp_inequality_ln === 'number' ? Math.max(0, w.exp_inequality_ln) : 10;
     const w8a = typeof w.log_to_exp_basic === 'number' ? Math.max(0, w.log_to_exp_basic) : 16;
     const w8b = typeof w.log_to_exp_frac === 'number' ? Math.max(0, w.log_to_exp_frac) : 10;
     const w8c = typeof w.log_to_exp_zero === 'number' ? Math.max(0, w.log_to_exp_zero) : 8;
@@ -143,10 +170,11 @@ export function generateLogarithmsQuestion(input: {
     const w10b = typeof w.evaluate_root === 'number' ? Math.max(0, w.evaluate_root) : 10;
     const w11 = typeof w.simplify_log_power === 'number' ? Math.max(0, w.simplify_log_power) : 14;
     const w2 = typeof w.solve_exp_3sf === 'number' ? Math.max(0, w.solve_exp_3sf) : 20;
+    const wIneq = typeof w.exp_inequality_log10 === 'number' ? Math.max(0, w.exp_inequality_log10) : 10;
     const w3 = typeof w.log_to_exp === 'number' ? Math.max(0, w.log_to_exp) : 20;
     const w4 = typeof w.evaluate_integer === 'number' ? Math.max(0, w.evaluate_integer) : 25;
     const w5 = typeof w.evaluate_fraction === 'number' ? Math.max(0, w.evaluate_fraction) : 10;
-    const total = w1 + w1b + w1c + w1d + w6a + w6b + w6c + w6d + w6e + w6f + w6g + w6h + w7 + w8a + w8b + w8c + w8d + w9a + w9b + w9c + w10a + w10b + w11 + w2 + w3 + w4 + w5;
+    const total = w1 + w1b + w1c + w1d + w6a + w6b + w6c + w6d + w6e + w6f + w6g + w6h + wSolveEq + w7 + wSub + wLnEval + wLnSolve + wAbs + wEEval + wESolve + wELneq + w8a + w8b + w8c + w8d + w9a + w9b + w9c + w10a + w10b + w11 + w2 + wIneq + w3 + w4 + w5;
     const pick = total <= 0 ? 0 : rng.next() * total;
     if (pick < w1) return 'exp_to_log' as const;
     if (pick < w1 + w1b) return 'exp_to_log_const' as const;
@@ -161,20 +189,30 @@ export function generateLogarithmsQuestion(input: {
     const o4d = o4c + w6f;
     const o4e = o4d + w6g;
     const o4f = o4e + w6h;
-    const o5 = o4f + w7;
-    const o6 = o5 + w8a;
-    const o7 = o6 + w8b;
-    const o8 = o7 + w8c;
-    const o9 = o8 + w8d;
-    const o10 = o9 + w9a;
-    const o11 = o10 + w9b;
-    const o12 = o11 + w9c;
-    const o13 = o12 + w10a;
-    const o14 = o13 + w10b;
-    const o15 = o14 + w11;
-    const o16 = o15 + w2;
-    const o17 = o16 + w3;
-    const o18 = o17 + w4;
+    const o4g = o4f + wSolveEq;
+    const o5 = o4g + w7;
+    const o5b = o5 + wSub;
+    const o5c = o5b + wLnEval;
+    const o5d = o5c + wLnSolve;
+    const o5e = o5d + wAbs;
+    const o5f = o5e + wEEval;
+    const o5g = o5f + wESolve;
+    const o5h = o5g + wELneq;
+    const o6 = o5h;
+    const o7 = o6 + w8a;
+    const o8 = o7 + w8b;
+    const o9 = o8 + w8c;
+    const o10 = o9 + w8d;
+    const o11 = o10 + w9a;
+    const o12 = o11 + w9b;
+    const o13 = o12 + w9c;
+    const o14 = o13 + w10a;
+    const o15 = o14 + w10b;
+    const o16 = o15 + w11;
+    const o17 = o16 + w2;
+    const o18 = o17 + wIneq;
+    const o19 = o18 + w3;
+    const o20 = o19 + w4;
     if (pick < o2) return 'single_log_sum' as const;
     if (pick < o3) return 'single_log_diff' as const;
     if (pick < o4) return 'single_log_power' as const;
@@ -183,33 +221,49 @@ export function generateLogarithmsQuestion(input: {
     if (pick < o4d) return 'single_log_const_plus' as const;
     if (pick < o4e) return 'single_log_const_minus' as const;
     if (pick < o4f) return 'single_log_then_simplify' as const;
+    if (pick < o4g) return 'solve_log_equation' as const;
     if (pick < o5) return 'solve_nested_log' as const;
-    if (pick < o6) return 'log_to_exp_basic' as const;
-    if (pick < o7) return 'log_to_exp_frac' as const;
-    if (pick < o8) return 'log_to_exp_zero' as const;
-    if (pick < o9) return 'log_to_exp_var_rhs' as const;
-    if (pick < o10) return 'solve_log_basic' as const;
-    if (pick < o11) return 'solve_log_linear' as const;
-    if (pick < o12) return 'solve_log_zero' as const;
-    if (pick < o13) return 'evaluate_decimal' as const;
-    if (pick < o14) return 'evaluate_root' as const;
-    if (pick < o15) return 'simplify_log_power' as const;
-    if (pick < o16) return 'solve_exp_3sf' as const;
-    if (pick < o17) return 'log_to_exp' as const;
-    if (pick < o18) return 'evaluate_integer' as const;
+    if (pick < o5b) return 'solve_exp_sub_u_ax' as const;
+    if (pick < o5c) return 'evaluate_ln_3sf' as const;
+    if (pick < o5d) return 'solve_ln_3sf' as const;
+    if (pick < o5e) return 'solve_abs_exp_unique' as const;
+    if (pick < o5f) return 'evaluate_e_3sf' as const;
+    if (pick < o5g) return 'solve_exp_ln_exact' as const;
+    if (pick < o5h) return 'exp_inequality_ln' as const;
+    if (pick < o7) return 'log_to_exp_basic' as const;
+    if (pick < o8) return 'log_to_exp_frac' as const;
+    if (pick < o9) return 'log_to_exp_zero' as const;
+    if (pick < o10) return 'log_to_exp_var_rhs' as const;
+    if (pick < o11) return 'solve_log_basic' as const;
+    if (pick < o12) return 'solve_log_linear' as const;
+    if (pick < o13) return 'solve_log_zero' as const;
+    if (pick < o14) return 'evaluate_decimal' as const;
+    if (pick < o15) return 'evaluate_root' as const;
+    if (pick < o16) return 'simplify_log_power' as const;
+    if (pick < o17) return 'solve_exp_3sf' as const;
+    if (pick < o18) return 'exp_inequality_log10' as const;
+    if (pick < o19) return 'log_to_exp' as const;
+    if (pick < o20) return 'evaluate_integer' as const;
     return 'evaluate_fraction' as const;
   })();
 
   const answerKind = ((): LogarithmsAnswerKind => {
     const override = input.answerKindByVariant?.[variant];
     if (override) return override;
-    if (variant === 'solve_exp_3sf') return 'decimal_3sf';
+    if (variant === 'solve_exp_3sf') return 'decimal_4sf';
+    if (variant === 'evaluate_ln_3sf' || variant === 'solve_ln_3sf') return 'decimal_4sf';
+    if (variant === 'solve_abs_exp_unique') return 'integer';
+    if (variant === 'evaluate_e_3sf') return 'decimal_4sf';
+    if (variant === 'solve_exp_ln_exact') return 'text';
+    if (variant === 'exp_inequality_ln') return 'decimal_4sf';
     if (variant === 'exp_to_log' || variant === 'exp_to_log_const' || variant === 'exp_to_log_two_vars' || variant === 'exp_to_log_ab_c') return 'text';
     if (variant === 'single_log_sum' || variant === 'single_log_diff' || variant === 'single_log_power') return 'text';
-    if (variant === 'single_log_coeff_sum' || variant === 'single_log_coeff_diff' || variant === 'single_log_const_plus' || variant === 'single_log_const_minus' || variant === 'single_log_then_simplify') return 'text';
+    if (variant === 'single_log_coeff_sum' || variant === 'single_log_coeff_diff' || variant === 'single_log_const_plus' || variant === 'single_log_const_minus') return 'text';
+    if (variant === 'solve_log_equation' || variant === 'solve_nested_log') return 'text';
+    if (variant === 'exp_inequality_log10') return 'text';
     if (variant === 'log_to_exp_basic' || variant === 'log_to_exp_frac' || variant === 'log_to_exp_zero' || variant === 'log_to_exp_var_rhs') return 'text';
     if (variant === 'simplify_log_power') return 'text';
-    if (variant === 'solve_log_basic' || variant === 'solve_log_linear' || variant === 'solve_log_zero' || variant === 'solve_nested_log') return 'integer';
+    if (variant === 'solve_log_basic' || variant === 'solve_log_linear' || variant === 'solve_log_zero') return 'integer';
     if (variant === 'evaluate_decimal' || variant === 'evaluate_root') return 'integer';
     if (variant === 'evaluate_fraction') return 'integer';
     return 'integer';
@@ -220,6 +274,366 @@ export function generateLogarithmsQuestion(input: {
     if (input.difficulty === 'medium') return rng.pick([2, 3, 4, 5, 6, 8, 9, 10]);
     return rng.pick([2, 3, 4, 5, 6, 7, 8, 9, 10, 12]);
   };
+
+  if (variant === 'solve_exp_3sf') {
+    const base = rng.pick([2, 3, 4, 5, 6, 7, 8, 9, 10]);
+    // Choose a non-integer solution so a calculator is actually needed.
+    const x = (() => {
+      const raw = input.difficulty === 'easy'
+        ? (rng.int(12, 28) / 10)
+        : input.difficulty === 'medium'
+          ? (rng.int(14, 42) / 10)
+          : (rng.int(16, 60) / 10);
+      return Number(raw.toFixed(2));
+    })();
+    // Display RHS rounded to 4 s.f. to avoid long decimals in the prompt.
+    const bShown = to4sf(Math.pow(base, x));
+    // Solve based on the displayed value so the equation is consistent.
+    const xFromShown = Math.log(bShown) / Math.log(base);
+    const expected = to4sf(xFromShown);
+
+    const katexQuestion = String.raw`\text{Usage of calculator is allowed. Solve and give }x\text{ correct to 4 significant figures: }\;${base}^{x}=${bShown}`;
+    const katexExplanation: KatexExplanationBlock[] = [
+      { kind: 'text', content: 'Take logs of both sides.' },
+      { kind: 'math', content: String.raw`${base}^{x}=${bShown}`, displayMode: true },
+      { kind: 'math', content: String.raw`x\log_{10}(${base})=\log_{10}(${bShown})`, displayMode: true },
+      { kind: 'math', content: String.raw`x=\frac{\log_{10}(${bShown})}{\log_{10}(${base})}`, displayMode: true },
+      { kind: 'text', content: `So x \approx ${expected} (4 s.f.).` },
+    ];
+
+    return {
+      kind: 'logarithms',
+      topicId: 'logarithms',
+      variantId: 'solve_exp_3sf',
+      answerKind: 'decimal_4sf',
+      id: buildId(input.seed, variant),
+      seed: input.seed,
+      difficulty: input.difficulty,
+      katexQuestion,
+      katexExplanation,
+      expectedNumber: expected,
+      expectedLatex: String.raw`${expected}`,
+    };
+  }
+
+  if (variant === 'evaluate_e_3sf') {
+    const exp = input.difficulty === 'easy'
+      ? rng.pick([0.8, 1, 1.2, 1.5, 2])
+      : input.difficulty === 'medium'
+        ? rng.pick([0.6, 0.8, 1.3, 1.7, 2.2, 2.7])
+        : rng.pick([0.4, 0.7, 1.1, 1.8, 2.5, 3.1]);
+    const value = to4sf(Math.exp(exp));
+    const katexQuestion = String.raw`\text{Usage of calculator is allowed. Evaluate correct to 4 significant figures: }\;e^{${exp}}`;
+    const katexExplanation: KatexExplanationBlock[] = [
+      { kind: 'text', content: 'Use a calculator to evaluate and round to 4 significant figures.' },
+      { kind: 'math', content: String.raw`e^{${exp}}\approx ${value}`, displayMode: true },
+    ];
+    return {
+      kind: 'logarithms',
+      topicId: 'logarithms',
+      variantId: 'evaluate_e_3sf',
+      answerKind: 'decimal_4sf',
+      id: buildId(input.seed, variant),
+      seed: input.seed,
+      difficulty: input.difficulty,
+      katexQuestion,
+      katexExplanation,
+      expectedNumber: value,
+      expectedLatex: String.raw`${value}`,
+    };
+  }
+
+  if (variant === 'solve_exp_ln_exact') {
+    const a = rng.pick([1, 2, 3]);
+    const b = rng.pick([-3, -2, -1, 0, 1, 2, 3]);
+    const c = rng.pick([2, 3, 5, 7, 10, 12, 15, 20]);
+    const katexQuestion = String.raw`\text{Usage of calculator is not allowed. Solve, giving your answer in terms of natural logarithms: }\;e^{${a}x ${b >= 0 ? '+' : '-'} ${Math.abs(b)}}=${c}`;
+    const expectedLatex = b === 0
+      ? String.raw`x=\frac{\ln(${c})}{${a}}`
+      : String.raw`x=\frac{\ln(${c}) ${b >= 0 ? '-' : '+'} ${Math.abs(b)}}{${a}}`;
+    const katexExplanation: KatexExplanationBlock[] = [
+      { kind: 'text', content: 'Take natural logs of both sides.' },
+      { kind: 'math', content: String.raw`e^{${a}x ${b >= 0 ? '+' : '-'} ${Math.abs(b)}}=${c}`, displayMode: true },
+      { kind: 'math', content: String.raw`\ln\left(e^{${a}x ${b >= 0 ? '+' : '-'} ${Math.abs(b)}}\right)=\ln(${c})`, displayMode: true },
+      { kind: 'math', content: String.raw`${a}x ${b >= 0 ? '+' : '-'} ${Math.abs(b)}=\ln(${c})`, displayMode: true },
+      { kind: 'math', content: expectedLatex, displayMode: true },
+    ];
+    return {
+      kind: 'logarithms',
+      topicId: 'logarithms',
+      variantId: 'solve_exp_ln_exact',
+      answerKind: 'text',
+      id: buildId(input.seed, variant),
+      seed: input.seed,
+      difficulty: input.difficulty,
+      katexQuestion,
+      katexExplanation,
+      expectedLatex,
+    };
+  }
+
+  if (variant === 'exp_inequality_ln') {
+    const a = rng.pick([1, 2, 3]);
+    const b = rng.pick([-3, -2, -1, 0, 1, 2, 3]);
+    const c = rng.pick([2, 3, 5, 7, 10, 12, 15, 20]);
+    const sense = rng.pick(['<', '>', '\\le', '\\ge'] as const);
+    const bound = (Math.log(c) - b) / a;
+    const expected = to4sf(bound);
+
+    const ineq = String.raw`e^{${a}x ${b >= 0 ? '+' : '-'} ${Math.abs(b)}}\;${sense}\;${c}`;
+    const katexQuestion = String.raw`\text{Usage of calculator is allowed. Solve and give the critical value of }x\text{ correct to 4 significant figures: }\;${ineq}`;
+    const rhs = b === 0
+      ? String.raw`\frac{\ln(${c})}{${a}}`
+      : String.raw`\frac{\ln(${c}) ${b >= 0 ? '-' : '+'} ${Math.abs(b)}}{${a}}`;
+    const expectedLatex = sense === '<'
+      ? String.raw`x < ${rhs}`
+      : sense === '>'
+        ? String.raw`x > ${rhs}`
+        : sense === '\\le'
+          ? String.raw`x \\le ${rhs}`
+          : String.raw`x \\ge ${rhs}`;
+    const katexExplanation: KatexExplanationBlock[] = [
+      { kind: 'text', content: 'Because e^t is increasing, taking ln keeps the inequality direction the same.' },
+      { kind: 'math', content: String.raw`e^{${a}x ${b >= 0 ? '+' : '-'} ${Math.abs(b)}}\;${sense}\;${c}`, displayMode: true },
+      { kind: 'math', content: String.raw`${a}x ${b >= 0 ? '+' : '-'} ${Math.abs(b)}\;${sense}\;\ln(${c})`, displayMode: true },
+      { kind: 'math', content: expectedLatex, displayMode: true },
+      { kind: 'text', content: `So the critical value is x \u2248 ${expected} (4 s.f.).` },
+    ];
+    return {
+      kind: 'logarithms',
+      topicId: 'logarithms',
+      variantId: 'exp_inequality_ln',
+      answerKind: 'decimal_4sf',
+      id: buildId(input.seed, variant),
+      seed: input.seed,
+      difficulty: input.difficulty,
+      promptBlocks: [
+        { kind: 'text', content: 'Usage of calculator is allowed. Solve and give the critical value of x correct to 4 significant figures: ' },
+        { kind: 'math', content: ineq },
+      ],
+      katexQuestion,
+      katexExplanation,
+      expectedLatex,
+      expectedNumber: expected,
+    };
+  }
+
+  if (variant === 'exp_inequality_log10') {
+    const base = rng.pick([2, 3, 5, 10]);
+    const k = base === 10 ? rng.pick([3, 5, 7, 12, 25, 30]) : rng.pick([3, 5, 7, 12, 20, 35]);
+    const sense = rng.pick(['<', '>', '\\le', '\\ge'] as const);
+
+    const katexQuestion = String.raw`\text{Usage of calculator is allowed. Solve for }x\text{ in terms of base-10 logarithms: }\;${base}^{x}\;${sense}\;${k}`;
+    const rhs = String.raw`\frac{\log_{10}(${k})}{\log_{10}(${base})}`;
+    const expectedLatex = sense === '<'
+      ? String.raw`x < ${rhs}`
+      : sense === '>'
+        ? String.raw`x > ${rhs}`
+        : sense === '\\le'
+          ? String.raw`x \le ${rhs}`
+          : String.raw`x \ge ${rhs}`;
+
+    const katexExplanation: KatexExplanationBlock[] = [
+      { kind: 'text', content: 'Take base-10 logs of both sides.' },
+      { kind: 'math', content: String.raw`${base}^{x}\;${sense}\;${k}`, displayMode: true },
+      { kind: 'math', content: String.raw`\log_{10}(${base}^{x})\;${sense}\;\log_{10}(${k})`, displayMode: true },
+      { kind: 'math', content: String.raw`x\log_{10}(${base})\;${sense}\;\log_{10}(${k})`, displayMode: true },
+      { kind: 'text', content: 'Now divide by \log_{10}(' + String(base) + ') (it is positive because the base is > 1).' },
+      { kind: 'math', content: expectedLatex, displayMode: true },
+    ];
+
+    return {
+      kind: 'logarithms',
+      topicId: 'logarithms',
+      variantId: 'exp_inequality_log10',
+      answerKind: 'text',
+      id: buildId(input.seed, variant),
+      seed: input.seed,
+      difficulty: input.difficulty,
+      katexQuestion,
+      katexExplanation,
+      expectedLatex,
+    };
+  }
+
+  if (variant === 'solve_exp_sub_u_ax') {
+    // Single-answer substitution-style equation using a repeated root in u=a^x.
+    const base = rng.pick([2, 3, 5, 10]);
+    const sym = rng.pick(['u', 'v', 'w', 't']);
+    const k = input.difficulty === 'easy' ? rng.pick([0, 1, 2, 3]) : rng.pick([0, 1, 2, 3, 4]);
+    const u1 = Math.pow(base, k);
+
+    const katexQuestion = String.raw`\text{Usage of calculator is not allowed.}\\[0.7em]\text{Use }${sym}=${base}^{x}\text{ to solve:}\\[0.7em]${base}^{2x}\; -\; ${2 * u1}\cdot ${base}^{x}\; +\; ${u1 * u1}\;=\;0`;
+    const katexExplanation: KatexExplanationBlock[] = [
+      { kind: 'text', content: `Choose the substitution ${sym} = ${base}^x so the equation becomes a quadratic in ${sym}.` },
+      { kind: 'math', content: String.raw`${sym}=${base}^{x}\quad\Rightarrow\quad ${base}^{2x}=(${base}^{x})^{2}=${sym}^{2}`, displayMode: true },
+      { kind: 'text', content: `Rewrite every term in terms of ${sym}.` },
+      { kind: 'math', content: String.raw`${base}^{2x} - ${2 * u1}\cdot ${base}^{x} + ${u1 * u1} = 0\quad\Rightarrow\quad ${sym}^{2} - ${2 * u1}${sym} + ${u1 * u1} = 0`, displayMode: true },
+      { kind: 'text', content: 'Factorise or complete the square to solve the quadratic.' },
+      { kind: 'math', content: String.raw`${sym}^{2} - ${2 * u1}${sym} + ${u1 * u1} = (${sym}-${u1})^{2}`, displayMode: true },
+      { kind: 'text', content: 'Set the square equal to zero.' },
+      { kind: 'math', content: String.raw`(${sym}-${u1})^{2}=0\quad\Rightarrow\quad ${sym}=${u1}`, displayMode: true },
+      { kind: 'text', content: `Substitute back ${sym}=${base}^{x}.` },
+      { kind: 'math', content: String.raw`${base}^{x}=${u1}`, displayMode: true },
+      { kind: 'text', content: 'Write the right-hand side as a power of the same base.' },
+      { kind: 'math', content: String.raw`${u1}=${base}^{${k}}`, displayMode: true },
+      { kind: 'text', content: 'Equate exponents.' },
+      { kind: 'math', content: String.raw`${base}^{x}=${base}^{${k}}\quad\Rightarrow\quad x=${k}`, displayMode: true },
+    ];
+
+    return {
+      kind: 'logarithms',
+      topicId: 'logarithms',
+      variantId: 'solve_exp_sub_u_ax',
+      answerKind: 'integer',
+      id: buildId(input.seed, variant),
+      seed: input.seed,
+      difficulty: input.difficulty,
+      katexQuestion,
+      katexExplanation,
+      expectedNumber: k,
+      expectedLatex: String.raw`${k}`,
+    };
+  }
+
+  if (variant === 'evaluate_ln_3sf') {
+    const arg = rng.pick([0.15, 0.2, 0.3, 0.6, 0.9, 1.4, 3]);
+    const value = to4sf(Math.log(arg));
+    const katexQuestion = String.raw`\text{Usage of calculator is allowed. Evaluate correct to 4 significant figures: }\;\ln(${arg})`;
+    const katexExplanation: KatexExplanationBlock[] = [
+      { kind: 'text', content: 'Use a calculator to evaluate the natural log and round to 4 significant figures.' },
+      { kind: 'math', content: String.raw`\ln(${arg})\approx ${value}`, displayMode: true },
+    ];
+
+    return {
+      kind: 'logarithms',
+      topicId: 'logarithms',
+      variantId: 'evaluate_ln_3sf',
+      answerKind: 'decimal_4sf',
+      id: buildId(input.seed, variant),
+      seed: input.seed,
+      difficulty: input.difficulty,
+      katexQuestion,
+      katexExplanation,
+      expectedNumber: value,
+      expectedLatex: String.raw`${value}`,
+    };
+  }
+
+  if (variant === 'solve_ln_3sf') {
+    const c = rng.pick([1, 2, 3, 4, 5]);
+    const k = input.difficulty === 'easy'
+      ? rng.pick([1.2, 1.4, 1.6, 1.8])
+      : rng.pick([1.1, 1.3, 1.5, 1.7, 1.9, 2.1]);
+    const x = to4sf(Math.exp(k) - c);
+
+    const katexQuestion = String.raw`\text{Usage of calculator is allowed. Solve and give }x\text{ correct to 4 significant figures: }\;\ln(x+${c})=${k}`;
+    const katexExplanation: KatexExplanationBlock[] = [
+      { kind: 'text', content: 'Exponentiate both sides to undo the natural log.' },
+      { kind: 'math', content: String.raw`\ln(x+${c})=${k} \iff x+${c}=e^{${k}}`, displayMode: true },
+      { kind: 'math', content: String.raw`x=e^{${k}}-${c}`, displayMode: true },
+      { kind: 'text', content: 'Now evaluate with a calculator and round to 4 significant figures.' },
+      { kind: 'math', content: String.raw`x\approx ${x}`, displayMode: true },
+    ];
+
+    return {
+      kind: 'logarithms',
+      topicId: 'logarithms',
+      variantId: 'solve_ln_3sf',
+      answerKind: 'decimal_4sf',
+      id: buildId(input.seed, variant),
+      seed: input.seed,
+      difficulty: input.difficulty,
+      katexQuestion,
+      katexExplanation,
+      expectedNumber: x,
+      expectedLatex: String.raw`${x}`,
+    };
+  }
+
+  if (variant === 'solve_abs_exp_unique') {
+    // Construct |a^x - A| = A which has only one valid solution (a^x = 2A).
+    const base = rng.pick([2, 3, 5]);
+    const k = input.difficulty === 'easy' ? rng.pick([1, 2, 3]) : rng.pick([1, 2, 3, 4, 5]);
+    const A = Math.pow(base, k);
+    const x = k + 1;
+
+    const katexQuestion = String.raw`\text{Usage of calculator is not allowed. Solve: }\;\left|${base}^{x}- ${A}\right| = ${A}`;
+    const katexExplanation: KatexExplanationBlock[] = [
+      { kind: 'text', content: 'Use the definition of absolute value.' },
+      { kind: 'math', content: String.raw`\left|U\right|=A \iff U=A\;\text{or}\;U=-A`, displayMode: true },
+      { kind: 'math', content: String.raw`${base}^{x}-${A}=${A}\;\text{or}\;${base}^{x}-${A}=-${A}`, displayMode: true },
+      { kind: 'math', content: String.raw`${base}^{x}=2\cdot ${A}\;\text{or}\;${base}^{x}=0`, displayMode: true },
+      { kind: 'text', content: 'But ' + String(base) + '^x cannot be 0, so only the first equation is valid.' },
+      { kind: 'math', content: String.raw`${base}^{x}=2\cdot ${base}^{${k}}`, displayMode: true },
+      { kind: 'math', content: String.raw`${base}^{x}=${base}^{${k+1}}`, displayMode: true },
+      { kind: 'math', content: String.raw`x=${x}`, displayMode: true },
+    ];
+
+    return {
+      kind: 'logarithms',
+      topicId: 'logarithms',
+      variantId: 'solve_abs_exp_unique',
+      answerKind: 'integer',
+      id: buildId(input.seed, variant),
+      seed: input.seed,
+      difficulty: input.difficulty,
+      katexQuestion,
+      katexExplanation,
+      expectedNumber: x,
+      expectedLatex: String.raw`${x}`,
+    };
+  }
+
+  if (variant === 'solve_log_equation') {
+    const base = pickLogBase();
+    const p = input.difficulty === 'easy' ? rng.pick([1, 2]) : rng.pick([1, 2, 3]);
+    const s = input.difficulty === 'easy' ? rng.pick([1, 2, 3, 4]) : rng.pick([1, 2, 3, 4, 5, 6]);
+    const t = -(p + rng.pick([1, 2, 3, 4]));
+    const m = s + t + 2 * p;
+    const n = p * p - s * t;
+
+    const a = 2;
+    const katexQuestion = String.raw`\text{Solve: }\;${a}\log_{${base}}(x+${p})=\log_{${base}}(${m}x+${n})`;
+
+    const eq0 = String.raw`${a}\log_{${base}}(x+${p})=\log_{${base}}(${m}x+${n})`;
+    const eq1 = String.raw`\log_{${base}}\left((x+${p})^{${a}}\right)=\log_{${base}}(${m}x+${n})`;
+    const eq2 = String.raw`(x+${p})^{${a}}=${m}x+${n}`;
+    const eq3 = String.raw`x^{2}+${2 * p}x+${p * p}=${m}x+${n}`;
+    const eq4 = String.raw`x^{2}+${2 * p - m}x+${p * p - n}=0`;
+    const eq5 = String.raw`(x-${s})(x-${t})=0`;
+    const eq6 = String.raw`x=${s}\;\text{or}\;x=${t}`;
+    const checkS = String.raw`x=${s}:\;x+${p}=${s + p}>0\;\text{and}\;${m}x+${n}=${m * s + n}>0`;
+    const checkT = String.raw`x=${t}:\;x+${p}=${t + p}\le 0\;\text{(not defined)}`;
+
+    const katexExplanation: KatexExplanationBlock[] = [
+      { kind: 'math_callout', content: eq0, callout: 'Use the power law.', displayMode: true },
+      { kind: 'math_callout', content: eq1, callout: 'Use equality of logarithms.', displayMode: true },
+      { kind: 'math_callout', content: eq2, callout: 'Now solve the equation.', displayMode: true },
+      { kind: 'math_callout', content: eq3, callout: 'Expand brackets.', displayMode: true },
+      { kind: 'math', content: eq4, displayMode: true },
+      { kind: 'math', content: eq5, displayMode: true },
+      { kind: 'math', content: eq6, displayMode: true },
+      { kind: 'text', content: 'Check which solutions make the logarithms defined (arguments must be positive).' },
+      { kind: 'math', content: checkS, displayMode: true },
+      { kind: 'math', content: checkT, displayMode: true },
+      { kind: 'text', content: `Hence, the solution is x = ${s}.` },
+    ];
+
+    return {
+      kind: 'logarithms',
+      topicId: 'logarithms',
+      variantId: 'solve_log_equation',
+      answerKind: 'integer',
+      id: buildId(input.seed, variant),
+      seed: input.seed,
+      difficulty: input.difficulty,
+      katexQuestion,
+      katexExplanation,
+      expectedNumber: s,
+      expectedLatex: String.raw`${s}`,
+    };
+  }
 
   if (variant === 'single_log_coeff_sum' || variant === 'single_log_coeff_diff') {
     const base = pickLogBase();
@@ -271,6 +685,7 @@ export function generateLogarithmsQuestion(input: {
       difficulty: input.difficulty,
       katexQuestion,
       katexExplanation,
+      expectedParts: [String(base), String(inner)],
       expectedLatex,
     };
   }
@@ -321,6 +736,7 @@ export function generateLogarithmsQuestion(input: {
       difficulty: input.difficulty,
       katexQuestion,
       katexExplanation,
+      expectedParts: [String(base), String(inside)],
       expectedLatex,
     };
   }
@@ -345,8 +761,23 @@ export function generateLogarithmsQuestion(input: {
       ? String.raw`\log_{${base}}\left(\frac{${A}}{${B}}\right)`
       : String.raw`\log_{${base}}(${A}\cdot ${B})`;
 
+    const gcdInt = (x: number, y: number) => {
+      let a = Math.abs(x);
+      let b = Math.abs(y);
+      while (b !== 0) {
+        const t0 = a % b;
+        a = b;
+        b = t0;
+      }
+      return a || 1;
+    };
+
+    const g = isDiff ? gcdInt(u, v) : 1;
+    const u2 = isDiff ? Math.floor(u / g) : u;
+    const v2 = isDiff ? Math.floor(v / g) : v;
+
     const simplifiedInside = isDiff
-      ? String.raw`\frac{${u}}{${v}}`
+      ? String.raw`\frac{${u2}}{${v2}}`
       : String.raw`${A * B}`;
 
     const expectedLatex = String.raw`\log_{${base}}\left(${simplifiedInside}\right)`;
@@ -361,7 +792,7 @@ export function generateLogarithmsQuestion(input: {
       { kind: 'math', content: combined, displayMode: true },
       { kind: 'text', content: 'Step 2: simplify the expression inside the log (cancel common factors or multiply).' },
       isDiff
-        ? { kind: 'math', content: String.raw`\frac{${A}}{${B}}=\frac{${t}\cdot ${u}}{${t}\cdot ${v}}=\frac{${u}}{${v}}`, displayMode: true }
+        ? { kind: 'math', content: String.raw`\frac{${A}}{${B}}=\frac{${t}\cdot ${u}}{${t}\cdot ${v}}=\frac{${u}}{${v}}=\frac{${u2}}{${v2}}`, displayMode: true }
         : { kind: 'math', content: String.raw`${A}\cdot ${B} = ${A * B}`, displayMode: true },
       { kind: 'text', content: 'So the final simplified single logarithm is:' },
       { kind: 'math', content: expectedLatex, displayMode: true },
@@ -377,6 +808,7 @@ export function generateLogarithmsQuestion(input: {
       difficulty: input.difficulty,
       katexQuestion,
       katexExplanation,
+      expectedParts: [String(base), String(simplifiedInside)],
       expectedLatex,
     };
   }
@@ -522,14 +954,25 @@ export function generateLogarithmsQuestion(input: {
   if (variant === 'solve_log_linear') {
     const base = rng.pick([2, 3, 5, 10]);
     const m = rng.pick([1, 2, 3, 4, 5]);
-    const c = rng.pick([-6, -5, -4, -3, -2, -1, 1, 2, 3, 4, 5, 6]);
-    const k = rng.pick([0, 1, 2, 3]);
-    const rhs = Math.pow(base, k);
-    const x = (rhs - c) / m;
-    // Ensure integer x.
-    const xInt = Number.isFinite(x) ? Math.round(x) : 1;
-    const rhs2 = m * xInt + c;
-    const k2 = Math.round(Math.log(rhs2) / Math.log(base));
+
+    // Construct a guaranteed-valid equation by picking k and x first,
+    // then setting c so that mx + c = base^k at the solution.
+    const k2 = rng.pick([0, 1, 2, 3]);
+    const rhs2 = Math.pow(base, k2);
+
+    let xInt = 1;
+    let c = 1;
+    for (let attempt = 0; attempt < 40; attempt++) {
+      const candidateX = rng.pick([1, 2, 3, 4, 5, 6, 7, 8]);
+      const candidateC = rhs2 - m * candidateX;
+      // Keep constants readable and avoid 0 so formatting stays clean.
+      if (candidateC === 0) continue;
+      if (candidateC < -12 || candidateC > 12) continue;
+      xInt = candidateX;
+      c = candidateC;
+      break;
+    }
+
     const katexQuestion = String.raw`\text{Solve: }\;\log_{${base}}\big(${m}x ${c >= 0 ? '+' : '-'} ${Math.abs(c)}\big) = ${k2}`;
     const katexExplanation: KatexExplanationBlock[] = [
       { kind: 'text', content: 'Convert to exponential form, then solve the resulting linear equation.' },

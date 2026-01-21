@@ -53,7 +53,16 @@ const PRACTICE_VARIANTS: Partial<Record<PracticeTopicId, string[]>> = {
     'single_log_const_plus',
     'single_log_const_minus',
     'single_log_then_simplify',
+    'solve_log_equation',
     'solve_nested_log',
+    'exp_inequality_log10',
+    'solve_exp_sub_u_ax',
+    'evaluate_ln_3sf',
+    'solve_ln_3sf',
+    'solve_abs_exp_unique',
+    'evaluate_e_3sf',
+    'solve_exp_ln_exact',
+    'exp_inequality_ln',
     'log_to_exp_basic',
     'log_to_exp_frac',
     'log_to_exp_zero',
@@ -293,6 +302,7 @@ export default function Practice() {
 
   const [lastVariantByTopic, setLastVariantByTopic] = useState<Record<string, string | undefined>>({});
   const [recentQuestionIds, setRecentQuestionIds] = useState<string[]>([]);
+  const [recentQuestionKeys, setRecentQuestionKeys] = useState<string[]>([]);
   const [recentWordProblemCategories, setRecentWordProblemCategories] = useState<string[]>([]);
 
   const practiceHistoryLoadedRef = useRef(false);
@@ -849,6 +859,9 @@ export default function Practice() {
       setRecentQuestionIds(ph.recentQuestionIds.slice(0, 1000));
       setRecentWordProblemCategories(ph.recentWordProblemCategories.slice(0, 50));
     }
+    if (ph && Array.isArray(ph.recentQuestionKeys)) {
+      setRecentQuestionKeys(ph.recentQuestionKeys.slice(0, 1200));
+    }
     practiceHistoryLoadedRef.current = true;
   }, [settings]);
 
@@ -862,6 +875,7 @@ export default function Practice() {
       void db.settings.update('1', {
         practiceHistory: {
           recentQuestionIds: recentQuestionIds.slice(0, 1000),
+          recentQuestionKeys: recentQuestionKeys.slice(0, 1200),
           recentWordProblemCategories: recentWordProblemCategories.slice(0, 50),
           updatedAt: Date.now(),
         },
@@ -874,7 +888,7 @@ export default function Practice() {
         practiceHistoryPersistTimerRef.current = null;
       }
     };
-  }, [recentQuestionIds, recentWordProblemCategories]);
+  }, [recentQuestionIds, recentQuestionKeys, recentWordProblemCategories]);
 
   const rememberQuestionId = (id: string) => {
     if (!id) return;
@@ -883,6 +897,80 @@ export default function Practice() {
       return next.length > 1000 ? next.slice(0, 1000) : next;
     });
   };
+
+  const rememberQuestionKey = (key: string) => {
+    if (!key) return;
+    setRecentQuestionKeys((prev) => {
+      const next = [key, ...prev];
+      return next.length > 1200 ? next.slice(0, 1200) : next;
+    });
+  };
+
+  const getQuestionDedupKey = useCallback((q: QuadraticFactorizationQuestion | PracticeQuestion): string => {
+    const anyQ: any = q as any;
+    const stableStringify = (value: any): string => {
+      const seen = new WeakSet<object>();
+      const norm = (v: any): any => {
+        if (v == null) return v;
+        const t = typeof v;
+        if (t === 'string' || t === 'number' || t === 'boolean') return v;
+        if (Array.isArray(v)) return v.map(norm);
+        if (t === 'object') {
+          if (seen.has(v)) return '[Circular]';
+          seen.add(v);
+          const out: Record<string, any> = {};
+          const keys = Object.keys(v).sort();
+          for (const k of keys) {
+            if (
+              k === 'id' ||
+              k === 'seed' ||
+              k === 'createdAt' ||
+              k === 'updatedAt' ||
+              k === 'image' ||
+              k === 'imageUrl' ||
+              k === 'imageDataUrl' ||
+              k === 'attachments' ||
+              k === 'svgDataUrl'
+            ) {
+              continue;
+            }
+            out[k] = norm(v[k]);
+          }
+          return out;
+        }
+        return String(v);
+      };
+      try {
+        return JSON.stringify(norm(value));
+      } catch {
+        return '';
+      }
+    };
+
+    const keyObj = {
+      topicId: anyQ.topicId,
+      difficulty: anyQ.difficulty,
+      variantId: anyQ.variantId,
+      generatorParams: anyQ.generatorParams,
+      katexQuestion: anyQ.katexQuestion,
+      promptKatex: anyQ.promptKatex,
+      promptText: anyQ.promptText,
+      katexOptions: anyQ.katexOptions,
+      options: anyQ.options,
+      choices: anyQ.choices,
+      answers: anyQ.answers,
+      inputFields: anyQ.inputFields,
+    };
+
+    const body = stableStringify(keyObj);
+    if (!body) return '';
+    let h = 2166136261;
+    for (let i = 0; i < body.length; i++) {
+      h ^= body.charCodeAt(i);
+      h = Math.imul(h, 16777619);
+    }
+    return `${String(anyQ.topicId ?? 'q')}:${(h >>> 0).toString(16)}`;
+  }, []);
 
   const wordProblemCategory = (variantId: unknown) => {
     const v = String(variantId ?? '');
@@ -985,23 +1073,29 @@ export default function Practice() {
       const scored = recent.filter((e) => typeof e.isCorrect === 'boolean');
       const correct = scored.reduce((acc, e) => acc + (e.isCorrect ? 1 : 0), 0);
       const acc = scored.length ? correct / scored.length : 0;
+      if (acc >= 0.95) return 'ultimate' as PracticeDifficulty;
       if (acc >= 0.9) return 'hard' as PracticeDifficulty;
       if (acc >= 0.75) return 'medium' as PracticeDifficulty;
       return 'easy' as PracticeDifficulty;
     };
 
     const recentSet = new Set(recentQuestionIds);
+    const recentKeySet = new Set(recentQuestionKeys);
     const tryGenerate = (
       fn: (seed: number) => QuadraticFactorizationQuestion | PracticeQuestion,
       accept?: (q: QuadraticFactorizationQuestion | PracticeQuestion) => boolean,
       opts?: { strict?: boolean }
     ) => {
       const hasTextFilter = Boolean(onlyQuestionTextQuery.trim());
-      for (let attempt = 0; attempt < 50; attempt++) {
+      for (let attempt = 0; attempt < 1200; attempt++) {
         const seed = seedValue + attempt;
         const q = fn(seed);
-        if (!opts?.strict && !hasTextFilter && recentSet.has(q.id)) continue;
-        if (!opts?.strict && accept && !accept(q)) continue;
+        if (!hasTextFilter && recentSet.has(q.id)) continue;
+        if (!hasTextFilter) {
+          const k = getQuestionDedupKey(q);
+          if (k && recentKeySet.has(k)) continue;
+        }
+        if (accept && !accept(q)) continue;
         if (hasTextFilter) {
           const hay = getQuestionSearchText(q).toLowerCase();
           const needles = onlyQuestionTextQuery
@@ -1059,7 +1153,7 @@ export default function Practice() {
           if (picked.difficultyMode === 'fixed') return (picked.difficulty ?? 'easy') as PracticeDifficulty;
           if (picked.difficultyMode === 'mix') {
             const w = picked.difficultyWeights ?? {};
-            const candidates: PracticeDifficulty[] = ['easy', 'medium', 'hard'];
+            const candidates: PracticeDifficulty[] = ['easy', 'medium', 'hard', 'ultimate'];
             const best = weightedPick(candidates, (d) => Number((w as any)[d] ?? 0), seedValue);
             return (best ?? 'easy') as PracticeDifficulty;
           }
@@ -1088,6 +1182,7 @@ export default function Practice() {
           }
           setQuestion(q);
           rememberQuestionId(q.id);
+          rememberQuestionKey(getQuestionDedupKey(q));
         } else {
           const forced =
             variantOverride?.topicId === item.topicId ? buildForcedVariantWeights(item.topicId, variantOverride.variantId) : null;
@@ -1123,6 +1218,7 @@ export default function Practice() {
 
           setQuestion(q);
           rememberQuestionId(q.id);
+          rememberQuestionKey(getQuestionDedupKey(q));
           if (item.topicId === 'word_problems') {
             const nextVariant = (q as any).variantId ?? undefined;
             setLastVariantByTopic((m) => ({ ...m, word_problems: nextVariant }));
@@ -1181,6 +1277,7 @@ export default function Practice() {
         }
         setQuestion(q);
         rememberQuestionId(q.id);
+        rememberQuestionKey(getQuestionDedupKey(q));
       } else {
         const forced = variantOverride?.topicId === item.topicId
           ? buildForcedVariantWeights(item.topicId, variantOverride.variantId)
@@ -1212,6 +1309,7 @@ export default function Practice() {
         }
         setQuestion(q);
         rememberQuestionId(q.id);
+        rememberQuestionKey(getQuestionDedupKey(q));
         if (item.topicId === 'word_problems') {
           const nextVariant = (q as any).variantId ?? undefined;
           setLastVariantByTopic((m) => ({ ...m, word_problems: nextVariant }));
@@ -1240,6 +1338,7 @@ export default function Practice() {
       }
       setQuestion(q);
       rememberQuestionId(q.id);
+      rememberQuestionKey(getQuestionDedupKey(q));
       resetAttemptState();
       return;
     }
@@ -1270,6 +1369,7 @@ export default function Practice() {
     }
     setQuestion(q);
     rememberQuestionId(q.id);
+    rememberQuestionKey(getQuestionDedupKey(q));
     // Record last variant id (if present) so the next question avoids it.
     const nextVariant = (q as any).variantId ?? (q as any).generatorParams?.kind ?? undefined;
     setLastVariantByTopic((m) => ({ ...m, [topicId]: nextVariant }));
@@ -2202,6 +2302,17 @@ export default function Practice() {
           'exp_to_log_ab_c',
         ].includes(variantId);
 
+        const isSingleLog = [
+          'single_log_sum',
+          'single_log_diff',
+          'single_log_power',
+          'single_log_coeff_sum',
+          'single_log_coeff_diff',
+          'single_log_const_plus',
+          'single_log_const_minus',
+          'single_log_then_simplify',
+        ].includes(variantId);
+
 				const isConvertToExp = [
 					'log_to_exp_basic',
 					'log_to_exp_frac',
@@ -2220,6 +2331,25 @@ export default function Practice() {
           const expected = (lg.expectedParts as any[]).map((x) => normalize(String(x ?? '')));
           if (inputs.some((s) => !s)) return false;
           return inputs[0] === expected[0] && inputs[1] === expected[1] && inputs[2] === expected[2];
+        }
+
+        if (isSingleLog && Array.isArray(lg.expectedParts) && lg.expectedParts.length >= 2) {
+          const normalize = (raw: string) => String(raw ?? '')
+            .trim()
+            .replace(/[−–]/g, '-')
+            .replace(/\s+/g, '')
+            .replace(/\\left/g, '')
+            .replace(/\\right/g, '')
+            .replace(/[()]/g, '')
+            .replace(/\\(?:frac|dfrac|tfrac)\{([^}]*)\}\{([^}]*)\}/g, '$1/$2')
+            .replace(/\\(?:frac|dfrac|tfrac)(-?\d+)(\d+)/g, '$1/$2')
+            .replace(/\{([^}]*)\}/g, '$1')
+            .toLowerCase();
+          const b = normalize(answer1);
+          const arg = normalize(answer2);
+          if (!b || !arg) return false;
+          const expected = (lg.expectedParts as any[]).map((x) => normalize(String(x ?? '')));
+          return b === (expected[0] ?? '') && arg === (expected[1] ?? '');
         }
 
 				if (isConvertToExp && Array.isArray(lg.expectedParts) && lg.expectedParts.length === 3) {
@@ -2255,6 +2385,27 @@ export default function Practice() {
           return expectedNum !== null
             ? Math.abs(n - expectedNum) < 1e-9
             : Math.abs(n - Number(lg.expectedNumber)) < 1e-9;
+        }
+
+        if (lg.answerKind === 'decimal_4sf') {
+          const raw = raw1;
+          if (!raw) return false;
+          const n = Number(raw);
+          if (Number.isNaN(n)) return false;
+          const toSigFigs = (x: number, sig: number) => {
+            if (!Number.isFinite(x)) return x;
+            const ax = Math.abs(x);
+            if (ax === 0) return 0;
+            const p = Math.floor(Math.log10(ax));
+            const scale = Math.pow(10, sig - 1 - p);
+            return Math.round(x * scale) / scale;
+          };
+
+          const expected = expectedNum !== null ? expectedNum : Number(lg.expectedNumber);
+          if (!Number.isFinite(expected)) return false;
+          const userRounded = toSigFigs(n, 4);
+          const expectedRounded = toSigFigs(expected, 4);
+          return Math.abs(userRounded - expectedRounded) < 1e-9;
         }
 
         // text fallback: compare normalized latex-ish string (be tolerant to optional parentheses)
@@ -2701,7 +2852,7 @@ export default function Practice() {
                         className="w-full h-12 text-base"
                         disabled={!topicId}
                         onClick={() => {
-                          setDifficulty('hard');
+                          setDifficulty('ultimate');
                           setSessionSeed(Date.now());
                           setQuestion(null);
                           setSubmitted(false);
@@ -3046,14 +3197,32 @@ export default function Practice() {
               {(question as any).kind === 'graph' ? (
                 <div className="w-full select-none">
                   {(question as GraphPracticeQuestion).promptText ? (
-                    <div className={`tk-wp-expl-text text-xl md:text-2xl leading-snug text-left text-foreground ${(question as any).topicId === 'clock_reading' ? 'font-slab' : ''}`}>
-                      {(question as GraphPracticeQuestion).promptText}
+                    <div className={`tk-wp-expl-text w-full min-w-0 max-w-full overflow-x-hidden text-xl md:text-2xl leading-snug text-left text-foreground whitespace-normal break-words ${(question as any).topicId === 'clock_reading' ? 'font-slab' : ''}`}>
+                      {(() => {
+                        const s0 = String((question as GraphPracticeQuestion).promptText ?? '');
+                        const s = s0.replace(/\b(sin|cos|tan|sec|csc|cot)\s*\(/g, '\\$1(');
+                        const hasLatex = /\\sin\b|\\cos\b|\\tan\b|\\sec\b|\\csc\b|\\cot\b|\^\{?|_\{|\\frac\{|\\sqrt\b|\\cdot\b|\\pi\b/.test(s);
+                        if (!hasLatex) return s;
+
+                        const parts = s.split(
+                          /(\\frac\{[^}]+\}\{[^}]+\}|\\sqrt\{[^}]+\}|\\cdot|\\pi\b|-?\d*x\^\{\d+\}|x\^\{\d+\}|-?\d*x\^\d+|x\^\d+)/g
+                        );
+                        return (
+                          <span>
+                            {parts.filter((p) => p.length > 0).map((p, i) => {
+                              const isMath =
+                                /^(\\frac\{[^}]+\}\{[^}]+\}|\\sqrt\{[^}]+\}|\\cdot|\\pi\b|-?\d*x\^\{\d+\}|x\^\{\d+\}|-?\d*x\^\d+|x\^\d+)$/.test(p);
+                              return isMath ? <Katex key={i} latex={p} /> : <span key={i}>{p}</span>;
+                            })}
+                          </span>
+                        );
+                      })()}
                     </div>
                   ) : null}
 
                   {(question as GraphPracticeQuestion).promptKatex ? (
                     <div
-                      className={`${(question as GraphPracticeQuestion).promptText ? 'mt-2 text-2xl leading-snug text-left text-foreground' : 'text-2xl leading-snug text-center text-foreground'} max-w-full`}
+                      className={`${(question as GraphPracticeQuestion).promptText ? 'mt-2 text-2xl leading-snug text-left text-foreground' : 'text-2xl leading-snug text-center text-foreground'} w-full min-w-0 max-w-full overflow-x-hidden`}
                     >
                       <Katex latex={(question as GraphPracticeQuestion).promptKatex!} displayMode />
                     </div>
@@ -3111,6 +3280,18 @@ export default function Practice() {
                     });
                   };
 
+                  const wpLatex = isWordProblem ? String((question as any).katexQuestion ?? '').trim() : '';
+                  const wpShouldRenderAsKatex =
+                    !!wpLatex && /\^|_|\\frac\{|\\(?:dfrac|tfrac)\{|\\sqrt\b|\\pi\b|\\ln\b|\\log\b|\\cdot\b|\\int\b/.test(wpLatex);
+
+                  if (isWordProblem && wpShouldRenderAsKatex) {
+                    return (
+                      <div className={`w-full min-w-0 max-w-full select-none font-slab text-xl md:text-2xl leading-snug text-left whitespace-normal break-words`}>
+                        <Katex latex={wpLatex} displayMode />
+                      </div>
+                    );
+                  }
+
                   if (isWordProblem && wpPromptText.trim().length) {
                     const wp = question as any;
 
@@ -3129,12 +3310,12 @@ export default function Practice() {
                       .filter(Boolean);
 
                     return (
-                      <div className={`w-full select-none font-slab text-xl md:text-2xl leading-snug text-left`}>
+                      <div className={`w-full min-w-0 max-w-full select-none font-slab text-xl md:text-2xl leading-snug text-left whitespace-normal break-words`}>
                         <div className="w-full min-w-0 max-w-full space-y-2">
                           {sentences.map((t, i) => {
                             const segs = restoreFractionsParts(t, fracs);
                             return (
-                              <div key={i} className="whitespace-normal">
+                              <div key={i} className="whitespace-normal break-words">
                                 {segs.map((seg, j) => seg.kind === 'math'
                                   ? (
                                     <span key={j} className="inline-block align-baseline mx-1">
@@ -3153,52 +3334,67 @@ export default function Practice() {
                   }
 
                   if (isWordProblem) {
-                    const wpLatex = String((question as any).katexQuestion ?? '').trim();
-                    if (wpLatex && /\\text\b|\\!|\\\.|\\,|\{|\}|\\|\\frac\{/.test(wpLatex)) {
-                      const { out: tmp, fracs } = preserveFractions(wpLatex);
-                      const cleaned = stripLatex(tmp);
-                      if (cleaned) {
-                        const segs = restoreFractionsParts(cleaned, fracs);
+                    if (wpLatex) {
+                      const shouldRenderAsKatex =
+                        /\^|_|\\frac\{|\\(?:dfrac|tfrac)\{|\\sqrt\b|\\pi\b|\\ln\b|\\log\b|\\cdot\b|\\int\b/.test(wpLatex);
+                      if (shouldRenderAsKatex) {
                         return (
-                          <div className={`w-full select-none font-slab text-xl md:text-2xl leading-snug text-left`}>
-                            {segs.map((seg, j) => seg.kind === 'math'
-                              ? (
-                                <span key={j} className="inline-block align-baseline mx-1">
-                                  <Katex latex={seg.value} displayMode={false} />
-                                </span>
-                              )
-                              : (
-                                <span key={j}>{seg.value}</span>
-                              ))}
+                          <div className={`w-full min-w-0 max-w-full select-none font-slab text-xl md:text-2xl leading-snug text-left whitespace-normal break-words`}>
+                            <Katex latex={wpLatex} displayMode />
                           </div>
                         );
+                      }
+
+                      // Fallback: if it's mostly plain text with a few LaTeX wrappers, strip wrappers but keep fractions.
+                      if (/\\text\b|\\!|\\\.|\\,|\{|\}|\\|\\frac\{/.test(wpLatex)) {
+                        const { out: tmp, fracs } = preserveFractions(wpLatex);
+                        const cleaned = stripLatex(tmp);
+                        if (cleaned) {
+                          const segs = restoreFractionsParts(cleaned, fracs);
+                          return (
+                            <div className={`w-full min-w-0 max-w-full select-none font-slab text-xl md:text-2xl leading-snug text-left whitespace-normal break-words`}>
+                              {segs.map((seg, j) => seg.kind === 'math'
+                                ? (
+                                  <span key={j} className="inline-block align-baseline mx-1">
+                                    <Katex latex={seg.value} displayMode={false} />
+                                  </span>
+                                )
+                                : (
+                                  <span key={j}>{seg.value}</span>
+                                ))}
+                            </div>
+                          );
+                        }
                       }
                     }
                   }
 
                   const promptBlocks = (question as any).promptBlocks as any[] | undefined;
-                  if ((question as any).kind === 'polynomial' && Array.isArray(promptBlocks) && promptBlocks.length) {
+                  if (Array.isArray(promptBlocks) && promptBlocks.length) {
                     return (
                       <div className="w-full select-none">
-                        <div className="tk-wp-expl-text text-lg md:text-xl leading-relaxed text-left text-foreground">
-                          {promptBlocks.map((b, i) => {
-                            if (b?.kind === 'text' && String(b?.content ?? '') === '\n') {
-                              return ' ';
-                            }
-                            if (b?.kind === 'math') {
-                              // Render inline so the whole prompt stays on one line.
+                        <div className="tk-wp-expl-text font-slab w-full min-w-0 max-w-full overflow-x-hidden text-lg md:text-xl leading-relaxed text-left text-foreground whitespace-normal break-words">
+                          <span className="inline-flex flex-wrap items-baseline gap-x-1 gap-y-1">
+                            {promptBlocks.map((b, i) => {
+                              if (b?.kind === 'text' && String(b?.content ?? '') === '\n') {
+                                return ' ';
+                              }
+                              if (b?.kind === 'math') {
+                                return (
+                                  <span key={`pm-${i}`} className="tk-prompt-inline-math inline-flex items-baseline max-w-full min-w-0">
+                                    <span className="tk-math-scroll inline-block align-baseline max-w-full">
+                                      <Katex latex={String(b.content ?? '')} displayMode={false} />
+                                    </span>
+                                  </span>
+                                );
+                              }
                               return (
-                                <span key={`pm-${i}`} className="inline-block align-baseline mx-1">
-                                  <Katex latex={String(b.content ?? '')} displayMode={false} />
+                                <span key={`pt-${i}`} className="whitespace-normal">
+                                  {String(b?.content ?? '')}
                                 </span>
                               );
-                            }
-                            return (
-                              <span key={`pt-${i}`} className="whitespace-normal">
-                                {String(b?.content ?? '')}
-                              </span>
-                            );
-                          })}
+                            })}
+                          </span>
                         </div>
                       </div>
                     );
@@ -3801,6 +3997,40 @@ export default function Practice() {
 							/>
 						</div>
 					</div>
+				) : (question as any).kind === 'logarithms'
+					&& [
+						'single_log_sum',
+						'single_log_diff',
+						'single_log_power',
+						'single_log_coeff_sum',
+						'single_log_coeff_diff',
+						'single_log_const_plus',
+						'single_log_const_minus',
+						'single_log_then_simplify',
+					].includes(String((question as any).variantId)) ? (
+					<div className="w-full flex justify-center">
+						<div className="flex items-baseline gap-4">
+							<span className="text-4xl font-semibold select-none leading-none">
+								<Katex latex={String.raw`\log`} displayMode={false} />
+							</span>
+							<Input
+								value={answer1}
+								inputMode="text"
+								onChange={(e) => setAnswer1(e.target.value)}
+								disabled={submitted}
+								className="h-9 w-16 text-xl font-normal text-center py-0.5 align-baseline relative -ml-1 translate-y-3 rounded-none"
+								aria-label="Log base"
+							/>
+							<Input
+								value={answer2}
+								inputMode="text"
+								onChange={(e) => setAnswer2(e.target.value)}
+								disabled={submitted}
+								className="h-12 w-48 text-3xl font-normal text-center py-1 rounded-none"
+								aria-label="Log argument"
+							/>
+						</div>
+					</div>
 				) : (question as any).kind === 'logarithms' && String((question as any).answerKind) === 'text' ? (
 					<MathLiveInput
 						value={answer1}
@@ -4046,16 +4276,24 @@ export default function Practice() {
                           </div>
                           <div className="tk-wp-expl-text text-lg leading-relaxed text-foreground">
                             {(() => {
-                              const text = String(s.text ?? '');
-                              if (!(question as any).generatorParams?.circularMeasure) return text;
-                              // Render simple exponent tokens (e.g. r^2, AB^2) as KaTeX so superscripts display correctly.
-                              const hasCaretExponent = /\b[A-Za-z]{1,6}\^\d+\b/.test(text);
-                              if (!hasCaretExponent) return text;
-                              const parts = text.split(/(\b[A-Za-z]{1,6}\^\d+\b)/g);
+                              const raw = String(s.text ?? '');
+                              // Normalize common plain-text math fragments so they render properly.
+                              const normalized0 = raw
+                                .replace(/\b(sin|cos|tan|sec|csc|cot)\s*\(/g, '\\$1(')
+                                // Convert simple |...| into KaTeX absolute bars.
+                                .replace(/\|([^|]+)\|/g, String.raw`\\left|$1\\right|`);
+
+                              const hasLatex = /\\left\||\\right\||\\sin\b|\\cos\b|\\tan\b|\\sec\b|\\csc\b|\\cot\b|\\frac\{|\\(?:dfrac|tfrac)\{|\\sqrt\b|\\pi\b|\\ln\b|\\log\b|\\cdot\b|\\int\b|\^\{|\^\d|_\{|_\d/.test(normalized0);
+                              if (!hasLatex) return raw;
+
+                              const parts = normalized0.split(
+                                /(\\left\|[\s\S]*?\\right\||\\(?:frac|dfrac|tfrac)\{[^}]+\}\{[^}]+\}|\\sqrt\{[^}]+\}|\\sqrt\[[^\]]+\]\{[^}]+\}|\\pi\b|\\ln\b|\\log(?:_{\{[^}]+\}}|_{[^}]+})?\b|\\sin\b|\\cos\b|\\tan\b|\\sec\b|\\csc\b|\\cot\b|\\cdot|\\int\b|-?\d*x\^\{\d+\}|x\^\{\d+\}|-?\d*x\^\d+|x\^\d+|-?\d*x_\{[^}]+\}|x_\{[^}]+\}|-?\d*x_\d+|x_\d+)/g
+                              );
                               return (
                                 <span>
                                   {parts.filter((p) => p.length > 0).map((p, i) => {
-                                    const isMath = /^\b[A-Za-z]{1,6}\^\d+\b$/.test(p);
+                                    const isMath =
+                                      /^(\\left\|[\s\S]*?\\right\||\\(?:frac|dfrac|tfrac)\{[^}]+\}\{[^}]+\}|\\sqrt\{[^}]+\}|\\sqrt\[[^\]]+\]\{[^}]+\}|\\pi\b|\\ln\b|\\log(?:_{\{[^}]+\}}|_{[^}]+})?\b|\\sin\b|\\cos\b|\\tan\b|\\sec\b|\\csc\b|\\cot\b|\\cdot|\\int\b|-?\d*x\^\{\d+\}|x\^\{\d+\}|-?\d*x\^\d+|x\^\d+|-?\d*x_\{[^}]+\}|x_\{[^}]+\}|-?\d*x_\d+|x_\d+)$/.test(p);
                                     return isMath ? <Katex key={i} latex={p} /> : <span key={i}>{p}</span>;
                                   })}
                                 </span>
@@ -4128,7 +4366,53 @@ export default function Practice() {
                     </div>
                   ) : (
                     <div className="space-y-3">
-                      {(question as any).katexExplanation?.map((b: any, idx: number) =>
+                      {(() => {
+                        const rawBlocks = ((question as any).katexExplanation ?? []) as any[];
+                        const isLog = (question as any).topicId === 'logarithms';
+
+                        const inferCallout = (latex: string) => {
+                          const s = String(latex ?? '');
+                          if (/\\log_{10}\b|\\log\b/.test(s) && /=/.test(s)) return 'Take logarithms of both sides.';
+                          if (/\\ln\b/.test(s) && /=/.test(s)) return 'Take natural logarithms of both sides.';
+                          if (/\\iff/.test(s)) return 'Rewrite using an equivalent form.';
+                          if (/\\frac\{\\log_{10}/.test(s)) return 'Use the change-of-base relationship.';
+                          if (/\^\{/.test(s) || /\^\d/.test(s)) return 'Use index and log laws to simplify.';
+                          if (/x\s*=/.test(s)) return 'Solve for x.';
+                          return 'Simplify and proceed to the next step.';
+                        };
+
+                        const cooked = (() => {
+                          if (!isLog) return rawBlocks;
+                          const out: any[] = [];
+                          let pendingText: string | null = null;
+                          for (const b of rawBlocks) {
+                            if (!b) continue;
+                            if (b.kind === 'text') {
+                              const t = String(b.content ?? '').trim();
+                              if (!t) continue;
+                              pendingText = pendingText ? `${pendingText} ${t}` : t;
+                              continue;
+                            }
+                            if (b.kind === 'math' && pendingText) {
+                              out.push({ kind: 'math_callout', content: b.content, callout: pendingText, displayMode: b.displayMode });
+                              pendingText = null;
+                              continue;
+                            }
+                            if (b.kind === 'math' && !pendingText) {
+                              out.push({ kind: 'math_callout', content: b.content, callout: inferCallout(b.content), displayMode: b.displayMode });
+                              continue;
+                            }
+                            if (pendingText) {
+                              out.push({ kind: 'text', content: pendingText });
+                              pendingText = null;
+                            }
+                            out.push(b);
+                          }
+                          if (pendingText) out.push({ kind: 'text', content: pendingText });
+                          return out;
+                        })();
+
+                        return cooked.map((b: any, idx: number) =>
                         b.kind === 'text' ? (
                           <div
                             key={idx}
@@ -4143,23 +4427,66 @@ export default function Practice() {
                             ) : (
                               (() => {
                                 const s = String(b.content ?? '');
-                                const hasLatex = /\\frac\{|\^\{|\^\d|_\{|\\int\b|\\cdot\b/.test(s);
+                                const sNorm = s.replace(/\b(sin|cos|tan|sec|csc|cot)\s*\(/g, '\\$1(');
+                                const hasLatex = /\\sin\b|\\cos\b|\\tan\b|\\sec\b|\\csc\b|\\cot\b|\\frac\{|\\(?:dfrac|tfrac)\{|\\sqrt\b|\\pi\b|\\ln\b|\\log\b|\\cdot\b|\\int\b|\^\{|\^\d|_\{|_\d/.test(sNorm);
                                 if (!hasLatex) return s;
 
-                                const parts = s.split(
-                                  /(\\frac\{[^}]+\}\{[^}]+\}|\\cdot|\\int\b|-?\d*x\^\{\d+\}|x\^\{\d+\}|-?\d*x\^\d+|x\^\d+)/g
+                                const parts = sNorm.split(
+                                  /(\\(?:frac|dfrac|tfrac)\{[^}]+\}\{[^}]+\}|\\sqrt\{[^}]+\}|\\sqrt\[[^\]]+\]\{[^}]+\}|\\pi\b|\\ln\b|\\log(?:_{\{[^}]+\}}|_{[^}]+})?\b|\\cdot|\\int\b|-?\d*x\^\{\d+\}|x\^\{\d+\}|-?\d*x\^\d+|x\^\d+|[a-zA-Z]\^\{[^}]+\}|[a-zA-Z]\^[a-zA-Z0-9]+|-?\d*x_\{[^}]+\}|x_\{[^}]+\}|-?\d*x_\d+|x_\d+)/g
                                 );
                                 return (
                                   <span>
                                     {parts.filter((p) => p.length > 0).map((p, i) => {
                                       const isMath =
-                                        /^(\\frac\{[^}]+\}\{[^}]+\}|\\cdot|\\int\b|-?\d*x\^\{\d+\}|x\^\{\d+\}|-?\d*x\^\d+|x\^\d+)$/.test(p);
+                                        /^(\\(?:frac|dfrac|tfrac)\{[^}]+\}\{[^}]+\}|\\sqrt\{[^}]+\}|\\sqrt\[[^\]]+\]\{[^}]+\}|\\pi\b|\\ln\b|\\log(?:_{\{[^}]+\}}|_{[^}]+})?\b|\\cdot|\\int\b|-?\d*x\^\{\d+\}|x\^\{\d+\}|-?\d*x\^\d+|x\^\d+|[a-zA-Z]\^\{[^}]+\}|[a-zA-Z]\^[a-zA-Z0-9]+|-?\d*x_\{[^}]+\}|x_\{[^}]+\}|-?\d*x_\d+|x_\d+)$/.test(p);
                                       return isMath ? <Katex key={i} latex={p} /> : <span key={i}>{p}</span>;
                                     })}
                                   </span>
                                 );
                               })()
                             )}
+                          </div>
+                        ) : b.kind === 'math_callout' ? (
+                          <div key={idx} className="w-full">
+                            <div className="flex flex-col md:flex-row md:items-center gap-3 md:gap-4">
+                              <div
+                                className={
+                                  (question as any).topicId === 'word_problems'
+                                    ? 'text-2xl leading-snug py-1'
+                                    : (b.displayMode ? 'text-xl leading-snug' : 'text-xl leading-snug')
+                                }
+                              >
+                                <Katex
+                                  latex={b.content}
+                                  displayMode={(question as any).topicId === 'word_problems' ? false : !!b.displayMode}
+                                />
+                              </div>
+
+                              <div aria-hidden className="hidden md:block flex-1 border-t border-dotted border-border/80" />
+
+                              <div className="md:max-w-[360px] md:w-fit">
+                                <div className="rounded-md bg-amber-100/70 border border-amber-200/70 text-amber-950 px-3 py-2 text-sm leading-snug shadow-sm">
+                                  {(() => {
+                                    const s0 = String(b.callout ?? '');
+                                    const s = s0.replace(/\b(sin|cos|tan|sec|csc|cot)\s*\(/g, '\\$1(');
+                                    const hasLatex = /\\sin\b|\\cos\b|\\tan\b|\\sec\b|\\csc\b|\\cot\b|\\frac\{|\\(?:dfrac|tfrac)\{|\\sqrt\b|\\pi\b|\\ln\b|\\log\b|\\cdot\b|\\int\b|\^\{|\^\d|_\{|_\d/.test(s);
+                                    if (!hasLatex) return s;
+                                    const parts = s.split(
+                                      /(\\(?:frac|dfrac|tfrac)\{[^}]+\}\{[^}]+\}|\\sqrt\{[^}]+\}|\\sqrt\[[^\]]+\]\{[^}]+\}|\\pi\b|\\ln\b|\\log(?:_\{[^}]+\}|_{[^}]+})?\b|\\cdot|\\int\b|-?\d*x\^\{\d+\}|x\^\{\d+\}|-?\d*x\^\d+|x\^\d+|[a-zA-Z]\^\{[^}]+\}|[a-zA-Z]\^[a-zA-Z0-9]+|-?\d*x_\{[^}]+\}|x_\{[^}]+\}|-?\d*x_\d+|x_\d+)/g
+                                    );
+                                    return (
+                                      <span>
+                                        {parts.filter((p) => p.length > 0).map((p, i) => {
+                                          const isMath =
+                                            /^(\\(?:frac|dfrac|tfrac)\{[^}]+\}\{[^}]+\}|\\sqrt\{[^}]+\}|\\sqrt\[[^\]]+\]\{[^}]+\}|\\pi\b|\\ln\b|\\log(?:_\{[^}]+\}|_{[^}]+})?\b|\\cdot|\\int\b|-?\d*x\^\{\d+\}|x\^\{\d+\}|-?\d*x\^\d+|x\^\d+|[a-zA-Z]\^\{[^}]+\}|[a-zA-Z]\^[a-zA-Z0-9]+|-?\d*x_\{[^}]+\}|x_\{[^}]+\}|-?\d*x_\d+|x_\d+)$/.test(p);
+                                          return isMath ? <Katex key={i} latex={p} /> : <span key={i}>{p}</span>;
+                                        })}
+                                      </span>
+                                    );
+                                  })()}
+                                </div>
+                              </div>
+                            </div>
                           </div>
                         ) : b.kind === 'graph' ? (
                           <div key={idx} className="flex justify-center">
@@ -4190,7 +4517,8 @@ export default function Practice() {
                             <Katex latex={b.content} displayMode={(question as any).topicId === 'word_problems' ? false : !!b.displayMode} />
                           </div>
                         )
-                      )}
+                      );
+                      })()}
                     </div>
                   )}
                 </div>
