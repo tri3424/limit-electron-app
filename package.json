@@ -124,7 +124,7 @@
     "wait-on": "^8.0.2"
   },
   "overrides": {
-    "tar": "^7.5.6"
+    "tar": "6.2.1"
   },
   "build": {
     "appId": "com.subhadeep.mathink",
