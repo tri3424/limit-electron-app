@@ -15,11 +15,11 @@ export type PracticeTopicId =
   | 'permutation_combination'
   | 'polynomials'
   | 'simultaneous_equations'
-  | 'graph_quadratic_line'
   | 'graph_straight_line'
   | 'graph_trigonometry'
   | 'graph_unit_circle'
   | 'word_problems'
+  | 'baby_word_problems'
   | 'differentiation'
   | 'integration';
 
@@ -131,16 +131,16 @@ export const PRACTICE_TOPICS: PracticeTopic[] = [
     difficulties: ['easy', 'medium', 'hard', 'ultimate'],
   },
   {
-    id: 'graph_quadratic_line',
-    title: 'Graphs: Quadratic + Line',
-    description: 'Interpret quadratic-line graphs (MCQ).',
+    id: 'word_problems',
+    title: 'Word Problems',
+    description: 'Solve word problems.',
     enabled: true,
     difficulties: ['easy', 'medium', 'hard', 'ultimate'],
   },
   {
-    id: 'word_problems',
-    title: 'Word Problems',
-    description: 'Solve word problems.',
+    id: 'baby_word_problems',
+    title: 'Baby Word Problems',
+    description: 'Very simple one-step word problems.',
     enabled: true,
     difficulties: ['easy', 'medium', 'hard', 'ultimate'],
   },
@@ -160,7 +160,7 @@ export const PRACTICE_TOPICS: PracticeTopic[] = [
   },
   {
     id: 'graph_trigonometry',
-    title: 'Trigonometry Graphs',
+    title: 'Trigonometry',
     description: 'Read values from trig graphs.',
     enabled: true,
     difficulties: ['easy', 'medium', 'hard', 'ultimate'],

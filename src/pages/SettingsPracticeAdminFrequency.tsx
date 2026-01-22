@@ -74,6 +74,13 @@ export default function SettingsPracticeAdminFrequency() {
               { key: 'unit_circle', label: 'Unit circle', defaultValue: 70 },
               { key: 'ratio_quadrant', label: 'Quadrant + ratio', defaultValue: 10 },
               { key: 'identity_simplify', label: 'Identity simplify (MCQ)', defaultValue: 35 },
+              { key: 'exact_values_special_angles', label: 'Exact values (sec/csc/cot, special angles)', defaultValue: 25 },
+              { key: 'solve_trig_equation', label: 'Solve trig equations (multi-solution)', defaultValue: 25 },
+              { key: 'compound_angle_expand', label: 'Compound-angle expansion (MCQ)', defaultValue: 25 },
+              { key: 'exact_value_identities', label: 'Exact values from identities (MCQ)', defaultValue: 25 },
+              { key: 'given_cosx_compound', label: 'Given cos x, find compound angle (MCQ)', defaultValue: 12 },
+              { key: 'tan_add_sub_identity', label: 'Tan addition/subtraction exact value (MCQ)', defaultValue: 25 },
+              { key: 'sumdiff_from_given_ratios', label: 'Given ratios + quadrants: sin/cos/tan of (A±B) (MCQ)', defaultValue: 22 },
             ],
           };
         }
@@ -102,6 +109,37 @@ export default function SettingsPracticeAdminFrequency() {
 
               { key: 'diameter_endpoints_equation', label: 'Diameter endpoints -> equation of circle', defaultValue: 8 },
               { key: 'diameter_endpoints_center', label: 'Diameter endpoints -> center coordinates', defaultValue: 5 },
+            ],
+          };
+        }
+
+        if (t.id === 'baby_word_problems') {
+          return {
+            ...base,
+            variants: [
+              { key: 'add_total', label: 'Altogether / total (addition)', defaultValue: 40 },
+              { key: 'more_than', label: 'How many more? (subtraction)', defaultValue: 35 },
+              { key: 'distance_total', label: 'Total distance travelled (addition)', defaultValue: 35 },
+              { key: 'remaining_distance', label: 'How much further? (subtraction)', defaultValue: 35 },
+              { key: 'score_total', label: 'Total score (addition)', defaultValue: 30 },
+              { key: 'stamps_total', label: 'Stamps altogether (addition)', defaultValue: 30 },
+              { key: 'weight_total', label: 'Total weight (addition)', defaultValue: 25 },
+              { key: 'inventory_after_order', label: 'After ordering more (addition)', defaultValue: 25 },
+              { key: 'money_left', label: 'Money left (subtraction)', defaultValue: 25 },
+              { key: 'change_from_amount', label: 'Change (subtraction)', defaultValue: 25 },
+
+              { key: 'students_per_bus', label: 'Students per bus (share after cars)', defaultValue: 25 },
+              { key: 'unit_price_total_and_left', label: 'Unit price: total and left', defaultValue: 20 },
+              { key: 'unit_price_with_extra_item', label: 'Unit price: includes an extra item', defaultValue: 18 },
+              { key: 'consecutive_three_sum', label: '3 consecutive numbers: find smallest', defaultValue: 20 },
+              { key: 'consecutive_even_three_sum', label: '3 consecutive even numbers: find smallest', defaultValue: 18 },
+              { key: 'reverse_half_destroyed', label: 'Work backwards: bought then half destroyed', defaultValue: 18 },
+              { key: 'reverse_half_destroyed_after_buy', label: 'Work backwards: half destroyed after buying', defaultValue: 18 },
+              { key: 'reverse_half_sold_then_bought', label: 'Work backwards: sold half then bought more', defaultValue: 18 },
+              { key: 'reverse_half_spent_then_earned', label: 'Work backwards: half spent then earned', defaultValue: 18 },
+              { key: 'share_after_taking', label: 'Sharing: took some then shared equally', defaultValue: 18 },
+              { key: 'friends_from_give_each', label: 'Friends count: gave each friend', defaultValue: 18 },
+              { key: 'pies_from_pieces', label: 'Pies from pieces (division)', defaultValue: 18 },
             ],
           };
         }

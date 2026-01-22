@@ -600,7 +600,7 @@ All colors MUST be HSL.
   .tk-app-icon-tile-2 {
     background: #fbbf24;
     --tk-x: 5px;
-    --tk-y: -5px;
+    --tk-y: -4px;
     animation-delay: 40ms;
   }
   .tk-app-icon-tile-3 {
@@ -612,7 +612,7 @@ All colors MUST be HSL.
   .tk-app-icon-tile-4 {
     background: #3b82f6;
     --tk-x: 5px;
-    --tk-y: 5px;
+    --tk-y: 4px;
     animation-delay: 120ms;
   }
 

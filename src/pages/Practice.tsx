@@ -90,12 +90,10 @@ const PRACTICE_VARIANTS: Partial<Record<PracticeTopicId, string[]>> = {
     'committee_men_women',
   ],
   polynomials: ['factor_theorem'],
-  graph_quadratic_line: ['mcq_quad_line', 'y_intercept_from_quadratic_equation'],
   graph_straight_line: ['mcq_graph_equation', 'y_intercept_from_equation', 'gradient_from_equation'],
   word_problems: [
     'mensuration_cuboid_height',
     'probability_complement',
-    'coordinate_intercept',
     'unit_conversion_speed',
     'number_skills_mix',
     'greatest_odd_common_factor',
@@ -104,7 +102,42 @@ const PRACTICE_VARIANTS: Partial<Record<PracticeTopicId, string[]>> = {
     'bus_pass_increases',
     'number_properties_puzzle',
   ],
-  graph_trigonometry: ['unit_circle', 'ratio_quadrant', 'identity_simplify'],
+  baby_word_problems: [
+    'add_total',
+    'more_than',
+    'distance_total',
+    'score_total',
+    'money_left',
+    'stamps_total',
+    'remaining_distance',
+    'change_from_amount',
+    'weight_total',
+    'inventory_after_order',
+    'students_per_bus',
+    'unit_price_total_and_left',
+    'unit_price_with_extra_item',
+    'consecutive_three_sum',
+    'consecutive_even_three_sum',
+    'reverse_half_destroyed',
+    'reverse_half_spent_then_earned',
+    'share_after_taking',
+    'friends_from_give_each',
+    'reverse_half_sold_then_bought',
+    'reverse_half_destroyed_after_buy',
+    'pies_from_pieces',
+  ],
+  graph_trigonometry: [
+    'unit_circle',
+    'ratio_quadrant',
+    'identity_simplify',
+    'exact_values_special_angles',
+    'solve_trig_equation',
+    'compound_angle_expand',
+    'exact_value_identities',
+    'given_cosx_compound',
+    'tan_add_sub_identity',
+    'sumdiff_from_given_ratios',
+  ],
   graph_unit_circle: [
     'arc_length_forward',
     'arc_length_inverse_radius',
@@ -296,6 +329,7 @@ export default function Practice() {
   const [answer1, setAnswer1] = useState('');
   const [answer2, setAnswer2] = useState('');
   const [answer3, setAnswer3] = useState('');
+  const [extraAnswers, setExtraAnswers] = useState<string[]>([]);
   const [selectedOptionIndex, setSelectedOptionIndex] = useState<number | null>(null);
   const [submitted, setSubmitted] = useState(false);
   const [isCorrect, setIsCorrect] = useState<boolean | null>(null);
@@ -845,6 +879,7 @@ export default function Practice() {
     setAnswer1('');
     setAnswer2('');
     setAnswer3('');
+    setExtraAnswers([]);
     setSelectedOptionIndex(null);
     setSubmitted(false);
     setIsCorrect(null);
@@ -904,6 +939,14 @@ export default function Practice() {
       const next = [key, ...prev];
       return next.length > 1200 ? next.slice(0, 1200) : next;
     });
+  };
+
+  const rememberTrigKind = (q: QuadraticFactorizationQuestion | PracticeQuestion) => {
+    const anyQ: any = q as any;
+    if (anyQ?.topicId !== 'graph_trigonometry') return;
+    const k = String(anyQ?.generatorParams?.kind ?? '');
+    if (!k) return;
+    rememberQuestionKey(`graph_trigonometry_kind:${k}`);
   };
 
   const getQuestionDedupKey = useCallback((q: QuadraticFactorizationQuestion | PracticeQuestion): string => {
@@ -1095,6 +1138,23 @@ export default function Practice() {
           const k = getQuestionDedupKey(q);
           if (k && recentKeySet.has(k)) continue;
         }
+
+        // Extra anti-repeat for trigonometry: avoid repeating the same trig sub-kind too often
+        // unless admin has explicitly forced a strict variant selection.
+        const anyQ: any = q as any;
+        if (!hasTextFilter && !opts?.strict && anyQ?.topicId === 'graph_trigonometry') {
+          const subKind = String(anyQ?.generatorParams?.kind ?? '');
+          if (subKind) {
+            // Avoid repeating the same trig sub-kind in the last ~12 questions.
+            const recentKinds = recentQuestionKeys
+              .slice(0, 80)
+              .filter((s) => typeof s === 'string' && s.startsWith('graph_trigonometry_kind:'))
+              .map((s) => s.replace('graph_trigonometry_kind:', ''));
+            const recentKindSet = new Set(recentKinds.slice(0, 12));
+            if (recentKindSet.has(subKind)) continue;
+          }
+        }
+
         if (accept && !accept(q)) continue;
         if (hasTextFilter) {
           const hay = getQuestionSearchText(q).toLowerCase();
@@ -1183,6 +1243,7 @@ export default function Practice() {
           setQuestion(q);
           rememberQuestionId(q.id);
           rememberQuestionKey(getQuestionDedupKey(q));
+          rememberTrigKind(q);
         } else {
           const forced =
             variantOverride?.topicId === item.topicId ? buildForcedVariantWeights(item.topicId, variantOverride.variantId) : null;
@@ -1219,6 +1280,7 @@ export default function Practice() {
           setQuestion(q);
           rememberQuestionId(q.id);
           rememberQuestionKey(getQuestionDedupKey(q));
+          rememberTrigKind(q);
           if (item.topicId === 'word_problems') {
             const nextVariant = (q as any).variantId ?? undefined;
             setLastVariantByTopic((m) => ({ ...m, word_problems: nextVariant }));
@@ -1339,6 +1401,7 @@ export default function Practice() {
       setQuestion(q);
       rememberQuestionId(q.id);
       rememberQuestionKey(getQuestionDedupKey(q));
+      rememberTrigKind(q);
       resetAttemptState();
       return;
     }
@@ -2579,14 +2642,51 @@ export default function Practice() {
         }
 
         if (Array.isArray(gp.expectedParts) && gp.expectedParts.length > 0) {
-          const parts = [answer1, answer2, answer3];
-          for (let i = 0; i < gp.expectedParts.length; i++) {
-            const expected = Number(gp.expectedParts[i]);
-            const raw = String(parts[i] ?? '').trim();
+          const expectedParts = (gp.expectedParts as any[]).map((x) => Number(x)).filter((n) => Number.isFinite(n));
+          if (!expectedParts.length) return false;
+
+          const values = [answer1, answer2, answer3, ...extraAnswers].map((v) => String(v ?? '').trim());
+          const userNums: number[] = [];
+          for (let i = 0; i < expectedParts.length; i++) {
+            const raw = values[i] ?? '';
             if (!raw) return false;
             const user = Number(raw);
             if (Number.isNaN(user)) return false;
-            if (Math.abs(user - expected) > 0.02) return false;
+            userNums.push(user);
+          }
+
+          const tol = typeof gp.expectedTolerance === 'number' ? Number(gp.expectedTolerance) : 0.02;
+          const fmt = String(gp.expectedFormat ?? '');
+
+          const toSigFigs = (n: number, sf: number) => {
+            const x = Number(n);
+            if (!Number.isFinite(x)) return x;
+            if (x === 0) return 0;
+            const d = Math.ceil(Math.log10(Math.abs(x)));
+            const p = sf - d;
+            const scale = Math.pow(10, p);
+            return Math.round(x * scale) / scale;
+          };
+
+          const norm = (n: number) => (fmt === 'sigfig_4' ? toSigFigs(n, 4) : n);
+          const exp = expectedParts.map(norm);
+          const usr = userNums.map(norm);
+
+          // Order does not matter: greedily match each expected value to a remaining user value.
+          const remaining = usr.slice();
+          for (const e of exp) {
+            let bestIdx = -1;
+            let bestDist = Number.POSITIVE_INFINITY;
+            for (let i = 0; i < remaining.length; i++) {
+              const d = Math.abs(remaining[i]! - e);
+              if (d < bestDist) {
+                bestDist = d;
+                bestIdx = i;
+              }
+            }
+            if (bestIdx === -1) return false;
+            if (bestDist > tol) return false;
+            remaining.splice(bestIdx, 1);
           }
           return true;
         }
@@ -2700,6 +2800,31 @@ export default function Practice() {
     }
 
     const q = question as PracticeQuestion;
+    if ((q as any).kind === 'graph') {
+      const gq = q as any;
+      const gp = (gq.generatorParams ?? {}) as any;
+      if (
+        gq.topicId === 'graph_trigonometry'
+        && Array.isArray(gp.expectedParts)
+        && gp.expectedParts.length > 0
+        && (gp.kind === 'solve_trig_equation' || gp.kind === 'exact_values_special_angles')
+      ) {
+        // Keep these instructions inside the explanation only.
+        return '';
+      }
+
+      if (gq.topicId === 'graph_trigonometry' && Array.isArray(gp.expectedParts) && gp.expectedParts.length > 0) {
+        const unit = String(gp.expectedUnit ?? '');
+        const fmt = String(gp.expectedFormat ?? '');
+        if (unit === 'rad' && fmt === 'sigfig_4') {
+          return 'Enter all solutions in decimal radians (4 s.f.). Do not use π. Order does not matter.';
+        }
+        if (unit === 'deg') {
+          return 'Enter all solutions in degrees as numbers. Order does not matter.';
+        }
+        return 'Enter all solutions. Order does not matter.';
+      }
+    }
     switch (q.kind) {
       case 'arithmetic':
         return 'Enter your answer as an integer.';
@@ -3169,6 +3294,7 @@ export default function Practice() {
 
             {(question as any).kind === 'graph'
               && (((question as GraphPracticeQuestion).graphSpec) || ((question as GraphPracticeQuestion).svgDataUrl))
+              && !(question as any).generatorParams?.graphInExplanationOnly
               && !(question as any).generatorParams?.unitCircle
               && ((question as any).topicId !== 'graph_unit_circle' || (question as any).generatorParams?.circularMeasure) ? (
                 <div className="mt-4 flex justify-center">
@@ -3699,10 +3825,20 @@ export default function Practice() {
                   : (
                       <div className="max-w-sm mx-auto space-y-3">
                         {(question as GraphPracticeQuestion).inputFields!.map((f, idx) => {
-                          const values = [answer1, answer2, answer3];
-                          const setters = [setAnswer1, setAnswer2, setAnswer3] as const;
+                          const values = [answer1, answer2, answer3, ...extraAnswers];
                           const value = values[idx] ?? '';
-                          const setValue = setters[idx] ?? setAnswer1;
+                          const setValue = (next: string) => {
+                            if (idx === 0) return setAnswer1(next);
+                            if (idx === 1) return setAnswer2(next);
+                            if (idx === 2) return setAnswer3(next);
+                            const j = idx - 3;
+                            setExtraAnswers((prev) => {
+                              const out = prev.slice();
+                              while (out.length <= j) out.push('');
+                              out[j] = next;
+                              return out;
+                            });
+                          };
                           return (
                             <div key={f.id} className="space-y-1">
                               <Label className="text-xs text-muted-foreground">{f.label}</Label>
@@ -3721,7 +3857,16 @@ export default function Practice() {
                                   onChange={(e) => {
                                     const gp = ((question as GraphPracticeQuestion).generatorParams ?? {}) as any;
                                     const fixed2 = gp.expectedFormat === 'fixed2';
-                                    const next = sanitizeNumericInput(e.target.value, { maxDecimals: fixed2 ? 2 : undefined });
+                                    const forbidPi = gp.expectedForbidPi === true;
+                                    const maxDecimals = fixed2 ? 2 : (gp.expectedFormat === 'sigfig_4' ? 4 : undefined);
+                                    const raw = e.target.value;
+                                    if (forbidPi && /pi|π/i.test(raw)) {
+                                      const cleaned = raw.replace(/pi/gi, '').replace(/π/g, '');
+                                      const next = sanitizeNumericInput(cleaned, { maxDecimals });
+                                      (setValue as any)(next);
+                                      return;
+                                    }
+                                    const next = sanitizeNumericInput(raw, { maxDecimals });
                                     (setValue as any)(next);
                                   }}
                                   disabled={submitted}

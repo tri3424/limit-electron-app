@@ -180,7 +180,7 @@ export function generateGraphQuadraticLineMcq(input: {
     return {
       kind: 'graph',
       id: stableId('graph-quad-intercept', input.seed, `${a}-${b}-${c}`),
-      topicId: 'graph_quadratic_line',
+      topicId: input.topicId,
       difficulty: input.difficulty,
       seed: input.seed,
       katexQuestion: '',
@@ -352,7 +352,7 @@ export function generateGraphQuadraticLineMcq(input: {
   return {
     kind: 'graph',
     id: stableId('graph-quad-line', input.seed, `${a}-${b}-${c}-${mInt}-${d}`),
-    topicId: 'graph_quadratic_line',
+    topicId: input.topicId,
     difficulty: input.difficulty,
     seed: input.seed,
     generatorParams: {

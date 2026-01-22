@@ -1,5 +1,4 @@
 import { Fraction, fractionToLatex, normalizeFraction } from '@/lib/fraction';
-import { generateGraphQuadraticLineMcq } from '@/lib/practiceGraph/generateGraphQuadraticLine';
 import { generateGraphStraightLineMcq } from '@/lib/practiceGraph/generateGraphStraightLine';
 import { generateGraphTrigonometryMcq } from '@/lib/practiceGraph/generateGraphTrigonometry';
 import { generateGraphUnitCircleMcq } from '@/lib/practiceGraph/generateGraphUnitCircle';
@@ -8,6 +7,7 @@ import { generateIntegrationQuestion } from '@/lib/practiceGenerators/integratio
 import { generateLogarithmsQuestion, type LogarithmsQuestion } from '@/lib/practiceGenerators/logarithms';
 import { generateCircularMeasureProblem } from '@/lib/practiceGenerators/circularMeasure';
 import { generateWordProblemQuestion, WordProblemQuestion, WordProblemVariantId } from '@/lib/practiceGenerators/wordProblems';
+import { generateBabyWordProblemQuestion, type BabyWordProblemQuestion, type BabyWordProblemVariantId } from '@/lib/practiceGenerators/babyWordProblems';
 import { generatePolynomialsQuestion } from '@/lib/practiceGenerators/polynomials';
 import { generatePermutationCombinationQuestion, PermutationCombinationQuestion, PermutationCombinationVariantId } from '@/lib/practiceGenerators/permutationCombination';
 import { generateClockReadingQuestion } from '@/lib/practiceGenerators/clockReading';
@@ -64,11 +64,11 @@ export type PracticeTopicId =
   | 'permutation_combination'
   | 'polynomials'
   | 'simultaneous_equations'
-  | 'graph_quadratic_line'
   | 'graph_straight_line'
   | 'graph_trigonometry'
   | 'graph_unit_circle'
   | 'word_problems'
+  | 'baby_word_problems'
   | 'differentiation'
   | 'integration';
 
@@ -219,6 +219,7 @@ export type PracticeQuestion =
   | FactorisationQuestion
   | CalculusPracticeQuestion
   | WordProblemQuestion
+  | BabyWordProblemQuestion
   | GraphPracticeQuestion;
 
 type Rng = {
@@ -709,13 +710,6 @@ export function generatePracticeQuestion(input: {
         seed: input.seed,
         variantWeights: input.variantWeights,
       });
-    case 'graph_quadratic_line':
-      return generateGraphQuadraticLineMcq({
-        topicId: 'graph_quadratic_line',
-        difficulty: (input.difficulty === 'ultimate' ? 'hard' : input.difficulty) as any,
-        seed: input.seed,
-        variantWeights: input.variantWeights,
-      });
     case 'graph_straight_line':
       return generateGraphStraightLineMcq({
         topicId: 'graph_straight_line',
@@ -735,7 +729,41 @@ export function generatePracticeQuestion(input: {
         ? Math.max(0, weights.identity_simplify)
         : ((input.difficulty === 'hard' || input.difficulty === 'ultimate') ? 35 : 0);
 
-      const total = unitCircleWeight + ratioQuadrantWeight + identitySimplifyWeight;
+      const exactValuesWeight = typeof (weights as any)?.exact_values_special_angles === 'number'
+        ? Math.max(0, Number((weights as any).exact_values_special_angles))
+        : (input.difficulty === 'easy' ? 0 : 25);
+      const solveEquationWeight = typeof (weights as any)?.solve_trig_equation === 'number'
+        ? Math.max(0, Number((weights as any).solve_trig_equation))
+        : (input.difficulty === 'easy' ? 0 : 25);
+
+      const compoundAngleWeight = typeof (weights as any)?.compound_angle_expand === 'number'
+        ? Math.max(0, Number((weights as any).compound_angle_expand))
+        : (input.difficulty === 'easy' ? 0 : 25);
+      const exactIdentityWeight = typeof (weights as any)?.exact_value_identities === 'number'
+        ? Math.max(0, Number((weights as any).exact_value_identities))
+        : (input.difficulty === 'easy' ? 0 : 25);
+      const givenCosxWeight = typeof (weights as any)?.given_cosx_compound === 'number'
+        ? Math.max(0, Number((weights as any).given_cosx_compound))
+        : ((input.difficulty === 'hard' || input.difficulty === 'ultimate') ? 12 : 0);
+
+      const tanAddSubWeight = typeof (weights as any)?.tan_add_sub_identity === 'number'
+        ? Math.max(0, Number((weights as any).tan_add_sub_identity))
+        : (input.difficulty === 'easy' ? 0 : 25);
+
+      const sumDiffRatiosWeight = typeof (weights as any)?.sumdiff_from_given_ratios === 'number'
+        ? Math.max(0, Number((weights as any).sumdiff_from_given_ratios))
+        : (input.difficulty === 'easy' ? 0 : 22);
+
+      const total = unitCircleWeight
+        + ratioQuadrantWeight
+        + identitySimplifyWeight
+        + exactValuesWeight
+        + solveEquationWeight
+        + compoundAngleWeight
+        + exactIdentityWeight
+        + givenCosxWeight
+        + tanAddSubWeight
+        + sumDiffRatiosWeight;
       const pick = total <= 0 ? 0 : rng.next() * total;
 
       if (pick < unitCircleWeight) {
@@ -754,6 +782,13 @@ export function generatePracticeQuestion(input: {
           variantWeights: {
             ratio_quadrant: ratioQuadrantWeight,
             identity_simplify: identitySimplifyWeight,
+            exact_values_special_angles: exactValuesWeight,
+            solve_trig_equation: solveEquationWeight,
+            compound_angle_expand: compoundAngleWeight,
+            exact_value_identities: exactIdentityWeight,
+            given_cosx_compound: givenCosxWeight,
+            tan_add_sub_identity: tanAddSubWeight,
+            sumdiff_from_given_ratios: sumDiffRatiosWeight,
           },
         });
       }
@@ -766,6 +801,13 @@ export function generatePracticeQuestion(input: {
         variantWeights: {
           ratio_quadrant: ratioQuadrantWeight,
           identity_simplify: identitySimplifyWeight,
+          exact_values_special_angles: exactValuesWeight,
+          solve_trig_equation: solveEquationWeight,
+          compound_angle_expand: compoundAngleWeight,
+          exact_value_identities: exactIdentityWeight,
+          given_cosx_compound: givenCosxWeight,
+          tan_add_sub_identity: tanAddSubWeight,
+          sumdiff_from_given_ratios: sumDiffRatiosWeight,
         },
       });
     }
@@ -782,6 +824,13 @@ export function generatePracticeQuestion(input: {
         seed: input.seed,
         difficulty: input.difficulty,
         avoidVariantId: input.avoidVariantId as WordProblemVariantId | undefined,
+        variantWeights: input.variantWeights,
+      });
+    case 'baby_word_problems':
+      return generateBabyWordProblemQuestion({
+        seed: input.seed,
+        difficulty: input.difficulty,
+        avoidVariantId: input.avoidVariantId as BabyWordProblemVariantId | undefined,
         variantWeights: input.variantWeights,
       });
     case 'differentiation': {
