@@ -30,11 +30,13 @@ jobs:
         run: npm ci
 
       - name: Set build version
+        id: build_version
         run: |
           echo "BUILD_VERSION=1.0.${GITHUB_RUN_NUMBER}" >> "$GITHUB_ENV"
+          echo "version=1.0.${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
 
       - name: Build AppImage
-        run: npm run build && npx electron-builder --linux AppImage --x64 --publish never --config.extraMetadata.version=${{ env.BUILD_VERSION }}
+        run: npm run build && npx electron-builder --linux AppImage --x64 --publish never --config.extraMetadata.version=${{ steps.build_version.outputs.version }}
 
       - name: Inspect dist output
         run: |
@@ -55,5 +57,5 @@ jobs:
       - name: Upload AppImage
         uses: actions/upload-artifact@v4
         with:
-          name: Limit-Linux-${{ env.BUILD_VERSION }}-${{ github.sha }}
+          name: Limit-Linux-${{ steps.build_version.outputs.version }}-${{ github.sha }}
           path: dist/**/*
