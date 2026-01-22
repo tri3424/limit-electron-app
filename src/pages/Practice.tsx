@@ -7,6 +7,7 @@ import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Alert } from '@/components/ui/alert';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -316,13 +317,15 @@ export default function Practice() {
       const buf = new Uint32Array(1);
       if (typeof crypto !== 'undefined' && typeof crypto.getRandomValues === 'function') {
         crypto.getRandomValues(buf);
-        return (Date.now() ^ buf[0]) >>> 0;
+        return buf[0] as number;
       }
     } catch {
       // ignore
     }
-    return (Date.now() ^ Math.floor(Math.random() * 0xffffffff)) >>> 0;
+    return Date.now();
   });
+  const pendingKeywordSeedRef = useRef<number | null>(null);
+  const [keywordApplyNonce, setKeywordApplyNonce] = useState(0);
   const [question, setQuestion] = useState<QuadraticFactorizationQuestion | PracticeQuestion | null>(null);
   const [mixedModuleId, setMixedModuleId] = useState<string | null>(null);
   const [mixedCursor, setMixedCursor] = useState(0);
@@ -1442,6 +1445,15 @@ export default function Practice() {
     resetAttemptState();
   };
 
+  useEffect(() => {
+    if (keywordApplyNonce <= 0) return;
+    const seed = pendingKeywordSeedRef.current ?? Date.now();
+    pendingKeywordSeedRef.current = null;
+    setSessionSeed(seed);
+    generateNext(seed);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [keywordApplyNonce]);
+
   const buildPracticeSnapshot = useCallback((q: any) => {
     if (!q) return null;
     const pruneExplanation = (blocks: any[]) => {
@@ -1749,6 +1761,8 @@ export default function Practice() {
       setVariantOverride(null);
       setOnlyQuestionTextQuery(raw);
       setOnlyQuestionTextTopicScope(currentTopicForSearchScope);
+      pendingKeywordSeedRef.current = Date.now();
+      setKeywordApplyNonce((n) => n + 1);
       toast.success(`Filtering questions by text: "${raw}"`);
       return;
     }
@@ -1847,6 +1861,8 @@ export default function Practice() {
       setVariantOverride(null);
       setOnlyQuestionTextQuery(q);
       setOnlyQuestionTextTopicScope(currentTopicForSearchScope);
+      pendingKeywordSeedRef.current = Date.now();
+      setKeywordApplyNonce((n) => n + 1);
       toast.success(`Filtering questions by text: "${q}"`);
       return;
     }
@@ -3759,16 +3775,15 @@ export default function Practice() {
                               </div>
                               <div className="space-y-1">
                                 <Label className="text-xs text-muted-foreground">AM/PM</Label>
-                                <select
-                                  value={answer3 || ''}
-                                  onChange={(e) => setAnswer3(e.target.value)}
-                                  disabled={submitted}
-                                  className="h-12 rounded-md border bg-white px-3 text-lg"
-                                >
-                                  <option value="">—</option>
-                                  <option value="AM">AM</option>
-                                  <option value="PM">PM</option>
-                                </select>
+                                <Select value={answer3 || undefined} onValueChange={setAnswer3} disabled={submitted}>
+                                  <SelectTrigger className="h-12 w-28 text-lg">
+                                    <SelectValue placeholder="—" />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="AM">AM</SelectItem>
+                                    <SelectItem value="PM">PM</SelectItem>
+                                  </SelectContent>
+                                </Select>
                               </div>
                             </div>
                           </div>
