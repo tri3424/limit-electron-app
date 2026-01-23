@@ -14,6 +14,8 @@ export type WordProblemVariantId =
   | 'algebra_rectangle_area'
   | 'algebra_right_triangle_pythagoras'
   | 'algebra_trapezium_area'
+  | 'mensuration_cuboid_xy_sum_volume'
+  | 'mensuration_cylinder_hemisphere_r_h'
   | 'unit_conversion_speed'
   | 'number_skills_mix'
   | 'greatest_odd_common_factor'
@@ -25,9 +27,11 @@ export type WordProblemVariantId =
 export type WordProblemQuestion = {
   kind: 'word_problem';
   variantId: WordProblemVariantId;
-  answerKind: 'integer' | 'rational' | 'decimal_2dp';
+  answerKind: 'integer' | 'rational' | 'decimal_2dp' | 'decimal_4sf';
   expectedFraction?: Fraction;
   expectedNumber?: number;
+  expectedNumbers?: number[];
+  answerLabels?: string[];
   graphSpec?: any;
   graphAltText?: string;
   svgDataUrl?: string;
@@ -115,6 +119,135 @@ function buildRectangleDiagramSvg(input: { widthLabel: string; heightLabel: stri
 
   <line x1="${rectX}" y1="${rectY}" x2="${(rectX + 18).toFixed(2)}" y2="${rectY}" stroke="#111827" stroke-width="2" />
   <line x1="${rectX}" y1="${rectY}" x2="${rectX}" y2="${(rectY + 18).toFixed(2)}" stroke="#111827" stroke-width="2" />
+</svg>`;
+}
+
+function buildCuboidXyDiagramSvg(input: { xLabel: string; yLabel: string; fixedLabel: string }) {
+  const w = 460;
+  const h = 260;
+  const pad = 24;
+
+  const x0 = pad + 110;
+  const y0 = h - pad - 50;
+  const frontW = 220;
+  const frontH = 130;
+  const dx = 70;
+  const dy = -55;
+
+  const fx1 = x0;
+  const fy1 = y0;
+  const fx2 = x0 + frontW;
+  const fy2 = y0;
+  const fx3 = x0 + frontW;
+  const fy3 = y0 - frontH;
+  const fx4 = x0;
+  const fy4 = y0 - frontH;
+
+  const bx1 = fx1 + dx;
+  const by1 = fy1 + dy;
+  const bx2 = fx2 + dx;
+  const by2 = fy2 + dy;
+  const bx3 = fx3 + dx;
+  const by3 = fy3 + dy;
+  const bx4 = fx4 + dx;
+  const by4 = fy4 + dy;
+
+  const midFrontBottomX = (fx1 + fx2) / 2;
+  const midFrontBottomY = fy1;
+  const midFrontLeftX = fx1;
+  const midFrontLeftY = (fy1 + fy4) / 2;
+  const midTopFrontX = (fx4 + fx3) / 2;
+  const midTopFrontY = fy4;
+
+  const ptsFront = `${fx1.toFixed(2)},${fy1.toFixed(2)} ${fx2.toFixed(2)},${fy2.toFixed(2)} ${fx3.toFixed(2)},${fy3.toFixed(2)} ${fx4.toFixed(2)},${fy4.toFixed(2)}`;
+  const ptsBack = `${bx1.toFixed(2)},${by1.toFixed(2)} ${bx2.toFixed(2)},${by2.toFixed(2)} ${bx3.toFixed(2)},${by3.toFixed(2)} ${bx4.toFixed(2)},${by4.toFixed(2)}`;
+
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">
+  <rect x="0" y="0" width="${w}" height="${h}" fill="#ffffff" />
+
+  <polygon points="${ptsBack}" fill="#f1f5f9" stroke="none" />
+  <polygon points="${ptsFront}" fill="#f8fafc" stroke="none" />
+
+  <g fill="none" stroke="#111827" stroke-width="2" stroke-linejoin="round" stroke-linecap="round">
+    <polygon points="${ptsBack}" />
+    <polygon points="${ptsFront}" />
+    <line x1="${fx1.toFixed(2)}" y1="${fy1.toFixed(2)}" x2="${bx1.toFixed(2)}" y2="${by1.toFixed(2)}" />
+    <line x1="${fx2.toFixed(2)}" y1="${fy2.toFixed(2)}" x2="${bx2.toFixed(2)}" y2="${by2.toFixed(2)}" />
+    <line x1="${fx3.toFixed(2)}" y1="${fy3.toFixed(2)}" x2="${bx3.toFixed(2)}" y2="${by3.toFixed(2)}" />
+    <line x1="${fx4.toFixed(2)}" y1="${fy4.toFixed(2)}" x2="${bx4.toFixed(2)}" y2="${by4.toFixed(2)}" />
+  </g>
+
+  <text x="${midFrontBottomX.toFixed(2)}" y="${(midFrontBottomY + 22).toFixed(2)}" text-anchor="middle" font-family="Roboto Slab, ui-serif, Georgia, serif" font-size="18" fill="#111827">${input.xLabel}</text>
+  <text x="${(midFrontLeftX - 12).toFixed(2)}" y="${midFrontLeftY.toFixed(2)}" text-anchor="end" dominant-baseline="middle" font-family="Roboto Slab, ui-serif, Georgia, serif" font-size="18" fill="#111827">${input.yLabel}</text>
+  <text x="${midTopFrontX.toFixed(2)}" y="${(midTopFrontY - 10).toFixed(2)}" text-anchor="middle" font-family="Roboto Slab, ui-serif, Georgia, serif" font-size="18" fill="#111827">${input.fixedLabel}</text>
+</svg>`;
+}
+
+function buildCylinderHemisphereDiagramSvg(input: { rLabel: string; hLabel: string; totalLabel: string }) {
+  const w = 420;
+  const h = 320;
+  const pad = 24;
+
+  const cx = w / 2;
+  const radX = 95;
+  const radY = 28;
+  // Place the cylinder top low enough so the hemisphere cap isn't clipped by the viewbox.
+  const topY = pad + radX + 20;
+  const cylH = 140;
+  const bottomY = topY + cylH;
+
+  const L = (cx - radX).toFixed(2);
+  const R = (cx + radX).toFixed(2);
+  const T = topY.toFixed(2);
+  const B = bottomY.toFixed(2);
+
+  const shapeStroke = '#0891b2';
+  const shapeWidth = 3;
+
+  // r arrow should touch the base circumference at the join point between dashed and solid
+  // (leftmost point of the base ellipse).
+  const rArrowY = bottomY;
+  const rArrowStartX = cx;
+  const rArrowEndX = cx - radX;
+
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">
+  <rect x="0" y="0" width="${w}" height="${h}" fill="#ffffff" />
+
+  <g fill="none" stroke="${shapeStroke}" stroke-width="${shapeWidth}" stroke-linejoin="round" stroke-linecap="round">
+    <!-- Hemisphere outline -->
+    <path d="M ${L} ${T} A ${radX} ${radX} 0 0 1 ${R} ${T}" />
+
+    <!-- Cylinder top ellipse (front solid, back dashed) -->
+    <path d="M ${L} ${T} A ${radX} ${radY} 0 0 1 ${R} ${T}" />
+    <path d="M ${R} ${T} A ${radX} ${radY} 0 0 1 ${L} ${T}" stroke-dasharray="6 6" />
+
+    <!-- Cylinder sides -->
+    <line x1="${L}" y1="${T}" x2="${L}" y2="${B}" />
+    <line x1="${R}" y1="${T}" x2="${R}" y2="${B}" />
+
+    <!-- Cylinder base ellipse (front solid, back dashed) -->
+    <path d="M ${L} ${B} A ${radX} ${radY} 0 0 0 ${R} ${B}" />
+    <path d="M ${R} ${B} A ${radX} ${radY} 0 0 0 ${L} ${B}" stroke-dasharray="6 6" />
+  </g>
+
+  <!-- Total height dimension (right) -->
+  <line x1="${(cx + radX + 50).toFixed(2)}" y1="${(topY - radX).toFixed(2)}" x2="${(cx + radX + 50).toFixed(2)}" y2="${B}" stroke="#0f172a" stroke-width="2" />
+  <polygon points="${(cx + radX + 50).toFixed(2)},${(topY - radX).toFixed(2)} ${(cx + radX + 44).toFixed(2)},${(topY - radX + 12).toFixed(2)} ${(cx + radX + 56).toFixed(2)},${(topY - radX + 12).toFixed(2)}" fill="#0f172a" />
+  <polygon points="${(cx + radX + 50).toFixed(2)},${B} ${(cx + radX + 44).toFixed(2)},${(bottomY - 12).toFixed(2)} ${(cx + radX + 56).toFixed(2)},${(bottomY - 12).toFixed(2)}" fill="#0f172a" />
+  <text x="${(cx + radX + 62).toFixed(2)}" y="${((topY - radX + bottomY) / 2).toFixed(2)}" text-anchor="start" dominant-baseline="middle" font-family="Roboto Slab, ui-serif, Georgia, serif" font-size="18" fill="#111827">${input.totalLabel}</text>
+
+  <!-- Cylinder height dimension (left) -->
+  <line x1="${(cx - radX - 50).toFixed(2)}" y1="${T}" x2="${(cx - radX - 50).toFixed(2)}" y2="${B}" stroke="#0f172a" stroke-width="2" />
+  <polygon points="${(cx - radX - 50).toFixed(2)},${T} ${(cx - radX - 44).toFixed(2)},${(topY + 12).toFixed(2)} ${(cx - radX - 56).toFixed(2)},${(topY + 12).toFixed(2)}" fill="#0f172a" />
+  <polygon points="${(cx - radX - 50).toFixed(2)},${B} ${(cx - radX - 44).toFixed(2)},${(bottomY - 12).toFixed(2)} ${(cx - radX - 56).toFixed(2)},${(bottomY - 12).toFixed(2)}" fill="#0f172a" />
+  <text x="${(cx - radX - 62).toFixed(2)}" y="${((topY + bottomY) / 2).toFixed(2)}" text-anchor="end" dominant-baseline="middle" font-family="Roboto Slab, ui-serif, Georgia, serif" font-size="18" fill="#111827">${input.hLabel}</text>
+
+  <!-- r shown inside the base ellipse from centre to circumference -->
+  <line x1="${rArrowStartX.toFixed(2)}" y1="${rArrowY.toFixed(2)}" x2="${rArrowEndX.toFixed(2)}" y2="${rArrowY.toFixed(2)}" stroke="#0f172a" stroke-width="2" />
+  <polygon points="${rArrowEndX.toFixed(2)},${rArrowY.toFixed(2)} ${(rArrowEndX + 12).toFixed(2)},${(rArrowY - 6).toFixed(2)} ${(rArrowEndX + 12).toFixed(2)},${(rArrowY + 6).toFixed(2)}" fill="#0f172a" />
+  <text x="${((rArrowStartX + rArrowEndX) / 2).toFixed(2)}" y="${(rArrowY + 34).toFixed(2)}" text-anchor="middle" font-family="Roboto Slab, ui-serif, Georgia, serif" font-size="18" fill="#111827" stroke="#ffffff" stroke-width="6" paint-order="stroke" stroke-linejoin="round">${input.rLabel}</text>
 </svg>`;
 }
 
@@ -236,6 +369,8 @@ function pickVariant(rng: Rng, avoid?: WordProblemVariantId): WordProblemVariant
     'algebra_rectangle_area',
     'algebra_right_triangle_pythagoras',
     'algebra_trapezium_area',
+    'mensuration_cuboid_xy_sum_volume',
+    'mensuration_cylinder_hemisphere_r_h',
     'unit_conversion_speed',
     'number_skills_mix',
     'greatest_odd_common_factor',
@@ -280,6 +415,8 @@ function pickVariantByDifficulty(
   const mediumPool: WordProblemVariantId[] = [
     ...easyPool,
     'mensuration_cuboid_height',
+    'mensuration_cuboid_xy_sum_volume',
+    'mensuration_cylinder_hemisphere_r_h',
     'greatest_odd_common_factor',
     'compound_interest_rate',
     'probability_two_bags_blue',
@@ -361,6 +498,8 @@ export function generateWordProblemQuestion(input: {
     answerKind: WordProblemQuestion['answerKind'];
     expectedFraction?: Fraction;
     expectedNumber?: number;
+    expectedNumbers?: number[];
+    answerLabels?: string[];
     graphSpec?: any;
     graphAltText?: string;
     svgDataUrl?: string;
@@ -380,12 +519,212 @@ export function generateWordProblemQuestion(input: {
       answerKind: payload.answerKind,
       expectedFraction: payload.expectedFraction,
       expectedNumber: payload.expectedNumber,
+      expectedNumbers: payload.expectedNumbers,
+      answerLabels: payload.answerLabels,
       graphSpec: payload.graphSpec,
       graphAltText: payload.graphAltText,
       svgDataUrl: payload.svgDataUrl,
       svgAltText: payload.svgAltText,
     };
   };
+
+  if (variantId === 'mensuration_cuboid_xy_sum_volume') {
+    const fixedOptions = input.difficulty === 'medium' ? [4, 5, 6, 7] : [3, 4, 5, 6, 7, 8];
+    const fixed = fixedOptions[rng.int(0, fixedOptions.length - 1)] ?? 5;
+
+    const pick = (() => {
+      for (let attempt = 0; attempt < 300; attempt++) {
+        const x = rng.int(2, input.difficulty === 'medium' ? 18 : 28);
+        const y = rng.int(2, input.difficulty === 'medium' ? 18 : 28);
+        if (x === y) continue;
+        const S = x + y;
+        const P = x * y;
+        const V = fixed * P;
+        if (V < 80 || V > 900) continue;
+
+        // Occasionally force a non-square discriminant so answers are non-integers.
+        const D = S * S - 4 * P;
+        const sqrtD = Math.sqrt(D);
+        const isSquare = Number.isInteger(sqrtD);
+        const wantNonInteger = input.difficulty !== 'easy' && rng.next() < (input.difficulty === 'medium' ? 0.45 : 0.6);
+        if (wantNonInteger && isSquare) continue;
+        if (!wantNonInteger && !isSquare) continue;
+
+        const r1 = (S + sqrtD) / 2;
+        const r2 = (S - sqrtD) / 2;
+        if (!(r1 > 0 && r2 > 0)) continue;
+
+        return { S, V, r1, r2, wantNonInteger };
+      }
+      const x = rng.int(3, 16);
+      const y = rng.int(4, 20);
+      const S = x + y;
+      const V = fixed * x * y;
+      return { S, V, r1: Math.max(x, y), r2: Math.min(x, y), wantNonInteger: false };
+    })();
+
+    const x1 = pick.r1;
+    const y1 = pick.r2;
+
+    const needDecimal = !Number.isInteger(x1) || !Number.isInteger(y1);
+    const ansKind: WordProblemQuestion['answerKind'] = needDecimal ? 'decimal_4sf' : 'integer';
+
+    const cuboidSvg = buildCuboidXyDiagramSvg({
+      xLabel: 'x cm',
+      yLabel: 'y cm',
+      fixedLabel: `${fixed} cm`,
+    });
+
+    const promptText = `A cuboid has sides of length ${fixed} cm, x cm and y cm. Given that x + y = ${pick.S} and the volume of the cuboid is ${pick.V} cm³, find the value of x and the value of y. ${needDecimal ? 'Give any non-integer answers correct to 4 significant figures.' : ''}`.trim();
+    const katexQuestion = String.raw`\text{A cuboid has sides of length }${fixed}\text{ cm, }x\text{ cm and }y\text{ cm. Given that }x+y=${pick.S}\text{ and the volume is }${pick.V}\text{ cm}^3\text{, find }x\text{ and }y\text{.}${needDecimal ? '\\text{Give any non-integer answers to 4 s.f.}' : ''}`;
+
+    const working: KatexExplanationBlock[] = [
+      { kind: 'text', content: 'Diagram:' },
+      { kind: 'graph', graphSpec: { svgDataUrl: svgToDataUrl(cuboidSvg) }, altText: 'Cuboid diagram.' },
+      { kind: 'text', content: `Volume of a cuboid is length × width × height.` },
+      { kind: 'math', content: String.raw`V=${fixed}\cdot x\cdot y`, displayMode: true },
+      { kind: 'math', content: String.raw`${pick.V}=${fixed}xy`, displayMode: true },
+      { kind: 'math', content: String.raw`xy=${pick.V / fixed}`, displayMode: true },
+      { kind: 'text', content: 'We are also given:' },
+      { kind: 'math', content: String.raw`x+y=${pick.S}`, displayMode: true },
+      { kind: 'text', content: 'So x and y are two numbers with sum S and product P. They are roots of:' },
+      { kind: 'math', content: String.raw`t^2-${pick.S}t+${pick.V / fixed}=0`, displayMode: true },
+      { kind: 'text', content: 'Use the quadratic formula:' },
+      { kind: 'math', content: String.raw`t=\frac{${pick.S}\pm\sqrt{${pick.S}^2-4\cdot ${pick.V / fixed}}}{2}`, displayMode: true },
+      { kind: 'text', content: `This gives the two values (x,y) = (${needDecimal ? Number(x1).toPrecision(4) : x1}, ${needDecimal ? Number(y1).toPrecision(4) : y1}) in some order.` },
+      { kind: 'text', content: 'Final check: verify that x+y matches and the volume equals the given value.' },
+    ];
+
+    const katexExplanation = scaffoldExplanation({
+      title: 'This is a mensuration + algebra word problem (sum and product of two numbers).',
+      givens: [
+        `Cuboid side lengths are ${fixed} cm, x cm, y cm`,
+        `x + y = ${pick.S}`,
+        `Volume = ${pick.V} cm³`,
+      ],
+      goal: 'Find x and y.',
+      method: [
+        `Use volume: ${fixed}xy = ${pick.V} to find xy.`,
+        'Use sum and product to form a quadratic with roots x and y.',
+        'Solve the quadratic to find both values.',
+      ],
+      working,
+      checks: [
+        'Both values should be positive lengths.',
+        `Check x+y=${pick.S}.`,
+        `Check ${fixed}xy=${pick.V}.`,
+      ],
+    });
+
+    const a1 = needDecimal ? Number(x1).toPrecision(4) : String(Math.round(x1));
+    const a2 = needDecimal ? Number(y1).toPrecision(4) : String(Math.round(y1));
+    const n1 = needDecimal ? Number(a1) : Math.round(x1);
+    const n2 = needDecimal ? Number(a2) : Math.round(y1);
+
+    return mk({
+      idSuffix: 'mensuration_cuboid_xy_sum_volume',
+      promptText,
+      katexQuestion,
+      katexExplanation,
+      answerKind: ansKind,
+      expectedNumbers: [n1, n2],
+      answerLabels: ['x', 'y'],
+      svgDataUrl: svgToDataUrl(cuboidSvg),
+      svgAltText: 'Cuboid diagram.',
+    });
+  }
+
+  if (variantId === 'mensuration_cylinder_hemisphere_r_h') {
+    const pick = (() => {
+      for (let attempt = 0; attempt < 250; attempt++) {
+        const totalH = rng.int(14, 22);
+        const r = rng.int(2, 8);
+        const hCyl = totalH - r;
+        if (hCyl <= 2) continue;
+
+        // Surface area of exposed solid:
+        // hemisphere curved area: 2πr^2
+        // cylinder curved area: 2πrh
+        // base circle: πr^2
+        // total = (3r^2 + 2rh)π
+        const coef = 3 * r * r + 2 * r * hCyl;
+        // Provide a numeric surface area using π=22/7.
+        const sa = (coef * 22) / 7;
+        if (!Number.isFinite(sa)) continue;
+        if (!Number.isInteger(sa)) continue;
+        if (sa < 120 || sa > 2000) continue;
+        return { totalH, r, hCyl, coef, sa };
+      }
+      const totalH = 18;
+      const r = 3;
+      const hCyl = totalH - r;
+      const coef = 3 * r * r + 2 * r * hCyl;
+      const sa = (coef * 22) / 7;
+      return { totalH, r, hCyl, coef, sa: Number.isInteger(sa) ? sa : Math.round(sa) };
+    })();
+
+    const diagramSvg = buildCylinderHemisphereDiagramSvg({
+      rLabel: 'r',
+      hLabel: 'h',
+      totalLabel: `${pick.totalH} cm`,
+    });
+
+    const promptText = `The diagram shows a solid formed by joining a hemisphere of radius r cm to a cylinder of radius r cm and height h cm. The total height of the solid is ${pick.totalH} cm and the surface area is ${pick.sa} cm². Use π = 22/7. Find the value of r and the value of h.`;
+    const katexQuestion = String.raw`\text{A solid is formed by joining a hemisphere of radius }r\text{ cm to a cylinder of radius }r\text{ cm and height }h\text{ cm. }\\
+\text{Total height }=${pick.totalH}\text{ cm and surface area }=${pick.sa}\text{ cm}^2\text{. Use }\pi=\frac{22}{7}\text{. Find }r\text{ and }h\text{.}`;
+
+    const working: KatexExplanationBlock[] = [
+      { kind: 'text', content: 'Diagram:' },
+      { kind: 'graph', graphSpec: { svgDataUrl: svgToDataUrl(diagramSvg) }, altText: 'Cylinder with hemisphere diagram.' },
+      { kind: 'text', content: 'Step 1: Use the total height relationship.' },
+      { kind: 'math', content: String.raw`h + r = ${pick.totalH}`, displayMode: true },
+      { kind: 'math', content: String.raw`h = ${pick.totalH} - r`, displayMode: true },
+      { kind: 'text', content: 'Step 2: Write the surface area formula (exposed surfaces only).' },
+      { kind: 'text', content: 'Curved area of hemisphere = 2πr².' },
+      { kind: 'text', content: 'Curved area of cylinder = 2πrh.' },
+      { kind: 'text', content: 'Base circle area = πr².' },
+      { kind: 'math', content: String.raw`S = (2\pi r^2) + (2\pi r h) + (\pi r^2) = (3r^2+2rh)\pi`, displayMode: true },
+      { kind: 'text', content: 'Step 3: Use π = 22/7 and substitute h = total - r.' },
+      { kind: 'math', content: String.raw`${pick.sa} = (3r^2+2r(${pick.totalH}-r))\cdot\frac{22}{7}`, displayMode: true },
+      { kind: 'text', content: 'Simplify and solve for r.' },
+      { kind: 'math', content: String.raw`\text{This gives }r = ${pick.r}`, displayMode: true },
+      { kind: 'text', content: 'Then find h using h = total - r.' },
+      { kind: 'math', content: String.raw`h = ${pick.totalH} - ${pick.r} = ${pick.hCyl}`, displayMode: true },
+    ];
+
+    const katexExplanation = scaffoldExplanation({
+      title: 'This is a mensuration word problem involving a composite solid and surface area.',
+      givens: [
+        `Total height = ${pick.totalH} cm`,
+        `Surface area = ${pick.sa} cm²`,
+        'Use π = 22/7',
+      ],
+      goal: 'Find r and h.',
+      method: [
+        'Write h = total height − r.',
+        'Write the surface area as hemisphere curved area + cylinder curved area + base circle area.',
+        'Substitute π = 22/7 and solve.',
+      ],
+      working,
+      checks: [
+        'r and h must be positive.',
+        `Check h+r=${pick.totalH}.`,
+        `Substitute back into the surface area and check it matches ${pick.sa} cm² using π=22/7.`,
+      ],
+    });
+
+    return mk({
+      idSuffix: 'mensuration_cylinder_hemisphere_r_h',
+      promptText,
+      katexQuestion,
+      katexExplanation,
+      answerKind: 'integer',
+      expectedNumbers: [pick.r, pick.hCyl],
+      answerLabels: ['r', 'h'],
+      svgDataUrl: svgToDataUrl(diagramSvg),
+      svgAltText: 'Cylinder with hemisphere diagram.',
+    });
+  }
 
   if (variantId === 'algebra_right_triangle_pythagoras') {
     // Use Pythagorean triples with consecutive legs so we can model the legs as 2x and (2x+1).

@@ -98,6 +98,8 @@ const PRACTICE_VARIANTS: Partial<Record<PracticeTopicId, string[]>> = {
     'algebra_rectangle_area',
     'algebra_right_triangle_pythagoras',
     'algebra_trapezium_area',
+    'mensuration_cuboid_xy_sum_volume',
+    'mensuration_cylinder_hemisphere_r_h',
     'unit_conversion_speed',
     'number_skills_mix',
     'greatest_odd_common_factor',
@@ -2634,6 +2636,64 @@ export default function Practice() {
         const wp = q as any;
         const raw1 = String(answer1 ?? '').trim();
         const raw2 = String(answer2 ?? '').trim();
+
+        const countSignificantFigures = (raw: string): number => {
+          const s0 = String(raw ?? '').trim();
+          if (!s0) return 0;
+          const s = s0.replace(/[−–]/g, '-');
+          const parts = s.split(/[eE]/);
+          const mantissa0 = (parts[0] ?? '').trim();
+          if (!mantissa0) return 0;
+          const mantissa = mantissa0.replace(/^[+-]/, '');
+          if (!/^(?:\d+(?:\.\d*)?|\.\d+)$/.test(mantissa)) return 0;
+          const hasDot = mantissa.includes('.');
+          const digits = mantissa.replace('.', '');
+          if (!/[1-9]/.test(digits)) return 1;
+          if (hasDot) {
+            const idx = digits.search(/[1-9]/);
+            return Math.max(0, digits.length - idx);
+          }
+          const noLeading = digits.replace(/^0+/, '');
+          const noTrailing = noLeading.replace(/0+$/, '');
+          return noTrailing.length;
+        };
+
+        const checkDecimal4sf = (expected: number, raw: string) => {
+          const s = String(raw ?? '').trim();
+          if (!s) return false;
+          const cleaned = s.replace(/[−–]/g, '-').replace(/\s+/g, '');
+          if (!/^-?(?:\d+(?:\.\d*)?|\.\d+)$/.test(cleaned)) return false;
+          const n = Number(cleaned);
+          if (!Number.isFinite(n)) return false;
+
+          if (!Number.isInteger(expected)) {
+            if (!cleaned.includes('.')) return false;
+            if (countSignificantFigures(cleaned) !== 4) return false;
+          }
+
+          const tol = Math.max(1e-9, Math.abs(expected) * 1e-6);
+          return Math.abs(n - expected) <= tol;
+        };
+
+        if (Array.isArray(wp.expectedNumbers) && wp.expectedNumbers.length === 2) {
+          const e1 = Number(wp.expectedNumbers[0]);
+          const e2 = Number(wp.expectedNumbers[1]);
+          if (!raw1 || !raw2) return false;
+
+          if (wp.answerKind === 'integer') {
+            if (!/^-?\d+$/.test(raw1) || !/^-?\d+$/.test(raw2)) return false;
+            return (Number(raw1) === e1 && Number(raw2) === e2) || (Number(raw1) === e2 && Number(raw2) === e1);
+          }
+
+          if (wp.answerKind === 'decimal_4sf') {
+            const direct = checkDecimal4sf(e1, raw1) && checkDecimal4sf(e2, raw2);
+            const swapped = checkDecimal4sf(e2, raw1) && checkDecimal4sf(e1, raw2);
+            return direct || swapped;
+          }
+
+          return false;
+        }
+
         const raw = wp.answerKind === 'rational' && wp.expectedFraction
           ? (raw2 ? `${raw1}/${raw2}` : raw1)
           : raw1;
@@ -2648,6 +2708,11 @@ export default function Practice() {
         if (wp.answerKind === 'decimal_2dp') {
           if (!/^-?\d+\.\d{2}$/.test(raw)) return false;
           return Number(raw) === Number(wp.expectedNumber);
+        }
+
+        if (wp.answerKind === 'decimal_4sf') {
+          if (typeof wp.expectedNumber !== 'number' || !Number.isFinite(wp.expectedNumber)) return false;
+          return checkDecimal4sf(Number(wp.expectedNumber), raw);
         }
 
         // rational: allow fraction or decimal
@@ -3863,7 +3928,6 @@ export default function Practice() {
                       if (kind === 'time_12_ampm') {
                         return (
                           <div className="max-w-md mx-auto space-y-3">
-                            <Label className="text-xs text-muted-foreground">Explanation</Label>
                             <div className="flex flex-wrap items-end justify-center gap-3">
                               <div className="space-y-1">
                                 <Label className="text-xs text-muted-foreground">Hour</Label>
@@ -3887,16 +3951,20 @@ export default function Practice() {
                                 />
                               </div>
                               <div className="space-y-1">
-                                <Label className="text-xs text-muted-foreground">AM/PM</Label>
-                                <Select value={answer3 || undefined} onValueChange={setAnswer3} disabled={submitted}>
-                                  <SelectTrigger className="h-12 w-28 text-lg">
-                                    <SelectValue placeholder="—" />
-                                  </SelectTrigger>
-                                  <SelectContent>
-                                    <SelectItem value="AM">AM</SelectItem>
-                                    <SelectItem value="PM">PM</SelectItem>
-                                  </SelectContent>
-                                </Select>
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  size="sm"
+                                  disabled={submitted}
+                                  className="h-12 w-20 text-lg"
+                                  onClick={() => {
+                                    const cur = answer3 === 'PM' ? 'PM' : 'AM';
+                                    setAnswer3(cur === 'PM' ? 'AM' : 'PM');
+                                  }}
+                                  title="Toggle AM/PM"
+                                >
+                                  {answer3 === 'PM' ? 'PM' : 'AM'}
+                                </Button>
                               </div>
                             </div>
                           </div>
@@ -3923,7 +3991,6 @@ export default function Practice() {
                       const minuteLabel = kind === 'duration_hm' ? 'Minutes' : 'Minute';
                       return (
                         <div className="max-w-md mx-auto space-y-3">
-                          <Label className="text-xs text-muted-foreground">Explanation</Label>
                           <div className="flex items-end justify-center gap-3">
                             <div className="space-y-1">
                               <Label className="text-xs text-muted-foreground">{hourLabel}</Label>
@@ -4192,7 +4259,6 @@ export default function Practice() {
                 )
               ) : (question as any).kind === 'graph' ? null : (
                 <div className="max-w-sm mx-auto space-y-1">
-                  <Label className="text-xs text-muted-foreground">Explanation</Label>
                   {(question as PracticeQuestion).kind === 'factorisation' ? (
                     <div className={`grid gap-3 ${(question as any).expectedFactors?.length === 3 ? 'grid-cols-3' : 'grid-cols-2'}`}>
                       <div className="space-y-1">
@@ -4310,24 +4376,25 @@ export default function Practice() {
 					&& ['log_to_exp_basic', 'log_to_exp_frac', 'log_to_exp_zero', 'log_to_exp_var_rhs', 'log_to_exp'].includes(String((question as any).variantId)) ? (
 					<div className="w-full flex justify-center">
 						<div className="flex items-baseline gap-4">
-							<div className="flex items-start">
-								<Input
-									value={answer1}
-									inputMode="text"
-									onChange={(e) => setAnswer1(e.target.value)}
-									disabled={submitted}
-									className="h-12 w-16 text-3xl font-normal text-center py-1 rounded-none"
-									aria-label="Base"
-								/>
-								<Input
-									value={answer2}
-									inputMode="text"
-									onChange={(e) => setAnswer2(e.target.value)}
-									disabled={submitted}
-									className="h-9 w-16 text-xl font-normal text-center py-0.5 rounded-none ml-2 -translate-y-3"
-									aria-label="Exponent"
-								/>
-							</div>
+							<span className="text-4xl font-semibold select-none leading-none">
+								<Katex latex={String.raw`\log`} displayMode={false} />
+							</span>
+							<Input
+								value={answer1}
+								inputMode="text"
+								onChange={(e) => setAnswer1(e.target.value)}
+								disabled={submitted}
+								className="h-9 w-16 text-xl font-normal text-center py-0.5 align-baseline relative -ml-1 translate-y-3 rounded-none"
+								aria-label="Log base"
+							/>
+							<Input
+								value={answer2}
+								inputMode="text"
+								onChange={(e) => setAnswer2(e.target.value)}
+								disabled={submitted}
+								className="h-12 w-40 text-3xl font-normal text-center py-1 rounded-none"
+								aria-label="Log argument"
+							/>
 							<span className="text-3xl font-semibold select-none">=</span>
 							<Input
 								value={answer3}
@@ -4335,7 +4402,7 @@ export default function Practice() {
 								onChange={(e) => setAnswer3(e.target.value)}
 								disabled={submitted}
 								className="h-12 w-28 text-3xl font-normal text-center py-1 rounded-none"
-								aria-label="Right-hand side"
+								aria-label="Result"
 							/>
 						</div>
 					</div>
@@ -4415,6 +4482,46 @@ export default function Practice() {
 						className={'text-2xl font-normal text-left tk-expr-input'}
 					/>
 				) : (question as PracticeQuestion).kind === 'word_problem'
+						&& Array.isArray((question as any).expectedNumbers)
+						&& ((question as any).expectedNumbers?.length ?? 0) === 2
+						&& (String((question as any).answerKind) === 'integer' || String((question as any).answerKind) === 'decimal_4sf') ? (
+							<div className="grid grid-cols-2 gap-3 max-w-md mx-auto">
+								<div className="space-y-1">
+									<Label className="text-xs text-muted-foreground">{String(((question as any).answerLabels?.[0] ?? 'Answer 1') as any)}</Label>
+									<Input
+										value={answer1}
+										inputMode={String((question as any).answerKind) === 'integer' ? 'numeric' : 'decimal'}
+										onChange={(e) => {
+											const ak = String((question as any).answerKind);
+											if (ak === 'integer') {
+												setAnswer1(sanitizeNumericInput(e.target.value, { maxDecimals: 0 }));
+												return;
+											}
+											setAnswer1(sanitizeNumericInput(e.target.value, { maxDecimals: 12 }));
+										}}
+										disabled={submitted}
+										className="h-12 text-2xl font-normal text-center py-1"
+									/>
+								</div>
+								<div className="space-y-1">
+									<Label className="text-xs text-muted-foreground">{String(((question as any).answerLabels?.[1] ?? 'Answer 2') as any)}</Label>
+									<Input
+										value={answer2}
+										inputMode={String((question as any).answerKind) === 'integer' ? 'numeric' : 'decimal'}
+										onChange={(e) => {
+											const ak = String((question as any).answerKind);
+											if (ak === 'integer') {
+												setAnswer2(sanitizeNumericInput(e.target.value, { maxDecimals: 0 }));
+												return;
+											}
+											setAnswer2(sanitizeNumericInput(e.target.value, { maxDecimals: 12 }));
+										}}
+										disabled={submitted}
+										className="h-12 text-2xl font-normal text-center py-1"
+									/>
+								</div>
+							</div>
+						) : (question as PracticeQuestion).kind === 'word_problem'
 						&& (question as any).answerKind === 'rational'
 						&& !!(question as any).expectedFraction ? (
                       <div className="w-full flex justify-center">
@@ -4474,6 +4581,10 @@ export default function Practice() {
                           }
                           if (wp.answerKind === 'decimal_2dp') {
                             setAnswer1(sanitizeNumericInput(e.target.value, { maxDecimals: 2 }));
+                            return;
+                          }
+                          if (wp.answerKind === 'decimal_4sf') {
+                            setAnswer1(sanitizeNumericInput(e.target.value, { maxDecimals: 12 }));
                             return;
                           }
                           setAnswer1(sanitizeRationalInput(e.target.value));
@@ -4804,8 +4915,13 @@ export default function Practice() {
                             {(() => {
                               const raw = String(b.content ?? '');
                               const normalized = raw.trim().toLowerCase();
-                              if (normalized === 'answer' || normalized === 'explanation') {
-                                return <div className="text-base font-semibold text-foreground">Explanation</div>;
+                              if (normalized === 'answer') {
+                                return <div className="text-base font-semibold text-foreground">Answer</div>;
+                              }
+                              if (normalized === 'explanation') {
+                                return (question as any).topicId === 'word_problems'
+                                  ? null
+                                  : <div className="text-base font-semibold text-foreground">Explanation</div>;
                               }
 
                               const sNorm = raw.replace(/\b(sin|cos|tan|sec|csc|cot)\s*\(/g, '\\$1(');

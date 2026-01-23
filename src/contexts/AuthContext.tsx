@@ -5,6 +5,7 @@ import { verifyAdminCredentials } from '@/lib/adminVault';
 
 const ADMIN_USERNAME = 'Subhadeep.Choudhury';
 const ADMIN_PASSWORD = 'Yubi123454';
+const ADMIN_USER_ID = 'admin';
 
 type UserRole = 'admin' | 'student' | null;
 
@@ -51,6 +52,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 						}
 					})();
 				}
+
+				if (parsed && parsed.role === 'admin' && !parsed.id && typeof parsed.username === 'string') {
+					const hydrated: AuthUser = { id: ADMIN_USER_ID, username: parsed.username, role: 'admin' };
+					setUser(hydrated);
+					localStorage.setItem('currentUser', JSON.stringify(hydrated));
+				}
       } catch {
         localStorage.removeItem('currentUser');
       }
@@ -60,7 +67,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const login = async (username: string, password: string): Promise<boolean> => {
     // Check admin credentials
     if (username === ADMIN_USERNAME && password === ADMIN_PASSWORD) {
-      const adminUser: AuthUser = { username, role: 'admin' as UserRole };
+			const adminUser: AuthUser = { id: ADMIN_USER_ID, username, role: 'admin' as UserRole };
       setUser(adminUser);
       localStorage.setItem('currentUser', JSON.stringify(adminUser));
       return true;
@@ -70,7 +77,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 		try {
 			const isStoredAdminOk = await verifyAdminCredentials(username, password);
 			if (isStoredAdminOk) {
-				const adminUser: AuthUser = { username, role: 'admin' as UserRole };
+				const adminUser: AuthUser = { id: ADMIN_USER_ID, username, role: 'admin' as UserRole };
 				setUser(adminUser);
 				localStorage.setItem('currentUser', JSON.stringify(adminUser));
 				return true;

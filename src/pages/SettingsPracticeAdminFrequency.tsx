@@ -296,6 +296,8 @@ export default function SettingsPracticeAdminFrequency() {
               { key: 'unit_conversion_speed', label: 'Unit conversion (speed)', defaultValue: 1 },
               { key: 'number_skills_mix', label: 'Number skills', defaultValue: 1 },
               { key: 'mensuration_cuboid_height', label: 'Mensuration (cuboid)', defaultValue: 1 },
+              { key: 'mensuration_cuboid_xy_sum_volume', label: 'Mensuration (cuboid: x+y and volume)', defaultValue: 1 },
+              { key: 'mensuration_cylinder_hemisphere_r_h', label: 'Mensuration (cylinder + hemisphere: r and h)', defaultValue: 1 },
               { key: 'greatest_odd_common_factor', label: 'GOCF', defaultValue: 1 },
               { key: 'compound_interest_rate', label: 'Compound interest', defaultValue: 1 },
               { key: 'bus_pass_increases', label: 'Bus pass', defaultValue: 1 },

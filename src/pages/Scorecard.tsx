@@ -8,8 +8,10 @@ import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { PRACTICE_TOPICS } from '@/lib/practiceTopics';
+import { Katex } from '@/components/Katex';
 
 type Row = {
   date: string;
@@ -45,6 +47,19 @@ function fmtMs(ms: number): string {
   return `${Math.round(ms / 1000)}s`;
 }
 
+function fmtTime(ts?: number): string {
+  if (typeof ts !== 'number') return '—';
+  return new Date(ts).toLocaleString('en-US', {
+    year: 'numeric',
+    month: 'short',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: true,
+  });
+}
+
 export default function Scorecard() {
   const navigate = useNavigate();
   const { user } = useAuth();
@@ -55,6 +70,24 @@ export default function Scorecard() {
     if (!user?.id) return [];
     return db.practiceEvents.where('userId').equals(user.id).toArray();
   }, [user?.id]) || [];
+
+  const timeline = useMemo(() => {
+    const out = [...events];
+    out.sort((a: any, b: any) => (Number(b.shownAt ?? 0) - Number(a.shownAt ?? 0)));
+    return out;
+  }, [events]);
+
+  const [open, setOpen] = useState(false);
+  const [selected, setSelected] = useState<any>(null);
+
+  const detailSnapshot = useMemo(() => {
+    if (!selected?.snapshotJson) return null;
+    try {
+      return JSON.parse(selected.snapshotJson);
+    } catch {
+      return null;
+    }
+  }, [selected]);
 
   const rows = useMemo(() => {
     const buckets = new Map<string, { date: string; mode: 'individual' | 'mixed'; topicId: string; total: number; correct: number; wrong: number; totalTimeMs: number }>();
@@ -183,6 +216,106 @@ export default function Scorecard() {
           </div>
         </ScrollArea>
       </Card>
+
+      <Card className="p-4">
+        <div className="text-sm font-semibold mb-3">Recent questions (newest first)</div>
+        <ScrollArea className="h-[45vh] rounded-md">
+          <div className="rounded-md border overflow-hidden">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="w-[190px]">Time</TableHead>
+                  <TableHead>Topic</TableHead>
+                  <TableHead className="w-[170px]">Variant</TableHead>
+                  <TableHead className="text-right w-[110px]">Result</TableHead>
+                  <TableHead className="text-right w-[120px]">View</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {timeline.length ? (
+                  timeline.map((e: any) => (
+                    <TableRow key={String(e.id)}>
+                      <TableCell className="text-sm font-medium">{fmtTime(e.submittedAt ?? e.shownAt)}</TableCell>
+                      <TableCell className="text-sm">{topicTitle(String(e.topicId ?? ''), e.mode)}</TableCell>
+                      <TableCell className="text-sm font-mono">{String(e.variantId ?? '—')}</TableCell>
+                      <TableCell className="text-right tabular-nums">
+                        {e.isCorrect === true ? 'Correct' : e.isCorrect === false ? 'Wrong' : '—'}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => {
+                            setSelected(e);
+                            setOpen(true);
+                          }}
+                        >
+                          View
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ))
+                ) : (
+                  <TableRow>
+                    <TableCell colSpan={5} className="text-center text-muted-foreground py-10">
+                      No practice activity yet.
+                    </TableCell>
+                  </TableRow>
+                )}
+              </TableBody>
+            </Table>
+          </div>
+        </ScrollArea>
+      </Card>
+
+      <Dialog open={open} onOpenChange={(v) => setOpen(v)}>
+        <DialogContent className="max-w-3xl">
+          <DialogHeader>
+            <DialogTitle>Question details</DialogTitle>
+          </DialogHeader>
+
+          <div className="space-y-3">
+            <div className="text-xs text-muted-foreground">{fmtTime(selected?.shownAt)}</div>
+            <div className="text-sm">
+              <span className="text-muted-foreground">Topic: </span>
+              <span className="font-medium">{String(selected?.topicId ?? '—')}</span>
+              <span className="text-muted-foreground"> · Variant: </span>
+              <span className="font-mono">{String(selected?.variantId ?? '—')}</span>
+            </div>
+
+            {detailSnapshot?.katexQuestion ? (
+              <div className="rounded-md border bg-background p-3">
+                <div className="text-xs text-muted-foreground mb-2">Question (KaTeX)</div>
+                <div className="text-xl leading-snug">
+                  <Katex latex={String(detailSnapshot.katexQuestion)} displayMode={false} />
+                </div>
+              </div>
+            ) : null}
+
+            {Array.isArray(detailSnapshot?.katexExplanation) && detailSnapshot.katexExplanation.length ? (
+              <div className="rounded-md border bg-background p-3">
+                <div className="text-xs text-muted-foreground mb-2">Explanation</div>
+                <div className="space-y-2">
+                  {detailSnapshot.katexExplanation.map((b: any, idx: number) => {
+                    if (!b || typeof b !== 'object') return null;
+                    if (b.kind === 'text') {
+                      return <div key={idx} className="text-sm leading-relaxed">{String(b.content ?? '')}</div>;
+                    }
+                    if (b.kind === 'math') {
+                      return (
+                        <div key={idx} className="text-lg leading-snug">
+                          <Katex latex={String(b.content ?? '')} displayMode={!!b.displayMode} />
+                        </div>
+                      );
+                    }
+                    return null;
+                  })}
+                </div>
+              </div>
+            ) : null}
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

@@ -69,7 +69,13 @@ export default function SettingsPracticeAdminAnalytics() {
   const navigate = useNavigate();
 
   const users = useLiveQuery(() => db.users.toArray()) || [];
-  const [userId, setUserId] = useState<string>(() => users?.[0]?.id ?? '');
+  const usersWithAdmin = useMemo(() => {
+    const base = Array.isArray(users) ? users : [];
+    const hasAdmin = base.some((u: any) => String(u?.id) === 'admin');
+    return hasAdmin ? base : [...base, { id: 'admin', username: 'Admin' }];
+  }, [users]);
+
+  const [userId, setUserId] = useState<string>(() => usersWithAdmin?.[0]?.id ?? '');
   const [dateFilter, setDateFilter] = useState<string>('all');
 
   const events = useLiveQuery(async () => {
@@ -121,7 +127,7 @@ export default function SettingsPracticeAdminAnalytics() {
   const [open, setOpen] = useState(false);
   const [selected, setSelected] = useState<any>(null);
 
-  const selectedUser = useMemo(() => users.find((u) => u.id === userId) ?? null, [userId, users]);
+  const selectedUser = useMemo(() => usersWithAdmin.find((u: any) => String(u?.id) === String(userId)) ?? null, [userId, usersWithAdmin]);
 
   const detailSnapshot = useMemo(() => {
     if (!selected?.snapshotJson) return null;
@@ -162,9 +168,9 @@ export default function SettingsPracticeAdminAnalytics() {
                     <SelectValue placeholder="Select user" />
                   </SelectTrigger>
                   <SelectContent>
-                    {users.map((u) => (
-                      <SelectItem key={u.id} value={u.id}>
-                        {u.username}
+                    {usersWithAdmin.map((u: any) => (
+                      <SelectItem key={String(u.id)} value={String(u.id)}>
+                        {String(u.username ?? u.id)}
                       </SelectItem>
                     ))}
                   </SelectContent>
