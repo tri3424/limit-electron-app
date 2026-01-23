@@ -177,6 +177,8 @@ export default function SongRecognition() {
 	const [guessQuery, setGuessQuery] = useState<string>("");
 	const [songPickerOpen, setSongPickerOpen] = useState(false);
 	const [result, setResult] = useState<"idle" | "correct" | "wrong">("idle");
+	const [correctTitle, setCorrectTitle] = useState<string>('');
+	const [pauseSignal, setPauseSignal] = useState(0);
 	const [challenge, setChallenge] = useState<
 		| null
 		| {
@@ -190,8 +192,10 @@ export default function SongRecognition() {
 	const makeChallenge = (prevUsedSongIds: string[], prevUsedSnippetKeys: string[], nextDifficultyLevel: number) => {
 		const pool = (songs ?? []).filter((s) => s.visible !== false);
 		if (!pool.length) return null;
-		const withSrt = pool.filter((s) => (songSrtBySongId.get(s.id) || []).length >= 5);
-		const chooseFrom = withSrt.length ? withSrt : pool;
+		const withSrt = pool.filter((s) => (songSrtBySongId.get(s.id) || []).length >= 2);
+		// Only allow songs that have timestamped lyrics (.srt/.lrc persisted as cues).
+		if (!withSrt.length) return null;
+		const chooseFrom = withSrt;
 
 		const listenedSorted = chooseFrom
 			.map((s) => listenedMsBySongId.get(s.id) || 0)
@@ -221,7 +225,7 @@ export default function SongRecognition() {
 		nextUsedSongIds = [...nextUsedSongIds, picked.id];
 		let nextUsedSnippetKeys = prevUsedSnippetKeys;
 		const cues = (songSrtBySongId.get(picked.id) || []).slice().sort((a, b) => a.cueIndex - b.cueIndex);
-		if (cues.length < 5) {
+		if (cues.length < 2) {
 			return {
 				challenge: {
 					songId: picked.id,
@@ -242,9 +246,88 @@ export default function SongRecognition() {
 		const firstWords = getFirstLyricWords(picked.lyrics, 2);
 		const { titlePhrase, words: titleWords } = getTitleWords(picked.title);
 		const timedInitial = getInitialTimedCueHints(cues, looksLikeLrc ? 4 : 3);
+
+		const lyricLines = String(picked.lyrics || '')
+			.replace(/\r\n/g, '\n')
+			.replace(/\r/g, '\n')
+			.split('\n')
+			.map((l) => normalizeLyricLine(l))
+			.filter(Boolean);
+		const earlyLyricLines = lyricLines.slice(0, 3);
+		const lyricLineCounts = (() => {
+			const m = new Map<string, number>();
+			for (const l of lyricLines) m.set(l, (m.get(l) || 0) + 1);
+			return m;
+		})();
+		const lyricLineSet = new Set(lyricLines);
+		const tokenSet = (s: string) => new Set(s.split(' ').map((w) => w.trim()).filter((w) => w.length >= 2));
+		const overlapScore = (a: string, b: string) => {
+			if (!a || !b) return 0;
+			const aa = tokenSet(a);
+			const bb = tokenSet(b);
+			if (!aa.size || !bb.size) return 0;
+			let inter = 0;
+			for (const w of aa) if (bb.has(w)) inter += 1;
+			// ratio of intersection to smaller set (more forgiving for short lines)
+			return inter / Math.max(1, Math.min(aa.size, bb.size));
+		};
+		const cueTextByCueIndex = (() => {
+			// Some Bengali timed lyrics can be inaccurate. Map each cue to the closest matching lyric line
+			// (in order) so snippet selection heuristics don't get confused.
+			const map = new Map<number, string>();
+			let cursor = 0;
+
+			for (const c of cues) {
+				const cueIdx = Number(c.cueIndex ?? 0);
+				const rawNorm = normalizeLyricLine(c.text || '');
+				if (!rawNorm) continue;
+				if (lyricLineSet.has(rawNorm)) {
+					map.set(cueIdx, rawNorm);
+					continue;
+				}
+
+				// Search a window forward from the last matched line.
+				const start = Math.max(0, cursor - 4);
+				const end = Math.min(lyricLines.length, cursor + 40);
+				let bestI = -1;
+				let best = 0;
+				for (let i = start; i < end; i += 1) {
+					const cand = lyricLines[i] || '';
+					const s = overlapScore(rawNorm, cand);
+					if (s > best) {
+						best = s;
+						bestI = i;
+						if (best >= 0.95) break;
+					}
+				}
+
+				if (bestI >= 0 && best >= 0.35) {
+					map.set(cueIdx, lyricLines[bestI]!);
+					cursor = Math.max(cursor, bestI + 1);
+				} else {
+					// fallback to the cue text itself
+					map.set(cueIdx, rawNorm);
+				}
+			}
+			return map;
+		})();
+
+		const normalizedCueText = (c: SongSrtCue) => cueTextByCueIndex.get(Number(c.cueIndex ?? 0)) || normalizeLyricLine(c.text || '');
 		const cuePasses = (c: SongSrtCue) => {
 			if (shouldIgnoreTimedLyricText(c.text || '')) return false;
-			const normalized = normalizeLyricLine(c.text || '');
+			const normalized = normalizedCueText(c);
+			if (normalized && earlyLyricLines.length) {
+				// Extra protection: don't allow snippets that match the first lyric lines (often reveals song name).
+				let tooClose = false;
+				for (const early of earlyLyricLines) {
+					if (!early) continue;
+					if (overlapScore(normalized, early) >= 0.6) {
+						tooClose = true;
+						break;
+					}
+				}
+				if (tooClose) return false;
+			}
 			if (normalized && hintLines.has(normalized)) return false;
 			if (normalized && timedInitial.lines.has(normalized)) return false;
 			if (normalized && titlePhrase && normalized.includes(titlePhrase)) return false;
@@ -287,8 +370,12 @@ export default function SongRecognition() {
 			};
 		}
 
-		const preferredLinesToPlay = nextDifficultyLevel >= 1 ? 2 : 3;
-		const lineOptions = preferredLinesToPlay >= 3 ? [3, 2] : [2];
+		const LINE_LONG_MS = 10_000;
+		const LINE_SHORT_MS = 6_000;
+		const CLIP_TARGET_MS = 11_000;
+		const CLIP_MIN_MS = 7_000;
+		const CLIP_MAX_MS = 12_000;
+		const lineOptions = [2, 1];
 
 		const usedSnippetSet = new Set(prevUsedSnippetKeys);
 		const lastKeyForSong = [...prevUsedSnippetKeys]
@@ -310,9 +397,42 @@ export default function SongRecognition() {
 			return list[Math.floor(Math.random() * list.length)]!;
 		};
 
-		let pickedBlock: SongSrtCue[] | null = null;
+		const scoreBlock = (block: SongSrtCue[]) => {
+			const first = block[0]!;
+			const last = block[block.length - 1]!;
+			const dur = Math.max(0, (last.endMs ?? 0) - (first.startMs ?? 0));
+			const firstDur = Math.max(0, (first.endMs ?? 0) - (first.startMs ?? 0));
+			const preferredLen = firstDur >= LINE_LONG_MS ? 1 : (firstDur <= LINE_SHORT_MS ? 2 : null);
+			let score = 0;
+			// hard constraints
+			if (dur <= 0) score -= 10_000;
+			if (dur > CLIP_MAX_MS) score -= 5_000 + (dur - CLIP_MAX_MS);
+			if (dur < CLIP_MIN_MS) score -= 2_000 + (CLIP_MIN_MS - dur);
+			// prefer near target
+			score -= Math.abs(dur - CLIP_TARGET_MS);
+			// prefer 1 long line vs 2 short lines based on the first line duration
+			if (preferredLen && block.length !== preferredLen) score -= 2_500;
+
+			// discourage selecting a 2-line block if the second line is mostly repetition
+			if (block.length === 2) {
+				const a = normalizedCueText(block[0]!);
+				const b = normalizedCueText(block[1]!);
+				const aWords = new Set(a.split(' ').map((w) => w.trim()).filter((w) => w.length >= 3));
+				const bWords = b.split(' ').map((w) => w.trim()).filter((w) => w.length >= 3);
+				if (aWords.size && bWords.length) {
+					let overlap = 0;
+					for (const w of bWords) if (aWords.has(w)) overlap += 1;
+					const overlapRatio = overlap / Math.max(1, bWords.length);
+					if (overlapRatio > 0.6) score -= 1_000;
+					else if (overlapRatio < 0.25) score += 150;
+				}
+			}
+			return score;
+		};
+
+		type Candidate = { start: number; len: number; score: number };
+		const candidates: Candidate[] = [];
 		for (const len of lineOptions) {
-			const candidates: number[] = [];
 			for (let i = 0; i + (len - 1) < trimmed.length; i += 1) {
 				let ok = true;
 				for (let j = 0; j < len; j += 1) {
@@ -329,31 +449,44 @@ export default function SongRecognition() {
 						}
 					}
 				}
-				if (ok) candidates.push(i);
+				if (!ok) continue;
+				const block = trimmed.slice(i, i + len);
+				const base = trimmed[i];
+				const cueIdx = base?.cueIndex ?? i;
+				const usedKey = `${picked.id}:${cueIdx}:${len}`;
+				const wasUsed = usedSnippetSet.has(usedKey);
+				const immediateRepeatPenalty =
+					Number.isFinite(lastCueIdx) && Number.isFinite(lastLen) && lastLen === len && cueIdx === lastCueIdx ? 1_250 : 0;
+				const startText = normalizedCueText(block[0]!);
+				const startCount = lyricLineCounts.get(startText) || 0;
+				let chorusPenalty = startCount >= 2 ? 600 * (startCount - 1) : 0;
+				if (i > 0) {
+					const prevText = normalizedCueText(trimmed[i - 1]!);
+					const prevCount = lyricLineCounts.get(prevText) || 0;
+					// Prefer entering a unique verse line after a repeated chorus line.
+					if (prevCount >= 2 && startCount <= 1) chorusPenalty -= 150;
+				}
+				candidates.push({ start: i, len, score: scoreBlock(block) - immediateRepeatPenalty - chorusPenalty - (wasUsed ? 10_000 : 0) });
 			}
+		}
 
-			const notUsed = candidates.filter((start) => {
-				const base = trimmed[start];
-				const cueIdx = base?.cueIndex ?? start;
-				return !usedSnippetSet.has(`${picked.id}:${cueIdx}:${len}`);
-			});
-			let pool = notUsed.length ? notUsed : candidates;
-			if (!notUsed.length && pool.length > 1 && Number.isFinite(lastCueIdx) && Number.isFinite(lastLen) && lastLen === len) {
-				const filteredPool = pool.filter((start) => {
-					const base = trimmed[start];
-					const cueIdx = base?.cueIndex ?? start;
-					return cueIdx !== lastCueIdx;
-				});
-				if (filteredPool.length) pool = filteredPool;
-			}
-			const start = pickFromRegion(pool);
-			if (typeof start === 'number') {
-				pickedBlock = trimmed.slice(start, start + len);
-				const base = trimmed[start];
-				const cueIdx = base?.cueIndex ?? start;
-				nextUsedSnippetKeys = [...nextUsedSnippetKeys, `${picked.id}:${cueIdx}:${len}`].slice(-200);
-				break;
-			}
+		candidates.sort((a, b) => b.score - a.score);
+		const top = candidates.slice(0, 60);
+		const topUnused = top.filter((c) => {
+			const base = trimmed[c.start];
+			const cueIdx = base?.cueIndex ?? c.start;
+			const usedKey = `${picked.id}:${cueIdx}:${c.len}`;
+			return !usedSnippetSet.has(usedKey);
+		});
+		const topPreferred = topUnused.length ? topUnused : top;
+		const topStarts = topPreferred.map((c) => c.start);
+		const pickedStart = pickFromRegion(topStarts);
+		const chosen = typeof pickedStart === 'number' ? topPreferred.find((c) => c.start === pickedStart) : topPreferred[0];
+		const pickedBlock = chosen ? trimmed.slice(chosen.start, chosen.start + chosen.len) : null;
+		if (chosen) {
+			const base = trimmed[chosen.start];
+			const cueIdx = base?.cueIndex ?? chosen.start;
+			nextUsedSnippetKeys = [...nextUsedSnippetKeys, `${picked.id}:${cueIdx}:${chosen.len}`].slice(-200);
 		}
 
 		if (!pickedBlock || !pickedBlock.length) {
@@ -372,7 +505,15 @@ export default function SongRecognition() {
 		const first = pickedBlock[0]!;
 		const last = pickedBlock[pickedBlock.length - 1]!;
 		const clipStartMs = Math.max(0, first.startMs);
-		const clipEndMs = Math.max(clipStartMs, last.endMs);
+		const TAIL_PAD_MS = 450;
+		const nextCueStartMs = (() => {
+			if (!chosen) return undefined;
+			const after = trimmed[chosen.start + chosen.len];
+			return typeof after?.startMs === 'number' ? after.startMs : undefined;
+		})();
+		const paddedEnd = (typeof last.endMs === 'number' ? last.endMs : clipStartMs) + TAIL_PAD_MS;
+		const cappedEnd = typeof nextCueStartMs === 'number' ? Math.max(clipStartMs, Math.min(paddedEnd, nextCueStartMs - 50)) : paddedEnd;
+		const clipEndMs = Math.max(clipStartMs, cappedEnd);
 		return {
 			challenge: {
 				songId: picked.id,
@@ -432,6 +573,7 @@ export default function SongRecognition() {
 								setGuessSongId("");
 								setGuessQuery("");
 								setResult("idle");
+								setCorrectTitle('');
 								return;
 							}
 							const next = makeChallenge([], [], 0);
@@ -446,6 +588,7 @@ export default function SongRecognition() {
 							setGuessSongId("");
 							setGuessQuery("");
 							setResult("idle");
+							setCorrectTitle('');
 						}}
 					>
 						{active ? "Close test" : "Start test"}
@@ -453,31 +596,39 @@ export default function SongRecognition() {
 				</div>
 			</div>
 
-			{active && challenge ? (
-				<Card className="p-4">
-					<div className="space-y-3">
-						{challenge.requiresSrt ? (
-							<div className="rounded-md border p-3 bg-muted/30 text-sm">
-								This song has no timestamped lyrics (.srt), so snippet playback is disabled.
-							</div>
-						) : null}
-						{(() => {
-							const song = (songs ?? []).find((s) => s.id === challenge.songId);
-							if (!song) return null;
+		{active && challenge ? (
+			<Card className="p-5">
+				<div className="max-w-xl mx-auto space-y-4">
+					<div>
+						<div className="text-sm font-semibold">Recognition snippet</div>
+						<div className="text-xs text-muted-foreground mt-0.5">Listen carefully, then pick the matching song.</div>
+					</div>
+
+					{challenge.requiresSrt ? (
+						<div className="rounded-md border-2 p-3 bg-muted/30 text-sm">
+							This song has no timestamped lyrics (.srt), so snippet playback is disabled.
+						</div>
+					) : null}
+
+					{(() => {
+						const song = (songs ?? []).find((s) => s.id === challenge.songId);
+						if (!song) return null;
 							return (
 								<AudioPlayer
 									src={song.audioFileUrl}
 									showVolumeControls={false}
 									hideSeekBar
 									hideTimeDisplay
+									pauseSignal={pauseSignal}
 									clipStartMs={challenge.requiresSrt ? undefined : challenge.clipStartMs}
 									clipEndMs={challenge.requiresSrt ? undefined : challenge.clipEndMs}
+									className="p-6"
 								/>
 							);
-						})()}
+					})()}
 
-						<div className="space-y-2">
-							<div className="text-sm font-semibold">Your answer</div>
+					<div className="space-y-2">
+						<div className="text-sm font-semibold">Your answer</div>
 							<Popover
 								open={songPickerOpen}
 								onOpenChange={(open) => {
@@ -485,111 +636,121 @@ export default function SongRecognition() {
 									setSongPickerOpen(open);
 								}}
 							>
-								<PopoverTrigger asChild>
-									<Button
-										variant="outline"
-										role="combobox"
-										aria-expanded={songPickerOpen}
-										disabled={result !== 'idle'}
-										className="w-full justify-between"
-									>
-										<span className={guessSongId ? 'truncate' : 'truncate text-muted-foreground'}>
-											{guessSongId ? ((songs ?? []).find((s) => s.id === guessSongId)?.title || 'Selected song') : 'Select song'}
-										</span>
-										<ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-									</Button>
-								</PopoverTrigger>
-								<PopoverContent className="w-[--radix-popover-trigger-width] p-0" align="start">
-									<Command>
-										<CommandInput
-											value={guessQuery}
-											disabled={result !== 'idle'}
-											onValueChange={(v) => {
-												setGuessQuery(v);
-												setResult('idle');
-											}}
-											placeholder="Search songs..."
-										/>
-										<CommandList>
-											<CommandEmpty>No matches.</CommandEmpty>
-											{guessOptions.map((s) => (
-												<CommandItem
-													key={s.id}
-													value={`${s.title || ''} ${s.singer || ''}`}
-													onSelect={() => {
-														setGuessSongId(s.id);
-														setResult('idle');
-														setSongPickerOpen(false);
-													}}
-												>
-													<Check className={guessSongId === s.id ? 'h-4 w-4' : 'h-4 w-4 opacity-0'} />
-													<span className="truncate">{s.title}</span>
-												</CommandItem>
-											))}
-										</CommandList>
-									</Command>
-								</PopoverContent>
-							</Popover>
-
-							<div
-								className={cn(
-									"rounded-md border p-3 text-sm font-semibold",
-									result === "idle" ? "bg-muted/20 text-muted-foreground" : "",
-									result === "correct" ? "bg-green-500/10 border-green-500/30 text-green-700 dark:text-green-300" : "",
-									result === "wrong" ? "bg-red-500/10 border-red-500/30 text-red-700 dark:text-red-300" : "",
-								)}
-							>
-								{result === "idle" ? "Pick an answer, then check." : null}
-								{result === "correct" ? "Correct!" : null}
-								{result === "wrong" ? "Wrong." : null}
-							</div>
-
-							<div className="flex items-center gap-2">
+							<PopoverTrigger asChild>
 								<Button
 									variant="outline"
-									onClick={() => {
-										const next = makeChallenge(usedSongIds, usedSnippetKeys, difficultyLevel);
-										if (!next) return;
-										setChallenge(next.challenge);
-										setUsedSongIds(next.nextUsedSongIds);
-										setUsedSnippetKeys(next.nextUsedSnippetKeys);
-										setGuessSongId("");
-										setGuessQuery("");
-										setResult("idle");
-									}}
+									role="combobox"
+									aria-expanded={songPickerOpen}
+									disabled={result !== 'idle'}
+									className="w-full justify-between"
 								>
-									New snippet
+									<span className={guessSongId ? 'truncate' : 'truncate text-muted-foreground'}>
+										{guessSongId ? ((songs ?? []).find((s) => s.id === guessSongId)?.title || 'Selected song') : 'Select song'}
+									</span>
+									<ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
 								</Button>
-								<Button
-									disabled={!guessSongId || !challenge}
-									onClick={() => {
-										if (!challenge) return;
-										const isCorrect = guessSongId === challenge.songId;
-										setResult(isCorrect ? "correct" : "wrong");
-										setRecentOutcomes((prev) => {
-											const next = [...prev, isCorrect].slice(-10);
-											if (next.length >= 8) {
-												const correctCount = next.filter(Boolean).length;
-												if (correctCount >= 8) {
-													setDifficultyLevel((d) => {
-														if (d >= 2) return d;
-														toast.message("Difficulty increased");
-														return d + 1;
-													});
-													return [];
-												}
-											}
-											return next;
-										});
-									}}
-								>
-									Check
-								</Button>
-							</div>
+							</PopoverTrigger>
+							<PopoverContent className="w-[--radix-popover-trigger-width] p-0" align="start">
+								<Command>
+									<CommandInput
+										value={guessQuery}
+										disabled={result !== 'idle'}
+										onValueChange={(v) => {
+											setGuessQuery(v);
+											setResult('idle');
+										}}
+										placeholder="Search songs..."
+									/>
+									<CommandList>
+										<CommandEmpty>No matches.</CommandEmpty>
+										{guessOptions.map((s) => (
+											<CommandItem
+												key={s.id}
+												value={`${s.title || ''} ${s.singer || ''}`}
+												onSelect={() => {
+													setGuessSongId(s.id);
+													setResult('idle');
+													setSongPickerOpen(false);
+												}}
+											>
+												<Check className={guessSongId === s.id ? 'h-4 w-4' : 'h-4 w-4 opacity-0'} />
+												<span className="truncate">{s.title}</span>
+											</CommandItem>
+										))}
+									</CommandList>
+								</Command>
+							</PopoverContent>
+						</Popover>
+					</div>
+
+					<div className="flex justify-center">
+						<div
+							className={cn(
+								"rounded-md border-4 px-3 py-2 text-sm font-semibold",
+								result === "idle" ? "bg-muted/20 text-muted-foreground" : "",
+								result === "correct" ? "bg-green-500/10 border-green-500/30 text-green-700 dark:text-green-300" : "",
+								result === "wrong" ? "bg-red-500/10 border-red-500/30 text-red-700 dark:text-red-300" : "",
+							)}
+						>
+							{result === "idle" ? "Pick an answer, then check." : null}
+							{result === "correct" ? "Correct!" : null}
+							{result === "wrong" ? (correctTitle ? `Wrong. Correct answer: ${correctTitle}` : 'Wrong.') : null}
 						</div>
 					</div>
-				</Card>
-			) : null}
-		</div>
-	);
+
+					<div className="flex justify-center">
+						<div className="grid grid-cols-2 gap-2">
+							<Button
+								variant="outline"
+								disabled={!challenge || result === 'idle'}
+								onClick={() => {
+									const next = makeChallenge(usedSongIds, usedSnippetKeys, difficultyLevel);
+									if (!next) return;
+									setChallenge(next.challenge);
+									setUsedSongIds(next.nextUsedSongIds);
+									setUsedSnippetKeys(next.nextUsedSnippetKeys);
+									setGuessSongId("");
+									setGuessQuery("");
+									setResult("idle");
+									setCorrectTitle('');
+								}}
+							>
+								New snippet
+							</Button>
+							<Button
+								className="w-full"
+								disabled={!guessSongId || !challenge}
+								onClick={() => {
+									if (!challenge) return;
+									setPauseSignal((x) => x + 1);
+									const isCorrect = guessSongId === challenge.songId;
+									setResult(isCorrect ? "correct" : "wrong");
+									const correct = (songs ?? []).find((s) => s.id === challenge.songId);
+									setCorrectTitle(String(correct?.title ?? ''));
+									setRecentOutcomes((prev) => {
+										const next = [...prev, isCorrect].slice(-10);
+										if (next.length >= 8) {
+											const correctCount = next.filter(Boolean).length;
+											if (correctCount >= 8) {
+												setDifficultyLevel((d) => {
+													if (d >= 2) return d;
+													toast.message("Difficulty increased");
+													return d + 1;
+												});
+												return [];
+											}
+										}
+										return next;
+									});
+								}}
+							>
+								Check
+							</Button>
+						</div>
+					</div>
+				</div>
+			</Card>
+		) : null}
+	</div>
+);
 }

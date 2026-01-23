@@ -22,6 +22,7 @@ type Props = {
 	clipEndMs?: number;
 	hideSeekBar?: boolean;
 	hideTimeDisplay?: boolean;
+	pauseSignal?: number;
 	onEnded?: () => void;
 	onPlay?: () => void;
 	onPause?: () => void;
@@ -38,6 +39,7 @@ export default function AudioPlayer({
 	clipEndMs,
 	hideSeekBar = false,
 	hideTimeDisplay = false,
+	pauseSignal,
 	onEnded,
 	onPlay,
 	onPause,
@@ -173,6 +175,16 @@ export default function AudioPlayer({
 	useEffect(() => {
 		const el = audioRef.current;
 		if (!el) return;
+		try {
+			if (!el.paused) el.pause();
+		} catch {
+			// ignore
+		}
+	}, [pauseSignal]);
+
+	useEffect(() => {
+		const el = audioRef.current;
+		if (!el) return;
 		setReady(false);
 		setPlaying(false);
 		setDuration(0);
@@ -204,17 +216,27 @@ export default function AudioPlayer({
 	}, [effectiveDuration, effectiveTime]);
 
 	return (
-		<div className={cn("w-full rounded-md border bg-background p-3", className)}>
+		<div className={cn("w-full rounded-md border-2 bg-background p-3", className)}>
 			{displayTitle ? <div className="text-sm font-semibold mb-2 truncate">{displayTitle}</div> : null}
 
 			<audio ref={audioRef} src={src} preload="metadata" />
 
-			<div className="flex items-center gap-2">
+			<div
+				className={cn(
+					"flex items-center gap-2",
+					hideSeekBar && hideTimeDisplay ? "justify-center" : "",
+				)}
+			>
 				<Button
 					type="button"
-					variant="outline"
+					variant="ghost"
 					size="icon"
 					disabled={!src || !ready}
+					className={cn(
+						"h-14 w-14 rounded-full border-[4px] border-primary text-primary hover:bg-primary/10 hover:text-primary",
+						"focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:ring-offset-2",
+						(!src || !ready) ? "opacity-50" : "",
+					)}
 					onClick={async () => {
 						const el = audioRef.current;
 						if (!el) return;
@@ -234,7 +256,7 @@ export default function AudioPlayer({
 						}
 					}}
 				>
-					{playing ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
+					{playing ? <Pause className="h-6 w-6" strokeWidth={2.6} /> : <Play className="h-6 w-6" strokeWidth={2.6} />}
 				</Button>
 
 				{hideSeekBar ? null : (
