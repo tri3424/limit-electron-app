@@ -11,6 +11,7 @@ import { generateBabyWordProblemQuestion, type BabyWordProblemQuestion, type Bab
 import { generatePolynomialsQuestion } from '@/lib/practiceGenerators/polynomials';
 import { generatePermutationCombinationQuestion, PermutationCombinationQuestion, PermutationCombinationVariantId } from '@/lib/practiceGenerators/permutationCombination';
 import { generateClockReadingQuestion } from '@/lib/practiceGenerators/clockReading';
+import { generateQuadraticsQuestion } from '@/lib/practiceGenerators/quadratics';
 
 export type PracticeDifficulty = 'easy' | 'medium' | 'hard' | 'ultimate';
 
@@ -85,8 +86,17 @@ export type PermutationCombinationPracticeQuestion = PermutationCombinationQuest
 
 export type QuadraticQuestion = {
   kind: 'quadratic';
-  solutions: Fraction[]; // length 2, repeated-root duplicated
-  solutionsLatex: string[];
+  // Quadratics supports multiple variants.
+  // - factorisation: 2 fractional roots
+  // - complete_square_pqr: find p,q,r
+  // - complete_square_abc: find a,b,c
+  // - solve_complete_square_surd: enter 2 decimal roots (4 s.f.)
+  variantId: string;
+  promptBlocks?: KatexExplanationBlock[];
+  solutions?: Fraction[]; // length 2, repeated-root duplicated
+  solutionsLatex?: string[];
+  expectedParts?: Array<{ id: string; label: string; kind: 'fraction' | 'decimal_4sf'; expectedFraction?: Fraction; expectedDecimal?: number }>;
+  calculatorAllowed?: boolean;
 } & PracticeQuestionBase;
 
 export type LinearQuestion = {
@@ -124,11 +134,16 @@ export type FractionsVariantId =
 
 export type SimultaneousQuestion = {
   kind: 'simultaneous';
+  variantId?: 'two_var' | 'three_var' | 'lin_quad';
   solutionX: Fraction;
   solutionY: Fraction;
+  solutionX2?: Fraction;
+  solutionY2?: Fraction;
   solutionZ?: Fraction;
   solutionLatexX: string;
   solutionLatexY: string;
+  solutionLatexX2?: string;
+  solutionLatexY2?: string;
   solutionLatexZ?: string;
   variableCount?: 2 | 3;
 } & PracticeQuestionBase;
@@ -255,6 +270,83 @@ function nonZeroInt(rng: Rng, min: number, max: number) {
   let v = 0;
   while (v === 0) v = rng.int(min, max);
   return v;
+}
+
+function generateQuadratics(input: { seed: number; difficulty: PracticeDifficulty; variantWeights?: Record<string, number> }): QuadraticQuestion {
+  const q: any = generateQuadraticsQuestion({
+    seed: input.seed,
+    difficulty: input.difficulty,
+    variantWeights: input.variantWeights,
+  });
+
+  const base: PracticeQuestionBase = {
+    id: q.id,
+    topicId: 'quadratics',
+    difficulty: input.difficulty,
+    seed: input.seed,
+    katexQuestion: q.katexQuestion,
+    katexExplanation: q.katexExplanation,
+  };
+
+  const method = String(q?.metadata?.method ?? 'factorisation');
+
+  if (method === 'factorisation') {
+    return {
+      ...base,
+      kind: 'quadratic',
+      variantId: 'factorisation',
+      promptBlocks: Array.isArray(q.promptBlocks) ? (q.promptBlocks as any) : undefined,
+      solutions: q.solutions as Fraction[],
+      solutionsLatex: q.solutionsLatex as string[],
+      calculatorAllowed: false,
+    };
+  }
+
+  if (method === 'complete_square_pqr') {
+    const exp = q.expected as { p: Fraction; q: Fraction; r: Fraction };
+    return {
+      ...base,
+      kind: 'quadratic',
+      variantId: 'complete_square_pqr',
+      promptBlocks: Array.isArray(q.promptBlocks) ? (q.promptBlocks as any) : undefined,
+      expectedParts: [
+        { id: 'p', label: 'p', kind: 'fraction', expectedFraction: exp.p },
+        { id: 'q', label: 'q', kind: 'fraction', expectedFraction: exp.q },
+        { id: 'r', label: 'r', kind: 'fraction', expectedFraction: exp.r },
+      ],
+      calculatorAllowed: false,
+    };
+  }
+
+  if (method === 'complete_square_abc') {
+    const exp = q.expected as { a: Fraction; b: Fraction; c: Fraction };
+    return {
+      ...base,
+      kind: 'quadratic',
+      variantId: 'complete_square_abc',
+      promptBlocks: Array.isArray(q.promptBlocks) ? (q.promptBlocks as any) : undefined,
+      expectedParts: [
+        { id: 'a', label: 'a', kind: 'fraction', expectedFraction: exp.a },
+        { id: 'b', label: 'b', kind: 'fraction', expectedFraction: exp.b },
+        { id: 'c', label: 'c', kind: 'fraction', expectedFraction: exp.c },
+      ],
+      calculatorAllowed: false,
+    };
+  }
+
+  // solve_complete_square_surd
+  const roots = q.expectedRoots as [number, number];
+  return {
+    ...base,
+    kind: 'quadratic',
+    variantId: 'solve_complete_square_surd',
+    promptBlocks: Array.isArray(q.promptBlocks) ? (q.promptBlocks as any) : undefined,
+    expectedParts: [
+      { id: 'x1', label: 'x_1', kind: 'decimal_4sf', expectedDecimal: roots[0] },
+      { id: 'x2', label: 'x_2', kind: 'decimal_4sf', expectedDecimal: roots[1] },
+    ],
+    calculatorAllowed: true,
+  };
 }
 
 function difficultyRange(difficulty: PracticeDifficulty) {
@@ -629,6 +721,8 @@ export function generatePracticeQuestion(input: {
   answerKindByVariant?: Record<string, string>;
 }): PracticeQuestion {
   switch (input.topicId) {
+    case 'quadratics':
+      return generateQuadratics({ seed: input.seed, difficulty: input.difficulty, variantWeights: input.variantWeights });
     case 'clock_reading':
       return generateClockReadingQuestion({
         seed: input.seed,
@@ -1685,6 +1779,24 @@ function generateSimultaneous(input: { topicId: PracticeTopicId; difficulty: Pra
   const R = difficultyRange(input.difficulty);
 
   const variant = (() => {
+    if (input.difficulty === 'ultimate') {
+      const w = input.variantWeights ?? {};
+      const w2 = Math.max(0, Number((w as any).two_var ?? 45));
+      const w3 = Math.max(0, Number((w as any).three_var ?? 20));
+      const wq = Math.max(0, Number((w as any).lin_quad ?? 35));
+      const total = w2 + w3 + wq;
+      if (!(total > 0)) {
+        const r = rng.next();
+        if (r < 0.35) return 'lin_quad' as const;
+        if (r < 0.55) return 'three_var' as const;
+        return 'two_var' as const;
+      }
+      const pick = rng.next() * total;
+      if (pick < wq) return 'lin_quad' as const;
+      if (pick < wq + w3) return 'three_var' as const;
+      return 'two_var' as const;
+    }
+
     if (input.difficulty !== 'hard') return 'two_var' as const;
     const w = input.variantWeights ?? {};
     const w2 = Math.max(0, Number(w.two_var ?? 70));
@@ -1812,6 +1924,7 @@ function generateSimultaneous(input: { topicId: PracticeTopicId; difficulty: Pra
 
       return {
         kind: 'simultaneous',
+        variantId: 'three_var',
         id: stableId('simul3', input.seed, `${a1}-${b1}-${c1}-${d1}-${a2}-${b2}-${c2}-${d2}-${a3}-${b3}-${c3}-${d3}`),
         topicId: 'simultaneous_equations',
         difficulty: input.difficulty,
@@ -1829,6 +1942,143 @@ function generateSimultaneous(input: { topicId: PracticeTopicId; difficulty: Pra
     }
 
     return generateSimultaneous({ ...input, seed: input.seed + 1, topicId: 'simultaneous_equations', variantWeights: input.variantWeights });
+  }
+
+  if (variant === 'lin_quad') {
+    // Linear + quadratic simultaneous system (ultimate-only).
+    // Construct by choosing two integer solutions that satisfy x^2 - d y^2 = n,
+    // then building a line through those two points.
+    const dChoices = [1, 4, 9];
+    const d = dChoices[rng.int(0, dChoices.length - 1)] ?? 4;
+
+    const pickSignedInt = (lo: number, hi: number) => {
+      const v = rng.int(lo, hi);
+      return rng.next() < 0.5 ? v : -v;
+    };
+
+    const y1 = pickSignedInt(1, 8);
+    let y2 = pickSignedInt(1, 8);
+    if (y2 === y1) y2 = y1 + 1;
+
+    const tryBuild = () => {
+      for (let attempt = 0; attempt < 250; attempt++) {
+        const yA = attempt % 2 === 0 ? y1 : y2;
+        const yB = attempt % 2 === 0 ? y2 : y1;
+
+        // Choose x1 first.
+        const x1 = pickSignedInt(2, 22);
+        const n = x1 * x1 - d * yA * yA;
+
+        // Ensure the second point produces a square.
+        const x2sq = n + d * yB * yB;
+        if (!(x2sq >= 0)) continue;
+        const x2abs = Math.round(Math.sqrt(x2sq));
+        if (x2abs * x2abs !== x2sq) continue;
+        const x2 = rng.next() < 0.5 ? x2abs : -x2abs;
+
+        // Ensure points are distinct.
+        if (x1 === x2 && yA === yB) continue;
+
+        // Build line through (x1,yA) and (x2,yB): A x + B y = C
+        const A = yA - yB;
+        const B = x2 - x1;
+        const C = A * x1 + B * yA;
+        if (A === 0 && B === 0) continue;
+
+        // Avoid awkward 0 denominators in the two methods.
+        if (A === 0 || B === 0) continue;
+
+        // Keep coefficients reasonable.
+        if (Math.abs(A) > 9 || Math.abs(B) > 12 || Math.abs(C) > 120) continue;
+
+        // Ensure equation is not trivially simplifiable to decimals; keep integer coeffs.
+        return { x1, y1: yA, x2, y2: yB, n, A, B, C };
+      }
+      return null;
+    };
+
+    const built = tryBuild();
+    if (!built) return generateSimultaneous({ ...input, seed: input.seed + 1, topicId: 'simultaneous_equations' });
+
+    const { x1, y1: yA, x2, y2: yB, n, A, B, C } = built;
+
+    const eq1 = buildEq(A, B, null, C);
+    const eq2 = `x^2 ${d < 0 ? '-' : '-'} ${Math.abs(d)}y^2 = ${n}`;
+
+    const sol1x = frac(x1, 1);
+    const sol1y = frac(yA, 1);
+    const sol2x = frac(x2, 1);
+    const sol2y = frac(yB, 1);
+
+    const sol1xL = fractionToLatex(sol1x);
+    const sol1yL = fractionToLatex(sol1y);
+    const sol2xL = fractionToLatex(sol2x);
+    const sol2yL = fractionToLatex(sol2y);
+
+    // Method 1: solve (1) for x and substitute into (2)
+    // x = (C - B y)/A
+    const k2 = B * B - d * A * A;
+    const k1 = -2 * B * C;
+    const k0 = C * C - n * A * A;
+    const lead = k2;
+    const rhsScaled = 0;
+
+    // Method 2: solve (1) for y and substitute into (2)
+    // y = (C - A x)/B
+    const m2 = B * B - d * A * A;
+    const m1 = 2 * d * A * C;
+    const m0 = -d * C * C - n * B * B;
+
+    const explanation: KatexExplanationBlock[] = [
+      { kind: 'text', content: 'Solve the simultaneous equations.' },
+      { kind: 'math', content: String.raw`\begin{aligned} ${eq1} \\ ${eq2} \end{aligned}`, displayMode: true },
+
+      { kind: 'text', content: 'Method 1 (make x the subject of the linear equation):' },
+      { kind: 'math', content: String.raw`\text{From (1): }x=\frac{${C} - ${B}y}{${A}}`, displayMode: true },
+      { kind: 'text', content: 'Substitute into (2):' },
+      { kind: 'math', content: String.raw`\left(\frac{${C} - ${B}y}{${A}}\right)^2 - ${d}y^2 = ${n}`, displayMode: true },
+      { kind: 'text', content: 'Multiply through by the denominator to remove fractions:' },
+      { kind: 'math', content: String.raw`(${C} - ${B}y)^2 - ${d}\,${A * A}y^2 = ${n}\,${A * A}`, displayMode: true },
+      { kind: 'text', content: 'Expand and rearrange into a quadratic in y:' },
+      { kind: 'math', content: String.raw`${lead}y^2 ${k1 < 0 ? '' : '+'} ${k1}y ${k0 < 0 ? '' : '+'} ${k0} = ${rhsScaled}`, displayMode: true },
+      { kind: 'text', content: 'Solve the quadratic to find y:' },
+      { kind: 'math', content: String.raw`y=${sol1yL}\ \text{or}\ y=${sol2yL}`, displayMode: true },
+      { kind: 'text', content: 'Substitute each value of y into (1) to find x:' },
+      { kind: 'math', content: String.raw`y=${sol1yL}\Rightarrow x=${sol1xL}`, displayMode: true },
+      { kind: 'math', content: String.raw`y=${sol2yL}\Rightarrow x=${sol2xL}`, displayMode: true },
+
+      { kind: 'text', content: 'Alternative method (make y the subject of the linear equation):' },
+      { kind: 'math', content: String.raw`\text{From (1): }y=\frac{${C} - ${A}x}{${B}}`, displayMode: true },
+      { kind: 'text', content: 'Substitute into (2):' },
+      { kind: 'math', content: String.raw`x^2 - ${d}\left(\frac{${C} - ${A}x}{${B}}\right)^2 = ${n}`, displayMode: true },
+      { kind: 'text', content: 'Multiply through by the denominator and rearrange into a quadratic in x:' },
+      { kind: 'math', content: String.raw`${m2}x^2 ${m1 < 0 ? '' : '+'} ${m1}x ${m0 < 0 ? '' : '+'} ${m0} = 0`, displayMode: true },
+      { kind: 'text', content: 'Solve to get the same x values, then substitute back to get y.' },
+      { kind: 'math', content: String.raw`x=${sol1xL}\ \text{or}\ x=${sol2xL}`, displayMode: true },
+
+      { kind: 'text', content: 'Solutions:' },
+      { kind: 'math', content: String.raw`(x,y)=(${sol1xL},${sol1yL})\ \text{or}\ (x,y)=(${sol2xL},${sol2yL})`, displayMode: true },
+    ];
+
+    return {
+      kind: 'simultaneous',
+      variantId: 'lin_quad',
+      id: stableId('simul-linq', input.seed, `${A}-${B}-${C}-${d}-${n}-${x1}-${yA}-${x2}-${yB}`),
+      topicId: 'simultaneous_equations',
+      difficulty: input.difficulty,
+      seed: input.seed,
+      katexQuestion: String.raw`\begin{aligned} ${eq1} \\ ${eq2} \end{aligned}`,
+      katexExplanation: explanation,
+      solutionX: sol1x,
+      solutionY: sol1y,
+      solutionX2: sol2x,
+      solutionY2: sol2y,
+      solutionLatexX: sol1xL,
+      solutionLatexY: sol1yL,
+      solutionLatexX2: sol2xL,
+      solutionLatexY2: sol2yL,
+      variableCount: 2,
+    };
   }
 
   // Choose integer solution first.
@@ -1876,6 +2126,7 @@ function generateSimultaneous(input: { topicId: PracticeTopicId; difficulty: Pra
 
   return {
     kind: 'simultaneous',
+    variantId: 'two_var',
     id: stableId('simul', input.seed, `${a1}-${b1}-${c1}-${a2}-${b2}-${c2}`),
     topicId: 'simultaneous_equations',
     difficulty: input.difficulty,

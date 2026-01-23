@@ -1,8 +1,8 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { useNavigate, useParams } from 'react-router-dom';
 import { v4 as uuidv4 } from 'uuid';
-import { db, type StoryChapter } from '@/lib/db';
+import { db, type StoryChapter, type StoryCourse } from '@/lib/db';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -21,7 +21,7 @@ import {
  	AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { ArrowLeft, Plus, Pencil, Trash2, Eye } from 'lucide-react';
+import { ArrowLeft, Plus, Pencil, Trash2, Eye, Download, Upload } from 'lucide-react';
 import { toast } from 'sonner';
 
 export default function StoriesAdminCourse() {
@@ -57,6 +57,149 @@ export default function StoriesAdminCourse() {
 	const [deleteChapterId, setDeleteChapterId] = useState<string | null>(null);
 	const [deleteChapterTitle, setDeleteChapterTitle] = useState('');
 	const [deletingChapter, setDeletingChapter] = useState(false);
+
+	const importChapterInputRef = useRef<HTMLInputElement | null>(null);
+	const [isImportingChapter, setIsImportingChapter] = useState(false);
+
+	const downloadJson = async (defaultFileName: string, data: any) => {
+		const dataText = JSON.stringify(data, null, 2);
+		if (window.data?.exportJsonToFile) {
+			const res = await window.data.exportJsonToFile({ defaultFileName, dataText });
+			if (res?.canceled) return;
+			return;
+		}
+		const blob = new Blob([dataText], { type: 'application/json' });
+		const url = URL.createObjectURL(blob);
+		const a = document.createElement('a');
+		a.href = url;
+		a.download = defaultFileName;
+		a.click();
+		URL.revokeObjectURL(url);
+	};
+
+	const readJsonFile = async (file: File): Promise<any> => {
+		const text = await new Promise<string>((resolve, reject) => {
+			const reader = new FileReader();
+			reader.onerror = () => reject(new Error('Failed to read file'));
+			reader.onload = () => resolve(String(reader.result ?? ''));
+			reader.readAsText(file);
+		});
+		return JSON.parse(text);
+	};
+
+	const exportCourse = async () => {
+		try {
+			if (!courseId) return;
+			const courseRow = await db.storyCourses.get(courseId);
+			if (!courseRow) {
+				toast.error('Course not found');
+				return;
+			}
+			const chs = await db.storyChapters.where('courseId').equals(courseId).toArray();
+			const orderedCh = chs.slice().sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+			const data = {
+				kind: 'story_course_export',
+				schemaVersion: 1,
+				exportedAt: new Date().toISOString(),
+				course: courseRow,
+				chapters: orderedCh,
+			};
+			const now = new Date();
+			const yyyy = now.getFullYear();
+			const mm = String(now.getMonth() + 1).padStart(2, '0');
+			const dd = String(now.getDate()).padStart(2, '0');
+			const hh = String(now.getHours()).padStart(2, '0');
+			const min = String(now.getMinutes()).padStart(2, '0');
+			const timestampPart = `${yyyy}${mm}${dd}-${hh}${min}`;
+			const safeTitle = String(courseRow.title || 'course').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+			const fileName = `MathInk-course-${safeTitle || 'course'}-${timestampPart}.json`;
+			await downloadJson(fileName, data);
+			toast.success('Course exported');
+		} catch (e) {
+			console.error(e);
+			toast.error('Failed to export course');
+		}
+	};
+
+	const exportChapter = async (chapterId: string) => {
+		try {
+			if (!courseId) return;
+			const chapter = await db.storyChapters.get(chapterId);
+			if (!chapter) {
+				toast.error('Chapter not found');
+				return;
+			}
+			const data = {
+				kind: 'story_chapter_export',
+				schemaVersion: 1,
+				exportedAt: new Date().toISOString(),
+				courseId,
+				chapter,
+			};
+			const now = new Date();
+			const yyyy = now.getFullYear();
+			const mm = String(now.getMonth() + 1).padStart(2, '0');
+			const dd = String(now.getDate()).padStart(2, '0');
+			const hh = String(now.getHours()).padStart(2, '0');
+			const min = String(now.getMinutes()).padStart(2, '0');
+			const timestampPart = `${yyyy}${mm}${dd}-${hh}${min}`;
+			const safeTitle = String(chapter.title || 'chapter').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+			const fileName = `MathInk-chapter-${safeTitle || 'chapter'}-${timestampPart}.json`;
+			await downloadJson(fileName, data);
+			toast.success('Chapter exported');
+		} catch (e) {
+			console.error(e);
+			toast.error('Failed to export chapter');
+		}
+	};
+
+	const importChapterFromFile = async (file: File) => {
+		setIsImportingChapter(true);
+		try {
+			if (!courseId) return;
+			const data = await readJsonFile(file);
+			if (!data || typeof data !== 'object') {
+				toast.error('Invalid file');
+				return;
+			}
+			if (String((data as any).kind ?? '') !== 'story_chapter_export') {
+				toast.error('Unsupported file type');
+				return;
+			}
+			const src = (data as any).chapter as StoryChapter | undefined;
+			if (!src) {
+				toast.error('Missing chapter');
+				return;
+			}
+			const now = Date.now();
+			const nextOrder = ordered.length ? (ordered[ordered.length - 1].order ?? ordered.length) + 1 : 1;
+			const id = uuidv4();
+			const ch: StoryChapter = {
+				...src,
+				id,
+				courseId,
+				title: String(src.title || 'Chapter') + ' (imported)',
+				order: nextOrder,
+				createdAt: now,
+				updatedAt: now,
+			};
+			await db.transaction('rw', db.storyChapters, db.storyCourses, async () => {
+				await db.storyChapters.add(ch);
+				const c = await db.storyCourses.get(courseId);
+				if (c) {
+					const next = Array.from(new Set([...(c.chapterIds || []), id]));
+					await db.storyCourses.update(courseId, { chapterIds: next, updatedAt: Date.now() });
+				}
+			});
+			toast.success('Chapter imported');
+		} catch (e) {
+			console.error(e);
+			toast.error('Failed to import chapter');
+		} finally {
+			setIsImportingChapter(false);
+			if (importChapterInputRef.current) importChapterInputRef.current.value = '';
+		}
+	};
 
 	const onCreateChapter = async () => {
 		if (!courseId) return;
@@ -205,6 +348,27 @@ export default function StoriesAdminCourse() {
 					{course?.description ? <div className="text-sm text-muted-foreground mt-2">{course.description}</div> : null}
 				</div>
 				<div className="flex gap-2">
+					<input
+						ref={importChapterInputRef}
+						type="file"
+						accept="application/json"
+						className="hidden"
+						onChange={(e) => {
+							const file = e.target.files && e.target.files[0];
+							if (!file) return;
+							void importChapterFromFile(file);
+						}}
+					/>
+					<Button variant="outline" onClick={() => void exportCourse()}>
+						<Download className="h-4 w-4 mr-2" /> Export course
+					</Button>
+					<Button
+						variant="outline"
+						disabled={isImportingChapter}
+						onClick={() => importChapterInputRef.current?.click()}
+					>
+						<Upload className="h-4 w-4 mr-2" /> Import chapter
+					</Button>
 					<Button variant="outline" onClick={() => setResetOpen(true)}>
 						Reset progress
 					</Button>
@@ -225,6 +389,14 @@ export default function StoriesAdminCourse() {
 									<div className="text-xs text-muted-foreground">Order: {ch.order} • Visible: {ch.visible === false ? 'No' : 'Yes'}</div>
 								</div>
 								<div className="flex gap-2">
+									<Button
+										size="icon"
+										variant="outline"
+										aria-label="Export"
+										onClick={() => void exportChapter(ch.id)}
+									>
+										<Download className="h-4 w-4" />
+									</Button>
 									<Button
 										size="icon"
 										variant="outline"

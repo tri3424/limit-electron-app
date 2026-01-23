@@ -75,6 +75,13 @@ export const PRACTICE_TOPICS: PracticeTopic[] = [
     difficulties: ['easy', 'medium', 'hard', 'ultimate'],
   },
   {
+    id: 'baby_word_problems',
+    title: 'Baby Word Problems',
+    description: 'Very simple one-step word problems.',
+    enabled: true,
+    difficulties: ['easy', 'medium', 'hard', 'ultimate'],
+  },
+  {
     id: 'linear_equations',
     title: 'Linear Equations',
     description: 'Solve linear equations.',
@@ -134,13 +141,6 @@ export const PRACTICE_TOPICS: PracticeTopic[] = [
     id: 'word_problems',
     title: 'Word Problems',
     description: 'Solve word problems.',
-    enabled: true,
-    difficulties: ['easy', 'medium', 'hard', 'ultimate'],
-  },
-  {
-    id: 'baby_word_problems',
-    title: 'Baby Word Problems',
-    description: 'Very simple one-step word problems.',
     enabled: true,
     difficulties: ['easy', 'medium', 'hard', 'ultimate'],
   },

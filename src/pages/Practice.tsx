@@ -18,9 +18,9 @@ import { ArrowLeft, Bug, CircleHelp } from 'lucide-react';
 import MathLiveInput from '@/components/MathLiveInput';
 import InteractiveGraph from '@/components/InteractiveGraph';
 import { PRACTICE_TOPICS, PracticeTopicId } from '@/lib/practiceTopics';
-import { Fraction, fractionToDisplay, fractionsEqual, normalizeFraction, parseFraction } from '@/lib/fraction';
+import { Fraction, fractionToDisplay, fractionToLatex, fractionsEqual, normalizeFraction, parseFraction } from '@/lib/fraction';
 import { db } from '@/lib/db';
-import { generateQuadraticByFactorisation, PracticeDifficulty, QuadraticFactorizationQuestion } from '@/lib/practiceGenerators/quadraticFactorization';
+import { PracticeDifficulty } from '@/lib/practiceGenerators/quadraticFactorization';
 import { generatePracticeQuestion, PracticeQuestion, GraphPracticeQuestion } from '@/lib/practiceEngine';
 import { useAuth } from '@/contexts/AuthContext';
 import { toast } from 'sonner';
@@ -37,7 +37,7 @@ type PracticeVariantMultiOverride = {
 } | null;
 
 const PRACTICE_VARIANTS: Partial<Record<PracticeTopicId, string[]>> = {
-  quadratics: ['distinct_root', 'repeated_root'],
+  quadratics: ['factorisation', 'complete_square_pqr', 'complete_square_abc', 'solve_complete_square_surd'],
   clock_reading: ['read_time', 'end_time_ampm', 'end_time_24h', 'duration_hm', 'duration_minutes'],
   linear_equations: ['linear'],
   indices: ['mul', 'div', 'pow'],
@@ -81,7 +81,7 @@ const PRACTICE_VARIANTS: Partial<Record<PracticeTopicId, string[]>> = {
   ],
   fractions: ['simplify_fraction', 'add_sub_fractions', 'fraction_of_number', 'mixed_to_improper'],
   algebraic_factorisation: ['simple', 'x2', 'x3', 'x3_3term', 'gcf_binomial', 'gcf_quadratic'],
-  simultaneous_equations: ['two_var', 'three_var'],
+  simultaneous_equations: ['two_var', 'three_var', 'lin_quad'],
   permutation_combination: [
     'team_no_restriction',
     'team_group_not_separated',
@@ -95,6 +95,9 @@ const PRACTICE_VARIANTS: Partial<Record<PracticeTopicId, string[]>> = {
   word_problems: [
     'mensuration_cuboid_height',
     'probability_complement',
+    'algebra_rectangle_area',
+    'algebra_right_triangle_pythagoras',
+    'algebra_trapezium_area',
     'unit_conversion_speed',
     'number_skills_mix',
     'greatest_odd_common_factor',
@@ -326,7 +329,7 @@ export default function Practice() {
   });
   const pendingKeywordSeedRef = useRef<number | null>(null);
   const [keywordApplyNonce, setKeywordApplyNonce] = useState(0);
-  const [question, setQuestion] = useState<QuadraticFactorizationQuestion | PracticeQuestion | null>(null);
+  const [question, setQuestion] = useState<PracticeQuestion | null>(null);
   const [mixedModuleId, setMixedModuleId] = useState<string | null>(null);
   const [mixedCursor, setMixedCursor] = useState(0);
   const [answer1, setAnswer1] = useState('');
@@ -944,7 +947,7 @@ export default function Practice() {
     });
   };
 
-  const rememberTrigKind = (q: QuadraticFactorizationQuestion | PracticeQuestion) => {
+  const rememberTrigKind = (q: PracticeQuestion) => {
     const anyQ: any = q as any;
     if (anyQ?.topicId !== 'graph_trigonometry') return;
     const k = String(anyQ?.generatorParams?.kind ?? '');
@@ -952,7 +955,7 @@ export default function Practice() {
     rememberQuestionKey(`graph_trigonometry_kind:${k}`);
   };
 
-  const getQuestionDedupKey = useCallback((q: QuadraticFactorizationQuestion | PracticeQuestion): string => {
+  const getQuestionDedupKey = useCallback((q: PracticeQuestion): string => {
     const anyQ: any = q as any;
     const stableStringify = (value: any): string => {
       const seen = new WeakSet<object>();
@@ -1128,8 +1131,8 @@ export default function Practice() {
     const recentSet = new Set(recentQuestionIds);
     const recentKeySet = new Set(recentQuestionKeys);
     const tryGenerate = (
-      fn: (seed: number) => QuadraticFactorizationQuestion | PracticeQuestion,
-      accept?: (q: QuadraticFactorizationQuestion | PracticeQuestion) => boolean,
+      fn: (seed: number) => PracticeQuestion,
+      accept?: (q: PracticeQuestion) => boolean,
       opts?: { strict?: boolean }
     ) => {
       const hasTextFilter = Boolean(onlyQuestionTextQuery.trim());
@@ -1179,7 +1182,7 @@ export default function Practice() {
     };
 
     const probabilityCooldown = 8;
-    const acceptWordProblem = (q: QuadraticFactorizationQuestion | PracticeQuestion) => {
+    const acceptWordProblem = (q: PracticeQuestion) => {
       const cat = wordProblemCategory((q as any).variantId);
       if (cat !== 'probability') return true;
       const recent = recentWordProblemCategories.slice(0, probabilityCooldown);
@@ -1225,29 +1228,7 @@ export default function Practice() {
 
         const item = { topicId: picked.topicId, difficulty: pickedDifficulty };
 
-        if (item.topicId === 'quadratics') {
-          const forced = variantOverride?.topicId === item.topicId
-            ? buildForcedVariantWeights(item.topicId, variantOverride.variantId)
-            : null;
-          const multi = variantMultiOverride?.topicId === item.topicId
-            ? buildMultiVariantWeights(item.topicId, variantMultiOverride.variantIds)
-            : null;
-          const weightsForTopic = (forced ?? multi) as any;
-          const strictTopic = !!forced || !!multi;
-          const q = tryGenerate(
-            (seed) => generateQuadraticByFactorisation({ seed, difficulty: item.difficulty, variantWeights: weightsForTopic }),
-            undefined,
-            { strict: strictTopic }
-          );
-          if (!q) {
-            toast.error(`No matching question found for filter: "${onlyQuestionTextQuery.trim()}"`);
-            return;
-          }
-          setQuestion(q);
-          rememberQuestionId(q.id);
-          rememberQuestionKey(getQuestionDedupKey(q));
-          rememberTrigKind(q);
-        } else {
+        {
           const forced =
             variantOverride?.topicId === item.topicId ? buildForcedVariantWeights(item.topicId, variantOverride.variantId) : null;
           const multi = variantMultiOverride?.topicId === item.topicId
@@ -1322,28 +1303,7 @@ export default function Practice() {
       }
       if (!item) return;
 
-      if (item.topicId === 'quadratics') {
-        const forced = variantOverride?.topicId === item.topicId
-          ? buildForcedVariantWeights(item.topicId, variantOverride.variantId)
-          : null;
-        const multi = variantMultiOverride?.topicId === item.topicId
-          ? buildMultiVariantWeights(item.topicId, variantMultiOverride.variantIds)
-          : null;
-        const weightsForTopic = (forced ?? multi) as any;
-        const strictTopic = !!forced || !!multi;
-        const q = tryGenerate(
-          (seed) => generateQuadraticByFactorisation({ seed, difficulty: item.difficulty, variantWeights: weightsForTopic }),
-          undefined,
-          { strict: strictMixed || strictTopic }
-        );
-        if (!q) {
-          toast.error(`No matching question found for filter: "${onlyQuestionTextQuery.trim()}"`);
-          return;
-        }
-        setQuestion(q);
-        rememberQuestionId(q.id);
-        rememberQuestionKey(getQuestionDedupKey(q));
-      } else {
+      {
         const forced = variantOverride?.topicId === item.topicId
           ? buildForcedVariantWeights(item.topicId, variantOverride.variantId)
           : null;
@@ -1386,28 +1346,6 @@ export default function Practice() {
     }
 
     if (!topicId) return;
-    if (topicId === 'quadratics') {
-      const forced = variantOverride?.topicId === topicId ? buildForcedVariantWeights(topicId, variantOverride.variantId) : null;
-      const multi = variantMultiOverride?.topicId === topicId ? buildMultiVariantWeights(topicId, variantMultiOverride.variantIds) : null;
-      const weightsForTopic = (forced ?? multi) as any;
-      const q = tryGenerate((seed) =>
-        generateQuadraticByFactorisation({
-          seed,
-          difficulty,
-          variantWeights: weightsForTopic,
-        })
-      );
-      if (!q) {
-        toast.error(`No matching question found for filter: "${onlyQuestionTextQuery.trim()}"`);
-        return;
-      }
-      setQuestion(q);
-      rememberQuestionId(q.id);
-      rememberQuestionKey(getQuestionDedupKey(q));
-      rememberTrigKind(q);
-      resetAttemptState();
-      return;
-    }
 
     const weightsForTopic = topicVariantWeights?.[topicId] as any;
     const forced = variantOverride?.topicId === topicId ? buildForcedVariantWeights(topicId, variantOverride.variantId) : null;
@@ -1487,10 +1425,31 @@ export default function Practice() {
         return '';
       }
 
-      if (q.metadata?.topic === 'quadratics') {
-        const sols = Array.isArray(q.solutionsLatex) ? q.solutionsLatex : [];
-        if (sols.length === 0) return '';
-        return String.raw`x = ${sols.join('\\;\text{or}\\; x = ')}`;
+      if (q.kind === 'quadratic') {
+        const qq: any = q as any;
+        if (qq.variantId === 'factorisation') {
+          const sols = Array.isArray(qq.solutionsLatex) ? qq.solutionsLatex : [];
+          if (sols.length === 0) return '';
+          // Always show two values of x, even if repeated.
+          const s0 = String(sols[0] ?? '');
+          const s1 = String(sols[1] ?? '');
+          if (!s0 && !s1) return '';
+          return String.raw`x = ${s0}\\;\text{or}\\; x = ${s1}`;
+        }
+        const parts = Array.isArray(qq.expectedParts) ? (qq.expectedParts as any[]) : [];
+        if (!parts.length) return '';
+        const rendered = parts.map((p: any) => {
+          if (p.kind === 'fraction' && p.expectedFraction) {
+            return String.raw`${p.label} = ${fractionToLatex(p.expectedFraction)}`;
+          }
+          if (p.kind === 'decimal_4sf' && typeof p.expectedDecimal === 'number') {
+            const v = Number(p.expectedDecimal);
+            if (!Number.isFinite(v)) return String.raw`${p.label} = ?`;
+            return String.raw`${p.label} \approx ${Number(v.toPrecision(4))}`;
+          }
+          return String.raw`${p.label} = ?`;
+        });
+        return rendered.join('\\; ,\\; ');
       }
 
       if (typeof q.solutionLatex === 'string' && q.solutionLatex) {
@@ -1527,16 +1486,6 @@ export default function Practice() {
         graphSpec: q.graphSpec,
         secondaryGraphSpec: q.secondaryGraphSpec,
         svgAltText: q.svgAltText,
-        correctAnswerKatex,
-      };
-    }
-
-    if (q.metadata?.topic === 'quadratics') {
-      return {
-        id: q.id,
-        katexQuestion: q.katexQuestion,
-        katexExplanation: pruneExplanation(q.katexExplanation),
-        metadata: q.metadata,
         correctAnswerKatex,
       };
     }
@@ -1890,7 +1839,7 @@ export default function Practice() {
     }
   }, [commandText, currentTopicForAdminCommand, currentTopicForSearchScope, isAdmin, variantMultiOverride, variantOverride]);
 
-  const getQuestionSearchText = useCallback((q: QuadraticFactorizationQuestion | PracticeQuestion): string => {
+  const getQuestionSearchText = useCallback((q: PracticeQuestion): string => {
     const anyQ: any = q as any;
     const out: string[] = [];
     const seen = new Set<any>();
@@ -2248,16 +2197,78 @@ export default function Practice() {
     return n.toFixed(2);
   };
 
+  const countSigFigs = (raw: string): number | null => {
+    const s0 = String(raw ?? '').trim();
+    if (!s0) return null;
+    if (!/^-?\d*(?:\.\d*)?$/.test(s0)) return null;
+    if (s0 === '-' || s0 === '.' || s0 === '-.') return null;
+
+    let s = s0;
+    if (s.startsWith('-')) s = s.slice(1);
+
+    const hasDot = s.includes('.');
+    const [a0, b0] = s.split('.', 2);
+    const a = a0 ?? '';
+    const b = b0 ?? '';
+
+    if (hasDot) {
+      // With decimal point: all digits after the first non-zero (including trailing zeros) are significant.
+      const digits = (a + b).replace(/^0+/, '');
+      if (!digits.length) return 0;
+      return digits.length;
+    }
+
+    // No decimal point: trailing zeros are not significant.
+    const trimmed = a.replace(/^0+/, '').replace(/0+$/, '');
+    return trimmed.length;
+  };
+
+  const equalsTo4SigFigs = (expected: number, raw: string): boolean => {
+    const s = sanitizeNumericInput(String(raw ?? ''), { maxDecimals: 12 }).trim();
+    if (!s) return false;
+    const sf = countSigFigs(s);
+    if (sf !== 4) return false;
+    const v = Number(s);
+    if (!Number.isFinite(v)) return false;
+    const eRounded = Number(expected.toPrecision(4));
+    const vRounded = Number(v.toPrecision(4));
+    return vRounded === eRounded;
+  };
+
   const checkSessionAnswer = () => {
     const q = question as any;
     if (!q || !q.kind) return false;
 
-    if ((question as any).metadata?.topic === 'quadratics') {
-      const q = question as QuadraticFactorizationQuestion;
-      return checkQuadraticAnswers(q.solutions, answer1, answer2);
-    }
-
     switch (q.kind) {
+      case 'quadratic': {
+        if (q.variantId === 'factorisation') {
+          const expected = Array.isArray(q.solutions) ? (q.solutions as Fraction[]) : [];
+          if (expected.length < 2) return false;
+          return checkQuadraticAnswers(expected, answer1, answer2);
+        }
+
+        const parts = Array.isArray(q.expectedParts) ? (q.expectedParts as any[]) : [];
+        const values = [answer1, answer2, answer3, ...extraAnswers];
+        if (!parts.length) return false;
+        if (values.slice(0, parts.length).some((v) => !String(v ?? '').trim())) return false;
+
+        for (let i = 0; i < parts.length; i++) {
+          const p = parts[i];
+          const raw = String(values[i] ?? '');
+          if (p.kind === 'fraction') {
+            if (!p.expectedFraction) return false;
+            if (!checkSingleFractionAnswer(p.expectedFraction as Fraction, raw)) return false;
+            continue;
+          }
+          if (p.kind === 'decimal_4sf') {
+            if (typeof p.expectedDecimal !== 'number') return false;
+            if (!equalsTo4SigFigs(Number(p.expectedDecimal), raw)) return false;
+            continue;
+          }
+          return false;
+        }
+        return true;
+      }
       case 'arithmetic': {
         const aq = q as any;
         const raw = String(answer1 ?? '').trim();
@@ -2300,6 +2311,25 @@ export default function Practice() {
         return v === Number((q as any).expectedNumber);
       }
       case 'simultaneous': {
+        const isLinQuad = (q as any).variantId === 'lin_quad'
+          && (q as any).solutionX2
+          && (q as any).solutionY2;
+
+        if (isLinQuad) {
+          const ax1 = answer1;
+          const ay1 = answer2;
+          const ax2 = String((extraAnswers[0] ?? '') as any);
+          const ay2 = String((extraAnswers[1] ?? '') as any);
+
+          const pair1a = checkSingleFractionAnswer(q.solutionX, ax1) && checkSingleFractionAnswer(q.solutionY, ay1);
+          const pair2a = checkSingleFractionAnswer((q as any).solutionX2, ax2) && checkSingleFractionAnswer((q as any).solutionY2, ay2);
+
+          const pair1b = checkSingleFractionAnswer(q.solutionX, ax2) && checkSingleFractionAnswer(q.solutionY, ay2);
+          const pair2b = checkSingleFractionAnswer((q as any).solutionX2, ax1) && checkSingleFractionAnswer((q as any).solutionY2, ay1);
+
+          return (pair1a && pair2a) || (pair1b && pair2b);
+        }
+
         const xOk = checkSingleFractionAnswer(q.solutionX, answer1);
         const yOk = checkSingleFractionAnswer(q.solutionY, answer2);
         if ((q as any).variableCount === 3) {
@@ -2369,7 +2399,38 @@ export default function Practice() {
           ? Number(lg.expectedNumber)
           : null;
 
-        if (expectedNum !== null && raw1) {
+        const countSignificantFigures = (raw: string): number => {
+          const s0 = String(raw ?? '').trim();
+          if (!s0) return 0;
+          const s = s0.replace(/[−–]/g, '-');
+          // Allow scientific notation.
+          const parts = s.split(/[eE]/);
+          const mantissa0 = (parts[0] ?? '').trim();
+          if (!mantissa0) return 0;
+          const mantissa = mantissa0.replace(/^[+-]/, '');
+
+          // Reject non-numeric mantissas.
+          if (!/^(?:\d+(?:\.\d*)?|\.\d+)$/.test(mantissa)) return 0;
+
+          const hasDot = mantissa.includes('.');
+          const digits = mantissa.replace('.', '');
+          // If the mantissa is all zeros (e.g. 0, 0.0), treat as 1 sig fig.
+          if (!/[1-9]/.test(digits)) return 1;
+
+          if (hasDot) {
+            // Decimal present: count from first non-zero digit through the end (including zeros).
+            const idx = digits.search(/[1-9]/);
+            return Math.max(0, digits.length - idx);
+          }
+
+          // Integer with no decimal point: trailing zeros are not significant.
+          const noLeading = digits.replace(/^0+/, '');
+          const noTrailing = noLeading.replace(/0+$/, '');
+          return noTrailing.length;
+        };
+
+        // Avoid accepting raw numeric equality for significant-figure questions.
+        if (expectedNum !== null && raw1 && lg.answerKind !== 'decimal_3sf' && lg.answerKind !== 'decimal_4sf') {
           const n = Number(raw1);
           if (!Number.isNaN(n) && Math.abs(n - expectedNum) < 1e-9) return true;
         }
@@ -2461,9 +2522,20 @@ export default function Practice() {
           if (!raw) return false;
           const n = Number(raw);
           if (Number.isNaN(n)) return false;
-          return expectedNum !== null
-            ? Math.abs(n - expectedNum) < 1e-9
-            : Math.abs(n - Number(lg.expectedNumber)) < 1e-9;
+          if (countSignificantFigures(raw) !== 3) return false;
+          const toSigFigs = (x: number, sig: number) => {
+            if (!Number.isFinite(x)) return x;
+            const ax = Math.abs(x);
+            if (ax === 0) return 0;
+            const p = Math.floor(Math.log10(ax));
+            const scale = Math.pow(10, sig - 1 - p);
+            return Math.round(x * scale) / scale;
+          };
+          const expected = expectedNum !== null ? expectedNum : Number(lg.expectedNumber);
+          if (!Number.isFinite(expected)) return false;
+          const userRounded = toSigFigs(n, 3);
+          const expectedRounded = toSigFigs(expected, 3);
+          return Math.abs(userRounded - expectedRounded) < 1e-9;
         }
 
         if (lg.answerKind === 'decimal_4sf') {
@@ -2484,6 +2556,7 @@ export default function Practice() {
           if (!Number.isFinite(expected)) return false;
           const userRounded = toSigFigs(n, 4);
           const expectedRounded = toSigFigs(expected, 4);
+          if (countSignificantFigures(raw) !== 4) return false;
           return Math.abs(userRounded - expectedRounded) < 1e-9;
         }
 
@@ -2733,17 +2806,19 @@ export default function Practice() {
     }
   };
 
-  const persistAttempt = (payload: { correct: boolean; inputs: [string, string]; q: QuadraticFactorizationQuestion }) => {
+  const persistAttempt = (payload: { correct: boolean; inputs: string[]; q: PracticeQuestion }) => {
     try {
-      const key = `practice.attempts.${payload.q.metadata.topic}.${payload.q.metadata.method}`;
+      const topic = String((payload.q as any).topicId ?? 'unknown');
+      const method = String((payload.q as any).variantId ?? (payload.q as any).metadata?.method ?? 'unknown');
+      const key = `practice.attempts.${topic}.${method}`;
       const existingRaw = localStorage.getItem(key);
       const existing = existingRaw ? JSON.parse(existingRaw) : [];
       const next = [
         {
           id: payload.q.id,
-          seed: payload.q.metadata.seed,
-          difficulty: payload.q.metadata.difficulty,
-          coefficients: payload.q.metadata.coefficients,
+          seed: (payload.q as any).seed,
+          difficulty: (payload.q as any).difficulty,
+          coefficients: (payload.q as any).metadata?.coefficients,
           correct: payload.correct,
           inputs: payload.inputs,
           createdAt: Date.now(),
@@ -2811,8 +2886,15 @@ export default function Practice() {
   const sessionInstruction = useMemo(() => {
     if (!question) return '';
 
-    if ((question as any).metadata?.topic === 'quadratics') {
-      return 'Enter both values of x. Order does not matter. Fractions are allowed.';
+    if ((question as any).kind === 'quadratic') {
+      const q: any = question as any;
+      if (q.variantId === 'factorisation') {
+        return 'Enter both values of x. Order does not matter. Fractions are allowed.';
+      }
+      if (q.variantId === 'solve_complete_square_surd') {
+        return 'You may use a calculator. Enter both answers to 4 significant figures.';
+      }
+      return 'Enter all requested constants. Fractions are allowed.';
     }
 
     const q = question as PracticeQuestion;
@@ -2857,7 +2939,9 @@ export default function Practice() {
       case 'permutation_combination':
         return 'Enter your answer as an integer.';
       case 'simultaneous':
-        return 'Solve for x and y. Enter both values (fractions are allowed).';
+        return (question as any)?.variantId === 'lin_quad'
+          ? 'There are 2 solution pairs. Enter (x₁, y₁) and (x₂, y₂) (fractions are allowed).'
+          : 'Solve for x and y. Enter both values (fractions are allowed).';
       case 'factorisation':
         return 'Factorise the expression completely. Enter the final factorised answer.';
       case 'word_problem': {
@@ -3267,6 +3351,20 @@ export default function Practice() {
                   Example: type <span className="font-mono">2x-1</span>, not <span className="font-mono">2x - 1</span>.
                 </div>
 
+                <div className="font-semibold mt-2">MathLive input boxes</div>
+                <div>
+                  - Use <span className="font-mono">-</span> for negatives.
+                </div>
+                <div>
+                  - Use brackets <span className="font-mono">( )</span> when needed.
+                </div>
+                <div>
+                  - Multiplication can be typed as <span className="font-mono">2x</span> or <span className="font-mono">2*x</span>.
+                </div>
+                <div>
+                  - Fractions can be typed as <span className="font-mono">3/4</span> (this will format as a fraction).
+                </div>
+
                 <div className="font-semibold mt-2">Powers (superscripts)</div>
                 <div>
                   Use <span className="font-mono">^</span> for powers.
@@ -3293,6 +3391,11 @@ export default function Practice() {
                 </div>
                 <div>
                   Example: <span className="font-mono">(12x)(2x-1)(5x+3)</span>
+                </div>
+                <div>
+                  Tips:
+                  <div className="mt-1">- Type <span className="font-mono">2x-1</span> for <span className="font-mono">(2x-1)</span>.</div>
+                  <div>- Use <span className="font-mono">/</span> for fractional coefficients, e.g. <span className="font-mono">(x+1)/2</span>.</div>
                 </div>
               </div>
               <DialogFooter>
@@ -3334,6 +3437,16 @@ export default function Practice() {
                 </div>
               )
               : null}
+
+            {(question as any).kind === 'word_problem' && (question as any).svgDataUrl ? (
+              <div className="mt-4 flex justify-center">
+                <img
+                  src={String((question as any).svgDataUrl)}
+                  alt={String((question as any).svgAltText ?? 'Diagram')}
+                  className="max-w-full h-auto"
+                />
+              </div>
+            ) : null}
 
             <div className="mt-6 w-full">
               {(question as any).kind === 'graph' ? (
@@ -3750,7 +3863,7 @@ export default function Practice() {
                       if (kind === 'time_12_ampm') {
                         return (
                           <div className="max-w-md mx-auto space-y-3">
-                            <Label className="text-xs text-muted-foreground">Answer</Label>
+                            <Label className="text-xs text-muted-foreground">Explanation</Label>
                             <div className="flex flex-wrap items-end justify-center gap-3">
                               <div className="space-y-1">
                                 <Label className="text-xs text-muted-foreground">Hour</Label>
@@ -3810,7 +3923,7 @@ export default function Practice() {
                       const minuteLabel = kind === 'duration_hm' ? 'Minutes' : 'Minute';
                       return (
                         <div className="max-w-md mx-auto space-y-3">
-                          <Label className="text-xs text-muted-foreground">Answer</Label>
+                          <Label className="text-xs text-muted-foreground">Explanation</Label>
                           <div className="flex items-end justify-center gap-3">
                             <div className="space-y-1">
                               <Label className="text-xs text-muted-foreground">{hourLabel}</Label>
@@ -3895,27 +4008,75 @@ export default function Practice() {
                     ))
               ) : null}
 
-              {(question as any).metadata?.topic === 'quadratics' ? (
-                <div className="grid grid-cols-2 gap-3 max-w-md mx-auto">
-                  <div className="space-y-1">
-                    <Label className="text-xs text-muted-foreground">Answer 1</Label>
-                    <Input
-                      value={answer1}
-                      onChange={(e) => setAnswer1(e.target.value)}
-                      disabled={submitted}
-                      className="h-12 text-2xl font-normal text-center py-1"
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <Label className="text-xs text-muted-foreground">Answer 2</Label>
-                    <Input
-                      value={answer2}
-                      onChange={(e) => setAnswer2(e.target.value)}
-                      disabled={submitted}
-                      className="h-12 text-2xl font-normal text-center py-1"
-                    />
-                  </div>
-                </div>
+              {(question as any).kind === 'quadratic' ? (
+                (() => {
+                  const qAny: any = question as any;
+                  if (qAny.variantId === 'factorisation') {
+                    return (
+                      <div className="grid grid-cols-2 gap-3 max-w-md mx-auto">
+                        <div className="space-y-1">
+                          <Label className="text-xs text-muted-foreground"><Katex latex={String.raw`x_{1}`} displayMode={false} /></Label>
+                          <Input
+                            value={answer1}
+                            inputMode="decimal"
+                            onChange={(e) => setAnswer1(sanitizeRationalInput(e.target.value))}
+                            disabled={submitted}
+                            className="h-12 text-2xl font-normal text-center py-1"
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <Label className="text-xs text-muted-foreground"><Katex latex={String.raw`x_{2}`} displayMode={false} /></Label>
+                          <Input
+                            value={answer2}
+                            inputMode="decimal"
+                            onChange={(e) => setAnswer2(sanitizeRationalInput(e.target.value))}
+                            disabled={submitted}
+                            className="h-12 text-2xl font-normal text-center py-1"
+                          />
+                        </div>
+                      </div>
+                    );
+                  }
+
+                  const parts = Array.isArray(qAny.expectedParts) ? (qAny.expectedParts as any[]) : [];
+                  const values = [answer1, answer2, answer3, ...extraAnswers];
+                  const setters = [setAnswer1, setAnswer2, setAnswer3] as const;
+                  const grid = parts.length === 2
+                    ? 'grid grid-cols-2 gap-3 max-w-md mx-auto'
+                    : parts.length === 3
+                      ? 'grid grid-cols-3 gap-3 max-w-2xl mx-auto'
+                      : 'grid grid-cols-1 gap-3 max-w-sm mx-auto';
+
+                  return (
+                    <div className={grid}>
+                      {parts.slice(0, 3).map((p: any, idx: number) => {
+                        const v = String(values[idx] ?? '');
+                        const setV = setters[idx] ?? setAnswer1;
+                        const isDecimal = p.kind === 'decimal_4sf';
+                        const labelRaw = String(p.label ?? `Answer ${idx + 1}`);
+                        const labelHasMath = /[_^\\]/.test(labelRaw);
+                        return (
+                          <div key={String(p.id ?? idx)} className="space-y-1">
+                            <Label className="text-xs text-muted-foreground">
+                              {labelHasMath ? <Katex latex={labelRaw} displayMode={false} /> : labelRaw}
+                            </Label>
+                            <Input
+                              value={v}
+                              inputMode="decimal"
+                              onChange={(e) => {
+                                const raw = e.target.value;
+                                if (isDecimal) return setV(sanitizeNumericInput(raw, { maxDecimals: 12 }));
+                                return setV(sanitizeRationalInput(raw));
+                              }}
+                              disabled={submitted}
+                              className="h-12 text-2xl font-normal text-center py-1"
+                            />
+                          </div>
+                        );
+                      })}
+                    </div>
+                  );
+                })()
               ) : (question as PracticeQuestion).kind === 'linear_intersection' ? (
                 <div className="grid grid-cols-2 gap-3 max-w-md mx-auto">
                   <div className="space-y-1">
@@ -3940,43 +4101,98 @@ export default function Practice() {
                   </div>
                 </div>
               ) : (question as PracticeQuestion).kind === 'simultaneous' ? (
-                <div className={(question as any).variableCount === 3 ? 'grid grid-cols-3 gap-3 max-w-2xl mx-auto' : 'grid grid-cols-2 gap-3 max-w-md mx-auto'}>
-                  <div className="space-y-1">
-                    <Label className="text-xs text-muted-foreground">x</Label>
-                    <Input
-                      value={answer1}
-                      inputMode="decimal"
-                      onChange={(e) => setAnswer1(sanitizeRationalInput(e.target.value))}
-                      disabled={submitted}
-                      className="h-12 text-2xl font-normal text-center py-1"
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <Label className="text-xs text-muted-foreground">y</Label>
-                    <Input
-                      value={answer2}
-                      inputMode="decimal"
-                      onChange={(e) => setAnswer2(sanitizeRationalInput(e.target.value))}
-                      disabled={submitted}
-                      className="h-12 text-2xl font-normal text-center py-1"
-                    />
-                  </div>
-                  {(question as any).variableCount === 3 ? (
+                ((question as any).variantId === 'lin_quad' && (question as any).solutionX2 && (question as any).solutionY2) ? (
+                  <div className="grid grid-cols-2 gap-3 max-w-md mx-auto">
                     <div className="space-y-1">
-                      <Label className="text-xs text-muted-foreground">z</Label>
+                      <Label className="text-xs text-muted-foreground">x₁</Label>
                       <Input
-                        value={answer3}
+                        value={answer1}
                         inputMode="decimal"
-                        onChange={(e) => setAnswer3(sanitizeRationalInput(e.target.value))}
+                        onChange={(e) => setAnswer1(sanitizeRationalInput(e.target.value))}
                         disabled={submitted}
                         className="h-12 text-2xl font-normal text-center py-1"
                       />
                     </div>
-                  ) : null}
-                </div>
+                    <div className="space-y-1">
+                      <Label className="text-xs text-muted-foreground">y₁</Label>
+                      <Input
+                        value={answer2}
+                        inputMode="decimal"
+                        onChange={(e) => setAnswer2(sanitizeRationalInput(e.target.value))}
+                        disabled={submitted}
+                        className="h-12 text-2xl font-normal text-center py-1"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-xs text-muted-foreground">x₂</Label>
+                      <Input
+                        value={String(extraAnswers[0] ?? '')}
+                        inputMode="decimal"
+                        onChange={(e) => setExtraAnswers((prev) => {
+                          const out = prev.slice();
+                          while (out.length < 2) out.push('');
+                          out[0] = sanitizeRationalInput(e.target.value);
+                          return out;
+                        })}
+                        disabled={submitted}
+                        className="h-12 text-2xl font-normal text-center py-1"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-xs text-muted-foreground">y₂</Label>
+                      <Input
+                        value={String(extraAnswers[1] ?? '')}
+                        inputMode="decimal"
+                        onChange={(e) => setExtraAnswers((prev) => {
+                          const out = prev.slice();
+                          while (out.length < 2) out.push('');
+                          out[1] = sanitizeRationalInput(e.target.value);
+                          return out;
+                        })}
+                        disabled={submitted}
+                        className="h-12 text-2xl font-normal text-center py-1"
+                      />
+                    </div>
+                  </div>
+                ) : (
+                  <div className={(question as any).variableCount === 3 ? 'grid grid-cols-3 gap-3 max-w-2xl mx-auto' : 'grid grid-cols-2 gap-3 max-w-md mx-auto'}>
+                    <div className="space-y-1">
+                      <Label className="text-xs text-muted-foreground">x</Label>
+                      <Input
+                        value={answer1}
+                        inputMode="decimal"
+                        onChange={(e) => setAnswer1(sanitizeRationalInput(e.target.value))}
+                        disabled={submitted}
+                        className="h-12 text-2xl font-normal text-center py-1"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-xs text-muted-foreground">y</Label>
+                      <Input
+                        value={answer2}
+                        inputMode="decimal"
+                        onChange={(e) => setAnswer2(sanitizeRationalInput(e.target.value))}
+                        disabled={submitted}
+                        className="h-12 text-2xl font-normal text-center py-1"
+                      />
+                    </div>
+                    {(question as any).variableCount === 3 ? (
+                      <div className="space-y-1">
+                        <Label className="text-xs text-muted-foreground">z</Label>
+                        <Input
+                          value={answer3}
+                          inputMode="decimal"
+                          onChange={(e) => setAnswer3(sanitizeRationalInput(e.target.value))}
+                          disabled={submitted}
+                          className="h-12 text-2xl font-normal text-center py-1"
+                        />
+                      </div>
+                    ) : null}
+                  </div>
+                )
               ) : (question as any).kind === 'graph' ? null : (
                 <div className="max-w-sm mx-auto space-y-1">
-                  <Label className="text-xs text-muted-foreground">Answer</Label>
+                  <Label className="text-xs text-muted-foreground">Explanation</Label>
                   {(question as PracticeQuestion).kind === 'factorisation' ? (
                     <div className={`grid gap-3 ${(question as any).expectedFactors?.length === 3 ? 'grid-cols-3' : 'grid-cols-2'}`}>
                       <div className="space-y-1">
@@ -4317,8 +4533,11 @@ export default function Practice() {
                       return parts.length ? parts.join(' | ') : 'N/A';
                     })(),
                   });
-                  if ((question as any).metadata?.topic === 'quadratics') {
-                    persistAttempt({ correct: ok, inputs: [answer1, answer2], q: question as QuadraticFactorizationQuestion });
+                  if ((question as any).kind === 'quadratic') {
+                    const qAny: any = question as any;
+                    const parts = Array.isArray(qAny.expectedParts) ? (qAny.expectedParts as any[]) : [];
+                    const n = qAny.variantId === 'factorisation' ? 2 : Math.max(2, parts.length);
+                    persistAttempt({ correct: ok, inputs: [answer1, answer2, answer3, ...extraAnswers].slice(0, n), q: question as PracticeQuestion });
                   }
                 }}
               >
@@ -4404,7 +4623,7 @@ export default function Practice() {
 
                       {!!(question as any).generatorParams?.circularMeasure && (question as any).generatorParams?.expectedLatex ? (
                         <div className="rounded-md border bg-background px-3 py-2">
-                          <div className="text-xs text-muted-foreground">Answer</div>
+                          <div className="text-xs text-muted-foreground">Explanation</div>
                           <div className="text-2xl leading-snug">
                             <Katex latex={(question as any).generatorParams.expectedLatex} displayMode={false} />
                           </div>
@@ -4413,7 +4632,7 @@ export default function Practice() {
 
                       {(question as GraphPracticeQuestion).correctIndex !== undefined && (question as GraphPracticeQuestion).katexOptions?.[(question as GraphPracticeQuestion).correctIndex!] ? (
                         <div className="rounded-md border bg-background px-3 py-2">
-                          <div className="text-xs text-muted-foreground">Answer</div>
+                          <div className="text-xs text-muted-foreground">Explanation</div>
                           <div className="text-2xl leading-snug">
                             <Katex
                               latex={(question as GraphPracticeQuestion).katexOptions![(question as GraphPracticeQuestion).correctIndex!]}
@@ -4577,34 +4796,36 @@ export default function Practice() {
                           <div
                             key={idx}
                             className={(question as any).topicId === 'word_problems'
-                              ? 'tk-wp-expl-text text-xl leading-relaxed text-foreground'
+                              ? 'tk-wp-expl-text font-slab text-xl leading-relaxed text-foreground'
                               : (question as any).topicId === 'polynomials'
-                                ? 'tk-wp-expl-text text-base leading-relaxed text-foreground'
-                                : 'text-base leading-relaxed text-foreground'}
+                                ? 'tk-wp-expl-text font-slab text-base leading-relaxed text-foreground'
+                                : 'font-slab text-base leading-relaxed text-foreground'}
                           >
-                            {(question as any).topicId === 'word_problems' ? (
-                              String(b.content ?? '')
-                            ) : (
-                              (() => {
-                                const s = String(b.content ?? '');
-                                const sNorm = s.replace(/\b(sin|cos|tan|sec|csc|cot)\s*\(/g, '\\$1(');
-                                const hasLatex = /\\sin\b|\\cos\b|\\tan\b|\\sec\b|\\csc\b|\\cot\b|\\frac\{|\\(?:dfrac|tfrac)\{|\\sqrt\b|\\pi\b|\\ln\b|\\log\b|\\cdot\b|\\int\b|\^\{|\^\d|_\{|_\d/.test(sNorm);
-                                if (!hasLatex) return s;
+                            {(() => {
+                              const raw = String(b.content ?? '');
+                              const normalized = raw.trim().toLowerCase();
+                              if (normalized === 'answer' || normalized === 'explanation') {
+                                return <div className="text-base font-semibold text-foreground">Explanation</div>;
+                              }
 
-                                const parts = sNorm.split(
-                                  /(\\(?:frac|dfrac|tfrac)\{[^}]+\}\{[^}]+\}|\\sqrt\{[^}]+\}|\\sqrt\[[^\]]+\]\{[^}]+\}|\\pi\b|\\ln\b|\\log(?:_{\{[^}]+\}}|_{[^}]+})?\b|\\cdot|\\int\b|-?\d*x\^\{\d+\}|x\^\{\d+\}|-?\d*x\^\d+|x\^\d+|[a-zA-Z]\^\{[^}]+\}|[a-zA-Z]\^[a-zA-Z0-9]+|-?\d*x_\{[^}]+\}|x_\{[^}]+\}|-?\d*x_\d+|x_\d+)/g
-                                );
-                                return (
-                                  <span>
-                                    {parts.filter((p) => p.length > 0).map((p, i) => {
-                                      const isMath =
-                                        /^(\\(?:frac|dfrac|tfrac)\{[^}]+\}\{[^}]+\}|\\sqrt\{[^}]+\}|\\sqrt\[[^\]]+\]\{[^}]+\}|\\pi\b|\\ln\b|\\log(?:_{\{[^}]+\}}|_{[^}]+})?\b|\\cdot|\\int\b|-?\d*x\^\{\d+\}|x\^\{\d+\}|-?\d*x\^\d+|x\^\d+|[a-zA-Z]\^\{[^}]+\}|[a-zA-Z]\^[a-zA-Z0-9]+|-?\d*x_\{[^}]+\}|x_\{[^}]+\}|-?\d*x_\d+|x_\d+)$/.test(p);
-                                      return isMath ? <Katex key={i} latex={p} /> : <span key={i}>{p}</span>;
-                                    })}
-                                  </span>
-                                );
-                              })()
-                            )}
+                              const sNorm = raw.replace(/\b(sin|cos|tan|sec|csc|cot)\s*\(/g, '\\$1(');
+                              const hasLatex = /\\sin\b|\\cos\b|\\tan\b|\\sec\b|\\csc\b|\\cot\b|\\frac\{|\\(?:dfrac|tfrac)\{|\\sqrt\b|\\pi\b|\\ln\b|\\log\b|\\cdot\b|\\int\b|\^\{|\^\d|_\{|_\d/.test(sNorm);
+                              if (!hasLatex) return raw;
+
+                              const parts = sNorm.split(
+                                /(\\(?:frac|dfrac|tfrac)\{[^}]+\}\{[^}]+\}|\\sqrt\{[^}]+\}|\\sqrt\[[^\]]+\]\{[^}]+\}|\\pi\b|\\ln\b|\\log(?:_\{[^}]+\}|_{[^}]+})?\b|\\cdot|\\int\b|-?\d*x\^\{\d+\}|x\^\{\d+\}|-?\d*x\^\d+|x\^\d+|[a-zA-Z]\^\{[^}]+\}|[a-zA-Z]\^[a-zA-Z0-9]+|-?\d*x_\{[^}]+\}|x_\{[^}]+\}|-?\d*x_\d+|x_\d+)/g
+                              );
+
+                              return (
+                                <span>
+                                  {parts.filter((p) => p.length > 0).map((p, i) => {
+                                    const isMath =
+                                      /^(\\(?:frac|dfrac|tfrac)\{[^}]+\}\{[^}]+\}|\\sqrt\{[^}]+\}|\\sqrt\[[^\]]+\]\{[^}]+\}|\\pi\b|\\ln\b|\\log(?:_\{[^}]+\}|_{[^}]+})?\b|\\cdot|\\int\b|-?\d*x\^\{\d+\}|x\^\{\d+\}|-?\d*x\^\d+|x\^\d+|[a-zA-Z]\^\{[^}]+\}|[a-zA-Z]\^[a-zA-Z0-9]+|-?\d*x_\{[^}]+\}|x_\{[^}]+\}|-?\d*x_\d+|x_\d+)$/.test(p);
+                                    return isMath ? <Katex key={i} latex={p} /> : <span key={i}>{p}</span>;
+                                  })}
+                                </span>
+                              );
+                            })()}
                           </div>
                         ) : b.kind === 'math_callout' ? (
                           <div key={idx} className="w-full">
@@ -4632,13 +4853,13 @@ export default function Practice() {
                                     const hasLatex = /\\sin\b|\\cos\b|\\tan\b|\\sec\b|\\csc\b|\\cot\b|\\frac\{|\\(?:dfrac|tfrac)\{|\\sqrt\b|\\pi\b|\\ln\b|\\log\b|\\cdot\b|\\int\b|\^\{|\^\d|_\{|_\d/.test(s);
                                     if (!hasLatex) return s;
                                     const parts = s.split(
-                                      /(\\(?:frac|dfrac|tfrac)\{[^}]+\}\{[^}]+\}|\\sqrt\{[^}]+\}|\\sqrt\[[^\]]+\]\{[^}]+\}|\\pi\b|\\ln\b|\\log(?:_\{[^}]+\}|_{[^}]+})?\b|\\cdot|\\int\b|-?\d*x\^\{\d+\}|x\^\{\d+\}|-?\d*x\^\d+|x\^\d+|[a-zA-Z]\^\{[^}]+\}|[a-zA-Z]\^[a-zA-Z0-9]+|-?\d*x_\{[^}]+\}|x_\{[^}]+\}|-?\d*x_\d+|x_\d+)/g
+                                      /(\\(?:frac|dfrac|tfrac)\{[^}]+\}\{[^}]+\}|\\sqrt\{[^}]+\}|\\sqrt\[[^\]]+\]\{[^}]+\}|\\pi\b|\\ln\b|\\log(?:_\{[^}]+\}|_{[^}]+})?\b|\\cdot|\\int\b|\\left\([^)]*\\right\)\^\{?\d+\}?|\([^)]*\)\^\{?\d+\}?|-?\d*x\^\{\d+\}|x\^\{\d+\}|-?\d*x\^\d+|x\^\d+|[a-zA-Z]\^\{[^}]+\}|[a-zA-Z]\^[a-zA-Z0-9]+|-?\d*x_\{[^}]+\}|x_\{[^}]+\}|-?\d*x_\d+|x_\d+)/g
                                     );
                                     return (
                                       <span>
                                         {parts.filter((p) => p.length > 0).map((p, i) => {
                                           const isMath =
-                                            /^(\\(?:frac|dfrac|tfrac)\{[^}]+\}\{[^}]+\}|\\sqrt\{[^}]+\}|\\sqrt\[[^\]]+\]\{[^}]+\}|\\pi\b|\\ln\b|\\log(?:_\{[^}]+\}|_{[^}]+})?\b|\\cdot|\\int\b|-?\d*x\^\{\d+\}|x\^\{\d+\}|-?\d*x\^\d+|x\^\d+|[a-zA-Z]\^\{[^}]+\}|[a-zA-Z]\^[a-zA-Z0-9]+|-?\d*x_\{[^}]+\}|x_\{[^}]+\}|-?\d*x_\d+|x_\d+)$/.test(p);
+                                            /^(\\(?:frac|dfrac|tfrac)\{[^}]+\}\{[^}]+\}|\\sqrt\{[^}]+\}|\\sqrt\[[^\]]+\]\{[^}]+\}|\\pi\b|\\ln\b|\\log(?:_\{[^}]+\}|_{[^}]+})?\b|\\cdot|\\int\b|\\left\([^)]*\\right\)\^\{?\d+\}?|\([^)]*\)\^\{?\d+\}?|-?\d*x\^\{\d+\}|x\^\{\d+\}|-?\d*x\^\d+|x\^\d+|[a-zA-Z]\^\{[^}]+\}|[a-zA-Z]\^[a-zA-Z0-9]+|-?\d*x_\{[^}]+\}|x_\{[^}]+\}|-?\d*x_\d+|x_\d+)$/.test(p);
                                           return isMath ? <Katex key={i} latex={p} /> : <span key={i}>{p}</span>;
                                         })}
                                       </span>
@@ -4650,11 +4871,19 @@ export default function Practice() {
                           </div>
                         ) : b.kind === 'graph' ? (
                           <div key={idx} className="flex justify-center">
-                            <InteractiveGraph
-                              spec={b.graphSpec}
-                              altText={b.altText}
-                              interactive={(question as any).topicId === 'integration'}
-                            />
+                            {typeof (b as any)?.graphSpec?.svgDataUrl === 'string' ? (
+                              <img
+                                src={String((b as any).graphSpec.svgDataUrl)}
+                                alt={String((b as any).altText ?? 'Diagram')}
+                                className="max-w-full h-auto"
+                              />
+                            ) : (
+                              <InteractiveGraph
+                                spec={b.graphSpec}
+                                altText={b.altText}
+                                interactive={(question as any).topicId === 'integration'}
+                              />
+                            )}
                           </div>
                         ) : b.kind === 'long_division' ? (
                           <div key={idx} className="py-2">

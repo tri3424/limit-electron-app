@@ -11,6 +11,9 @@ export type WordProblemVariantId =
   | 'mensuration_cuboid_height'
   | 'probability_complement'
   | 'coordinate_intercept'
+  | 'algebra_rectangle_area'
+  | 'algebra_right_triangle_pythagoras'
+  | 'algebra_trapezium_area'
   | 'unit_conversion_speed'
   | 'number_skills_mix'
   | 'greatest_odd_common_factor'
@@ -27,6 +30,8 @@ export type WordProblemQuestion = {
   expectedNumber?: number;
   graphSpec?: any;
   graphAltText?: string;
+  svgDataUrl?: string;
+  svgAltText?: string;
   id: string;
   topicId: 'word_problems';
   difficulty: PracticeDifficulty;
@@ -63,6 +68,123 @@ function stableId(prefix: string, seed: number, suffix: string) {
 
 function frac(n: number, d: number): Fraction {
   return normalizeFraction({ n, d });
+}
+
+function svgToDataUrl(svg: string) {
+  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+}
+
+function pickVarName(rng: Rng) {
+  const vars = ['x', 'y', 'n', 't', 'p', 'k'] as const;
+  return vars[rng.int(0, vars.length - 1)] ?? 'x';
+}
+
+function linExprLatex(variable: string, coef: number, constant: number) {
+  const c = Math.trunc(coef);
+  const b = Math.trunc(constant);
+  const varPart = c === 0 ? '' : c === 1 ? variable : c === -1 ? `-${variable}` : `${c}${variable}`;
+  if (!varPart) return String(b);
+  if (b === 0) return varPart;
+  return b > 0 ? `${varPart}+${b}` : `${varPart}-${Math.abs(b)}`;
+}
+
+function paren(s: string) {
+  return `(${s})`;
+}
+
+function buildRectangleDiagramSvg(input: { widthLabel: string; heightLabel: string }) {
+  const w = 420;
+  const h = 220;
+  const pad = 24;
+
+  const rectX = pad + 70;
+  const rectY = pad + 20;
+  const rectW = w - rectX - pad;
+  const rectH = h - rectY - pad - 20;
+
+  const cx = rectX + rectW / 2;
+  const cy = rectY + rectH / 2;
+
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">
+  <rect x="0" y="0" width="${w}" height="${h}" fill="#ffffff" />
+  <rect x="${rectX}" y="${rectY}" width="${rectW}" height="${rectH}" fill="#f8fafc" stroke="#111827" stroke-width="2" />
+
+  <text x="${cx.toFixed(2)}" y="${(rectY - 8).toFixed(2)}" text-anchor="middle" font-family="Roboto Slab, ui-serif, Georgia, serif" font-size="18" fill="#111827">${input.widthLabel}</text>
+  <text x="${(rectX - 10).toFixed(2)}" y="${cy.toFixed(2)}" text-anchor="end" dominant-baseline="middle" font-family="Roboto Slab, ui-serif, Georgia, serif" font-size="18" fill="#111827">${input.heightLabel}</text>
+
+  <line x1="${rectX}" y1="${rectY}" x2="${(rectX + 18).toFixed(2)}" y2="${rectY}" stroke="#111827" stroke-width="2" />
+  <line x1="${rectX}" y1="${rectY}" x2="${rectX}" y2="${(rectY + 18).toFixed(2)}" stroke="#111827" stroke-width="2" />
+</svg>`;
+}
+
+function buildRightTriangleDiagramSvg(input: { hypLabel: string; leg1Label: string; leg2Label: string }) {
+  const w = 440;
+  const h = 260;
+  const pad = 24;
+
+  const ax = pad + 90;
+  const ay = h - pad - 30;
+  const bx = w - pad - 30;
+  const by = h - pad - 30;
+  const cx = pad + 90;
+  const cy = pad + 30;
+
+  const midABx = (ax + bx) / 2;
+  const midABy = (ay + by) / 2;
+  const midACx = (ax + cx) / 2;
+  const midACy = (ay + cy) / 2;
+  const midBCx = (bx + cx) / 2;
+  const midBCy = (by + cy) / 2;
+
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">
+  <rect x="0" y="0" width="${w}" height="${h}" fill="#ffffff" />
+  <polygon points="${ax},${ay} ${bx},${by} ${cx},${cy}" fill="#f8fafc" stroke="#111827" stroke-width="2" />
+
+  <path d="M ${ax + 18} ${ay} L ${ax + 18} ${ay - 18} L ${ax} ${ay - 18}" fill="none" stroke="#111827" stroke-width="2" />
+
+  <text x="${midABx.toFixed(2)}" y="${(ay + 22).toFixed(2)}" text-anchor="middle" font-family="Roboto Slab, ui-serif, Georgia, serif" font-size="18" fill="#111827">${input.leg1Label}</text>
+  <text x="${(ax - 10).toFixed(2)}" y="${midACy.toFixed(2)}" text-anchor="end" dominant-baseline="middle" font-family="Roboto Slab, ui-serif, Georgia, serif" font-size="18" fill="#111827">${input.leg2Label}</text>
+  <text x="${(midBCx + 10).toFixed(2)}" y="${(midBCy - 8).toFixed(2)}" text-anchor="start" font-family="Roboto Slab, ui-serif, Georgia, serif" font-size="18" fill="#111827">${input.hypLabel}</text>
+</svg>`;
+}
+
+function buildTrapeziumDiagramSvg(input: { topLabel: string; bottomLabel: string; heightLabel: string }) {
+  const w = 420;
+  const h = 240;
+  const pad = 24;
+
+  // Trapezium points (not to scale), with top and bottom parallel.
+  const x1 = pad + 90;
+  const x2 = w - pad - 80;
+  const x3 = w - pad - 30;
+  const x4 = pad + 50;
+  const yTop = pad + 40;
+  const yBot = h - pad - 30;
+
+  const midTopX = (x1 + x2) / 2;
+  const midBotX = (x4 + x3) / 2;
+  const midHeightY = (yTop + yBot) / 2;
+
+  const heightX = x1;
+
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">
+  <rect x="0" y="0" width="${w}" height="${h}" fill="#ffffff" />
+  <defs>
+    <clipPath id="trap-clip">
+      <polygon points="${x1},${yTop} ${x2},${yTop} ${x3},${yBot} ${x4},${yBot}" />
+    </clipPath>
+  </defs>
+  <polygon points="${x1},${yTop} ${x2},${yTop} ${x3},${yBot} ${x4},${yBot}" fill="#f8fafc" stroke="#111827" stroke-width="2" />
+
+  <line x1="${heightX}" y1="${yTop}" x2="${heightX}" y2="${yBot}" stroke="#111827" stroke-width="2" stroke-dasharray="6 5" stroke-linecap="butt" clip-path="url(#trap-clip)" />
+
+  <text x="${midTopX.toFixed(2)}" y="${(yTop - 12).toFixed(2)}" text-anchor="middle" font-family="Roboto Slab, ui-serif, Georgia, serif" font-size="18" fill="#111827">${input.topLabel}</text>
+  <text x="${midBotX.toFixed(2)}" y="${(yBot + 22).toFixed(2)}" text-anchor="middle" font-family="Roboto Slab, ui-serif, Georgia, serif" font-size="18" fill="#111827">${input.bottomLabel}</text>
+  <text x="${(heightX - 26).toFixed(2)}" y="${midHeightY.toFixed(2)}" text-anchor="end" dominant-baseline="middle" font-family="Roboto Slab, ui-serif, Georgia, serif" font-size="18" fill="#111827">${input.heightLabel}</text>
+</svg>`;
 }
 
 function pickFrom<T>(arr: T[], idx: number): T {
@@ -111,6 +233,9 @@ function pickVariant(rng: Rng, avoid?: WordProblemVariantId): WordProblemVariant
   const all: WordProblemVariantId[] = [
     'mensuration_cuboid_height',
     'probability_complement',
+    'algebra_rectangle_area',
+    'algebra_right_triangle_pythagoras',
+    'algebra_trapezium_area',
     'unit_conversion_speed',
     'number_skills_mix',
     'greatest_odd_common_factor',
@@ -148,6 +273,9 @@ function pickVariantByDifficulty(
     'probability_complement',
     'unit_conversion_speed',
     'number_skills_mix',
+    'algebra_rectangle_area',
+    'algebra_right_triangle_pythagoras',
+    'algebra_trapezium_area',
   ];
   const mediumPool: WordProblemVariantId[] = [
     ...easyPool,
@@ -235,6 +363,8 @@ export function generateWordProblemQuestion(input: {
     expectedNumber?: number;
     graphSpec?: any;
     graphAltText?: string;
+    svgDataUrl?: string;
+    svgAltText?: string;
   }): WordProblemQuestion => {
     const id = stableId('word-problem', input.seed, `${variantId}-${payload.idSuffix}`);
     return {
@@ -252,8 +382,465 @@ export function generateWordProblemQuestion(input: {
       expectedNumber: payload.expectedNumber,
       graphSpec: payload.graphSpec,
       graphAltText: payload.graphAltText,
+      svgDataUrl: payload.svgDataUrl,
+      svgAltText: payload.svgAltText,
     };
   };
+
+  if (variantId === 'algebra_right_triangle_pythagoras') {
+    // Use Pythagorean triples with consecutive legs so we can model the legs as 2x and (2x+1).
+    // (20,21,29) -> x=10 (integer)
+    // (119,120,169) -> x=119/2 (fraction)
+    // (696,697,985) -> x=348 (integer)
+    const triples = [
+      { a: 20, b: 21, c: 29 },
+      { a: 119, b: 120, c: 169 },
+      { a: 696, b: 697, c: 985 },
+    ];
+
+    const pool = input.difficulty === 'easy'
+      ? [triples[0]!]
+      : input.difficulty === 'medium'
+        ? [triples[0]!, triples[1]!]
+        : triples;
+
+    const picked = pool[rng.int(0, pool.length - 1)] ?? triples[0]!;
+    const legSmall = Math.min(picked.a, picked.b);
+    const legLarge = Math.max(picked.a, picked.b);
+    const hyp = picked.c;
+
+    // 2x = legSmall, so x = legSmall/2 (may be fractional)
+    const xIsInteger = legSmall % 2 === 0;
+    const xFrac = xIsInteger ? null : normalizeFraction({ n: legSmall, d: 2 });
+    const xNum = xIsInteger ? legSmall / 2 : null;
+
+    const xLatex = xIsInteger ? String(xNum) : fractionToLatex(xFrac!);
+    const leg1Latex = String.raw`2x`;
+    const leg2Latex = String.raw`2x+1`;
+
+    const promptText = `The diagram shows a right-angled triangle with sides 2x cm, (2x+1) cm and ${hyp} cm. Find the value of x.`;
+
+    const triangleSvg = buildRightTriangleDiagramSvg({
+      leg1Label: '2x cm',
+      leg2Label: '(2x+1) cm',
+      hypLabel: `${hyp} cm`,
+    });
+
+    const katexQuestion = String.raw`\text{The diagram shows a right-angled triangle with sides }2x\text{ cm, }(2x+1)\text{ cm and }${hyp}\text{ cm. Find the value of }x\text{.}`;
+
+    const working: KatexExplanationBlock[] = [
+      { kind: 'text', content: 'Diagram:' },
+      { kind: 'graph', graphSpec: { svgDataUrl: svgToDataUrl(triangleSvg) }, altText: 'Right-angled triangle diagram.' },
+      { kind: 'text', content: 'Step 1: Identify the hypotenuse and the two perpendicular sides.' },
+      { kind: 'text', content: `The hypotenuse is the longest side, which is ${hyp} cm.` },
+      { kind: 'text', content: `The perpendicular sides are ${leg1Latex} and ${leg2Latex}.` },
+      { kind: 'text', content: 'Step 2: Use Pythagoras’ theorem for a right-angled triangle.' },
+      { kind: 'math', content: String.raw`(\text{leg})^2+(\text{leg})^2=(\text{hypotenuse})^2`, displayMode: true },
+      { kind: 'math', content: String.raw`(2x)^2+(2x+1)^2=${hyp}^2`, displayMode: true },
+      { kind: 'text', content: 'Step 3: Expand and simplify carefully.' },
+      { kind: 'math', content: String.raw`4x^2+(4x^2+4x+1)=${hyp}^2`, displayMode: true },
+      { kind: 'math', content: String.raw`8x^2+4x+1=${hyp}^2`, displayMode: true },
+      { kind: 'text', content: 'Step 4: Rearrange into a quadratic equation.' },
+      { kind: 'math', content: String.raw`8x^2+4x+1-${hyp}^2=0`, displayMode: true },
+      { kind: 'text', content: 'Step 5: Solve the quadratic and keep only valid solutions (lengths must be positive).' },
+      { kind: 'text', content: `From the valid solution we get x = ${xLatex}.` },
+      { kind: 'text', content: 'Step 6: Use x to find the lengths of all sides (this is a good check even though the answer requested is x).' },
+      { kind: 'math', content: String.raw`2x=${legSmall}\ \text{cm}`, displayMode: true },
+      { kind: 'math', content: String.raw`2x+1=${legLarge}\ \text{cm}`, displayMode: true },
+      { kind: 'math', content: String.raw`\text{hypotenuse}=${hyp}\ \text{cm}`, displayMode: true },
+      { kind: 'text', content: 'Final check: confirm Pythagoras with the numerical side lengths.' },
+      { kind: 'math', content: String.raw`${legSmall}^2+${legLarge}^2=${hyp}^2`, displayMode: true },
+    ];
+
+    const katexExplanation = scaffoldExplanation({
+      title: 'This is a geometry + algebra word problem using Pythagoras’ theorem.',
+      givens: [
+        `Right-angled triangle`,
+        `Perpendicular sides are 2x and (2x+1)`,
+        `Hypotenuse is ${hyp} cm`,
+      ],
+      goal: 'Find x.',
+      method: [
+        'Write Pythagoras: (leg)^2 + (leg)^2 = (hypotenuse)^2.',
+        'Substitute the algebraic expressions.',
+        'Expand carefully and rearrange to a quadratic equation.',
+        'Solve and reject any solution that gives a negative length.',
+      ],
+      working,
+      checks: [
+        'x must be positive because it represents a length.',
+        'After substituting x, the three side lengths must satisfy Pythagoras exactly.',
+      ],
+    });
+
+    if (!xIsInteger) {
+      return mk({
+        idSuffix: 'algebra_right_triangle_pythagoras',
+        promptText,
+        katexQuestion,
+        katexExplanation,
+        answerKind: 'rational',
+        expectedFraction: xFrac!,
+        svgDataUrl: svgToDataUrl(triangleSvg),
+        svgAltText: 'Right-angled triangle diagram.',
+      });
+    }
+
+    return mk({
+      idSuffix: 'algebra_right_triangle_pythagoras',
+      promptText,
+      katexQuestion,
+      katexExplanation,
+      answerKind: 'integer',
+      expectedNumber: xNum!,
+      svgDataUrl: svgToDataUrl(triangleSvg),
+      svgAltText: 'Right-angled triangle diagram.',
+    });
+  }
+
+  if (variantId === 'algebra_trapezium_area') {
+    const wantFraction = input.difficulty !== 'easy'
+      ? rng.next() < (input.difficulty === 'medium' ? 0.5 : 0.65)
+      : false;
+
+    const pick = (() => {
+      const attempts = 400;
+
+      const pickInt = () => {
+        const x = rng.int(2, input.difficulty === 'easy' ? 18 : 40);
+        const area = x * (x + 1);
+        return { x, area };
+      };
+
+      const pickHalf = () => {
+        // x = n/2 (n odd) -> area = x(x+1) ends in .25 or .75 often.
+        const n = rng.int(5, 55) | 1;
+        const xFrac = normalizeFraction({ n, d: 2 });
+        const area = (n * (n + 2)) / 4;
+        if (!(area > 0)) return null;
+        return { xFrac, area };
+      };
+
+      if (!wantFraction) return pickInt();
+      for (let i = 0; i < attempts; i++) {
+        const c = pickHalf();
+        if (c) return c;
+      }
+      return pickInt();
+    })();
+
+    const v = pickVarName(rng);
+    const vLatex = (pick as any).xFrac ? fractionToLatex((pick as any).xFrac as Fraction) : String((pick as any).x as number);
+
+    // Add variety: allow coefficients and offsets in each dimension.
+    // Keep expressions simple and ensure lengths stay positive for the generated v.
+    const chooseExpressions = (() => {
+      const attempts = 200;
+      const vNum = (pick as any).xFrac ? Number(((pick as any).xFrac as Fraction).n) / Number(((pick as any).xFrac as Fraction).d) : Number((pick as any).x as number);
+      for (let i = 0; i < attempts; i++) {
+        const a = rng.int(1, 4);
+        const b = rng.int(-6, 10);
+        const c = rng.int(1, 4);
+        const d = rng.int(-6, 10);
+        const e = rng.int(1, 3);
+        const f = rng.int(-4, 8);
+
+        const topLen = a * vNum + b;
+        const botLen = c * vNum + d;
+        const hLen = e * vNum + f;
+        if (!(topLen > 0 && botLen > 0 && hLen > 0)) continue;
+
+        const area = 0.5 * (topLen + botLen) * hLen;
+        if (!(area > 0) || area > 9999) continue;
+
+        return {
+          a, b, c, d, e, f,
+          area,
+          topExpr: linExprLatex(v, a, b),
+          botExpr: linExprLatex(v, c, d),
+          hExpr: linExprLatex(v, e, f),
+        };
+      }
+      // Fallback to original simple forms if we can't find a good varied one.
+      const a = 1;
+      const b = -1;
+      const c = 1;
+      const d = 3;
+      const e = 1;
+      const f = 0;
+      const topExpr = linExprLatex(v, a, b);
+      const botExpr = linExprLatex(v, c, d);
+      const hExpr = linExprLatex(v, e, f);
+      const vNum0 = (pick as any).xFrac ? Number(((pick as any).xFrac as Fraction).n) / Number(((pick as any).xFrac as Fraction).d) : Number((pick as any).x as number);
+      const area = 0.5 * ((a * vNum0 + b) + (c * vNum0 + d)) * (e * vNum0 + f);
+      return { a, b, c, d, e, f, area, topExpr, botExpr, hExpr };
+    })();
+
+    const areaShown = Number(chooseExpressions.area).toFixed(2);
+    const topExpr = chooseExpressions.topExpr;
+    const botExpr = chooseExpressions.botExpr;
+    const hExpr = chooseExpressions.hExpr;
+
+    const promptText = `The area of the trapezium is ${areaShown} cm². The parallel sides are ${paren(topExpr)} cm and ${paren(botExpr)} cm, and the perpendicular height is ${paren(hExpr)} cm. Find the value of ${v}.`;
+
+    const trapSvg = buildTrapeziumDiagramSvg({
+      topLabel: `${paren(topExpr)} cm`,
+      bottomLabel: `${paren(botExpr)} cm`,
+      heightLabel: `${paren(hExpr)} cm`,
+    });
+
+    const katexQuestion = String.raw`\text{The area of the trapezium is }${areaShown}\text{ cm}^2. \text{The parallel sides are }${paren(topExpr)}\text{ cm and }${paren(botExpr)}\text{ cm, and the perpendicular height is }${paren(hExpr)}\text{ cm. Find the value of }${v}\text{.}`;
+
+    const sumCoef = chooseExpressions.a + chooseExpressions.c;
+    const sumConst = chooseExpressions.b + chooseExpressions.d;
+    const sumExpr = linExprLatex(v, sumCoef, sumConst);
+
+    const working: KatexExplanationBlock[] = [
+      { kind: 'text', content: 'Diagram:' },
+      { kind: 'graph', graphSpec: { svgDataUrl: svgToDataUrl(trapSvg) }, altText: 'Trapezium diagram.' },
+      { kind: 'text', content: 'Step 1: Recall the area formula for a trapezium.' },
+      { kind: 'math', content: String.raw`\text{Area}=\frac{1}{2}(a+b)h`, displayMode: true },
+      { kind: 'text', content: 'Here, a and b are the lengths of the parallel sides, and h is the perpendicular distance between them.' },
+      { kind: 'text', content: 'Step 2: Substitute the given expressions.' },
+      { kind: 'math', content: String.raw`${areaShown}=\frac{1}{2}\big(${paren(topExpr)}+${paren(botExpr)}\big)\cdot ${paren(hExpr)}`, displayMode: true },
+      { kind: 'text', content: 'Step 3: Combine the parallel sides first.' },
+      { kind: 'math', content: String.raw`${paren(topExpr)}+${paren(botExpr)}=${sumExpr}`, displayMode: true },
+      { kind: 'math', content: String.raw`${areaShown}=\frac{1}{2}\big(${sumExpr}\big)\cdot ${paren(hExpr)}`, displayMode: true },
+      { kind: 'text', content: 'Step 4: Rearrange into a quadratic equation and solve.' },
+      { kind: 'text', content: `From the valid solution we get ${v} = ${vLatex}.` },
+    ];
+
+    const katexExplanation = scaffoldExplanation({
+      title: 'This is an algebra + mensuration problem using the trapezium area formula.',
+      givens: [
+        `Area = ${areaShown} cm²`,
+        `Parallel sides are ${paren(topExpr)} and ${paren(botExpr)}`,
+        `Perpendicular height is ${paren(hExpr)}`,
+      ],
+      goal: `Find ${v}.`,
+      method: [
+        'Write the trapezium area formula.',
+        'Substitute the expressions for the parallel sides and the height.',
+        `Simplify to get a quadratic equation in ${v}.`,
+        'Solve and reject invalid solutions based on lengths.',
+      ],
+      working,
+      checks: [
+        `${v} must be positive.`,
+        `Plug ${v} back into the area formula to confirm it matches the given area.`,
+      ],
+    });
+
+    if ((pick as any).xFrac) {
+      return mk({
+        idSuffix: 'algebra_trapezium_area',
+        promptText,
+        katexQuestion,
+        katexExplanation,
+        answerKind: 'rational',
+        expectedFraction: normalizeFraction((pick as any).xFrac as Fraction),
+        svgDataUrl: svgToDataUrl(trapSvg),
+        svgAltText: 'Trapezium diagram.',
+      });
+    }
+
+    return mk({
+      idSuffix: 'algebra_trapezium_area',
+      promptText,
+      katexQuestion,
+      katexExplanation,
+      answerKind: 'integer',
+      expectedNumber: Number((pick as any).x as number),
+      svgDataUrl: svgToDataUrl(trapSvg),
+      svgAltText: 'Trapezium diagram.',
+    });
+  }
+
+  if (variantId === 'algebra_rectangle_area') {
+    const pickInt = (min: number, max: number) => rng.int(min, max);
+
+    const v = pickVarName(rng);
+    const k = rng.int(1, 4);
+
+    const caseEasy = () => {
+      const x = pickInt(2, 15);
+      const a = rng.int(2, 7);
+      const b = rng.int(-12, 18);
+      const other = a * x + b;
+      if (!(other > 0)) return null;
+      const area = (k * x) * other;
+      if (!(area > 0) || area > 2200) return null;
+      return { x, a, b, other, area, answerKind: 'integer' as const };
+    };
+
+    const caseFrac = () => {
+      // x = n/2 (n odd) so it is genuinely fractional.
+      const n = rng.int(3, 35) | 1;
+      const xFrac = frac(n, 2);
+      const a = rng.int(2, 9);
+      const b = rng.int(-18, 30);
+
+      // other = a*(n/2) + b = (a*n + 2b)/2
+      const otherNumer = a * n + 2 * b;
+      if (!(otherNumer > 0)) return null;
+
+      // area = (k*n/2)*((a*n+2b)/2) = k*n*(a*n+2b)/4 must be integer
+      const areaNumer = k * n * otherNumer;
+      if (areaNumer % 4 !== 0) return null;
+      const area = areaNumer / 4;
+      if (!(area > 0) || area > 9000) return null;
+
+      // other side length as a reduced fraction
+      const otherFrac = normalizeFraction({ n: otherNumer, d: 2 });
+      return { xFrac, a, b, otherFrac, area, answerKind: 'rational' as const };
+    };
+
+    const caseInt = () => {
+      const x = pickInt(2, 40);
+      const a = rng.int(2, 10);
+      const b = rng.int(-25, 60);
+      const other = a * x + b;
+      if (!(other > 0)) return null;
+      const area = (k * x) * other;
+      if (!(area > 0) || area > 14000) return null;
+      return { x, a, b, other, area, answerKind: 'integer' as const };
+    };
+
+    const picked = (() => {
+      const attempts = 500;
+      if (input.difficulty === 'easy') {
+        for (let i = 0; i < attempts; i++) {
+          const c = caseEasy();
+          if (c) return c;
+        }
+        const x = 5;
+        const a = 6;
+        const b = -7;
+        const other = 23;
+        const area = (k * x) * other;
+        return { x, a, b, other, area, answerKind: 'integer' as const };
+      }
+
+      const wantFraction = rng.next() < (input.difficulty === 'medium' ? 0.5 : 0.65);
+      if (wantFraction) {
+        for (let i = 0; i < attempts; i++) {
+          const c = caseFrac();
+          if (c) return c;
+        }
+      }
+      for (let i = 0; i < attempts; i++) {
+        const c = caseInt();
+        if (c) return c;
+      }
+      const x = 4;
+      const a = 6;
+      const b = -7;
+      const other = 17;
+      const area = (k * x) * other;
+      return { x, a, b, other, area, answerKind: 'integer' as const };
+    })();
+
+    const a = (picked as any).a as number;
+    const b = (picked as any).b as number;
+    const area = (picked as any).area as number;
+
+    const vLatex = (picked as any).xFrac
+      ? fractionToLatex((picked as any).xFrac as Fraction)
+      : String((picked as any).x as number);
+    const otherLatex = (picked as any).otherFrac
+      ? fractionToLatex((picked as any).otherFrac as Fraction)
+      : String((picked as any).other as number);
+
+    const exprOther = b === 0
+      ? String.raw`${a}x`
+      : b > 0
+        ? String.raw`${a}x+${b}`
+        : String.raw`${a}x-${Math.abs(b)}`;
+
+    const exprOtherV = exprOther.replace(/x/g, v);
+    const side1Expr = k === 1 ? v : `${k}${v}`;
+
+    const promptText = `A rectangle has sides of length ${side1Expr} cm and (${exprOtherV}) cm. The area of the rectangle is ${area} cm². Find ${v}.`;
+
+    const rectSvg = buildRectangleDiagramSvg({
+      widthLabel: `${exprOtherV} cm`,
+      heightLabel: `${side1Expr} cm`,
+    });
+
+    const xSolveEq = String.raw`${side1Expr}(${exprOtherV})=${area}`;
+    const expandedEq = String.raw`${k * a}${v}^2${b === 0 ? '' : b > 0 ? `+${k * b}${v}` : `-${Math.abs(k * b)}${v}`}=${area}`;
+    const standardEq = String.raw`${k * a}${v}^2${b === 0 ? '' : b > 0 ? `+${k * b}${v}` : `-${Math.abs(k * b)}${v}`}-${area}=0`;
+
+    const katexQuestion = String.raw`
+\text{A rectangle has sides of length }${side1Expr}\text{ cm and }(${exprOtherV})\text{ cm.}\\
+\text{The area of the rectangle is }${area}\text{ cm}^2.\\
+\text{Find }${v}\text{.}
+`;
+
+    const katexExplanation: KatexExplanationBlock[] = scaffoldExplanation({
+      title: 'We are given a rectangle with algebraic side lengths and a known area.',
+      givens: [
+        `One side length is ${side1Expr} cm.`,
+        `The other side length is (${exprOtherV}) cm.`,
+        `Area = ${area} cm².`,
+      ],
+      goal: `Find the value of ${v}, then use it to find the lengths of both sides.`,
+      method: [
+        'Draw/visualize the rectangle and label the sides.',
+        'Use the area formula: Area = length × width.',
+        `Substitute the expressions, expand carefully, and form a quadratic equation in ${v}.`,
+        'Solve the quadratic, then reject any value that would make a side length negative.',
+        `Substitute the valid ${v} back into the other side expression to get both side lengths.`,
+      ],
+      working: [
+        { kind: 'text', content: 'Diagram:' },
+        { kind: 'graph', graphSpec: { svgDataUrl: svgToDataUrl(rectSvg) }, altText: 'Rectangle diagram.' },
+        { kind: 'text', content: 'Step 1: Write down the area formula for a rectangle.' },
+        { kind: 'math', content: String.raw`\text{Area}=\text{length}\times\text{width}`, displayMode: true },
+        { kind: 'text', content: 'Step 2: Substitute the given side lengths into the formula.' },
+        { kind: 'math', content: xSolveEq, displayMode: true },
+        { kind: 'text', content: `Step 3: Expand the brackets to form a quadratic equation in ${v}.` },
+        { kind: 'math', content: expandedEq, displayMode: true },
+        { kind: 'text', content: 'Step 4: Rearrange into the standard quadratic form ax^2 + bx + c = 0.' },
+        { kind: 'math', content: standardEq, displayMode: true },
+        { kind: 'text', content: 'Step 5: Solve the quadratic equation (using factorising if possible, or the quadratic formula). The question allows calculator usage if needed.' },
+        { kind: 'text', content: `Step 6: Check your solutions are valid lengths: ${v} must be positive, and the other side length must also be positive.` },
+        { kind: 'text', content: `From the valid solution, we get ${v} = ${vLatex}.` },
+        { kind: 'text', content: `Then the other side is (${exprOtherV}) = ${otherLatex} cm.` },
+        { kind: 'text', content: 'Step 7: Final check by multiplying the two sides to confirm the area.' },
+        { kind: 'math', content: String.raw`${side1Expr}\times (${exprOtherV})=${area}`, displayMode: true },
+      ],
+      checks: [
+        'Both side lengths must be positive numbers.',
+        'Multiplying the side lengths should give the stated area.',
+      ],
+    });
+
+    if ((picked as any).answerKind === 'rational') {
+      const expectedFraction = normalizeFraction((picked as any).xFrac as Fraction);
+      return mk({
+        idSuffix: 'algebra_rectangle_area',
+        promptText,
+        katexQuestion,
+        katexExplanation,
+        answerKind: 'rational',
+        expectedFraction,
+        svgDataUrl: svgToDataUrl(rectSvg),
+        svgAltText: 'Rectangle diagram.',
+      });
+    }
+
+    return mk({
+      idSuffix: 'algebra_rectangle_area',
+      promptText,
+      katexQuestion,
+      katexExplanation,
+      answerKind: 'integer',
+      expectedNumber: Number((picked as any).x as number),
+      svgDataUrl: svgToDataUrl(rectSvg),
+      svgAltText: 'Rectangle diagram.',
+    });
+  }
 
   if (variantId === 'mensuration_cuboid_height') {
     // Exactly 10 variants total (sub = 0..9). Difficulty only adjusts number size.

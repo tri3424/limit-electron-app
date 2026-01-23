@@ -262,6 +262,18 @@ export default function SettingsPracticeAdminFrequency() {
           };
         }
 
+        if (t.id === 'quadratics') {
+          return {
+            ...base,
+            variants: [
+              { key: 'factorisation', label: 'Solve by factorisation', defaultValue: 55 },
+              { key: 'complete_square_pqr', label: 'Express in form p(x−q)^2 + r (compare coefficients)', defaultValue: 15 },
+              { key: 'complete_square_abc', label: 'Express in form (ax+b)^2 + c (compare coefficients)', defaultValue: 15 },
+              { key: 'solve_complete_square_surd', label: 'Solve by completing the square (surd/decimal answers)', defaultValue: 15 },
+            ],
+          };
+        }
+
         if (t.id === 'differentiation') {
           return {
             ...base,
@@ -278,6 +290,9 @@ export default function SettingsPracticeAdminFrequency() {
             variants: [
               { key: 'probability_complement', label: 'Probability (complement)', defaultValue: 1 },
               { key: 'probability_two_bags_blue', label: 'Probability (two bags)', defaultValue: 1 },
+              { key: 'algebra_rectangle_area', label: 'Rectangle area (algebraic sides)', defaultValue: 1 },
+              { key: 'algebra_right_triangle_pythagoras', label: 'Right triangle (Pythagoras, solve for x)', defaultValue: 1 },
+              { key: 'algebra_trapezium_area', label: 'Trapezium area (algebraic sides, solve for x)', defaultValue: 1 },
               { key: 'unit_conversion_speed', label: 'Unit conversion (speed)', defaultValue: 1 },
               { key: 'number_skills_mix', label: 'Number skills', defaultValue: 1 },
               { key: 'mensuration_cuboid_height', label: 'Mensuration (cuboid)', defaultValue: 1 },
@@ -305,6 +320,7 @@ export default function SettingsPracticeAdminFrequency() {
             variants: [
               { key: 'two_var', label: '2 variables (2 equations)', defaultValue: 70 },
               { key: 'three_var', label: '3 variables (3 equations)', defaultValue: 30 },
+              { key: 'lin_quad', label: 'Linear + quadratic (Ultimate only)', defaultValue: 35 },
             ],
           };
         }

@@ -101,6 +101,11 @@ function to4sf(x: number): number {
   return Math.round(x * scale) / scale;
 }
 
+function to4sfString(x: number): string {
+  if (!Number.isFinite(x)) return String(x);
+  return x.toPrecision(4);
+}
+
 function nonOneBase(rng: Rng): number {
   const candidates = [2, 3, 4, 5, 6, 7, 8, 9, 10];
   return rng.pick(candidates);
@@ -291,6 +296,7 @@ export function generateLogarithmsQuestion(input: {
     // Solve based on the displayed value so the equation is consistent.
     const xFromShown = Math.log(bShown) / Math.log(base);
     const expected = to4sf(xFromShown);
+    const expectedStr = to4sfString(expected);
 
     const katexQuestion = String.raw`\text{Usage of calculator is allowed. Solve and give }x\text{ correct to 4 significant figures: }\;${base}^{x}=${bShown}`;
     const katexExplanation: KatexExplanationBlock[] = [
@@ -298,7 +304,7 @@ export function generateLogarithmsQuestion(input: {
       { kind: 'math', content: String.raw`${base}^{x}=${bShown}`, displayMode: true },
       { kind: 'math', content: String.raw`x\log_{10}(${base})=\log_{10}(${bShown})`, displayMode: true },
       { kind: 'math', content: String.raw`x=\frac{\log_{10}(${bShown})}{\log_{10}(${base})}`, displayMode: true },
-      { kind: 'text', content: `So x \approx ${expected} (4 s.f.).` },
+      { kind: 'text', content: `So x \approx ${expectedStr} (4 s.f.).` },
     ];
 
     return {
@@ -312,7 +318,7 @@ export function generateLogarithmsQuestion(input: {
       katexQuestion,
       katexExplanation,
       expectedNumber: expected,
-      expectedLatex: String.raw`${expected}`,
+      expectedLatex: String.raw`${expectedStr}`,
     };
   }
 
@@ -323,10 +329,11 @@ export function generateLogarithmsQuestion(input: {
         ? rng.pick([0.6, 0.8, 1.3, 1.7, 2.2, 2.7])
         : rng.pick([0.4, 0.7, 1.1, 1.8, 2.5, 3.1]);
     const value = to4sf(Math.exp(exp));
+    const valueStr = to4sfString(value);
     const katexQuestion = String.raw`\text{Usage of calculator is allowed. Evaluate correct to 4 significant figures: }\;e^{${exp}}`;
     const katexExplanation: KatexExplanationBlock[] = [
       { kind: 'text', content: 'Use a calculator to evaluate and round to 4 significant figures.' },
-      { kind: 'math', content: String.raw`e^{${exp}}\approx ${value}`, displayMode: true },
+      { kind: 'math', content: String.raw`e^{${exp}}\approx ${valueStr}`, displayMode: true },
     ];
     return {
       kind: 'logarithms',
@@ -339,7 +346,7 @@ export function generateLogarithmsQuestion(input: {
       katexQuestion,
       katexExplanation,
       expectedNumber: value,
-      expectedLatex: String.raw`${value}`,
+      expectedLatex: String.raw`${valueStr}`,
     };
   }
 
@@ -379,6 +386,7 @@ export function generateLogarithmsQuestion(input: {
     const sense = rng.pick(['<', '>', '\\le', '\\ge'] as const);
     const bound = (Math.log(c) - b) / a;
     const expected = to4sf(bound);
+    const expectedStr = to4sfString(expected);
 
     const ineq = String.raw`e^{${a}x ${b >= 0 ? '+' : '-'} ${Math.abs(b)}}\;${sense}\;${c}`;
     const katexQuestion = String.raw`\text{Usage of calculator is allowed. Solve and give the critical value of }x\text{ correct to 4 significant figures: }\;${ineq}`;
@@ -397,7 +405,7 @@ export function generateLogarithmsQuestion(input: {
       { kind: 'math', content: String.raw`e^{${a}x ${b >= 0 ? '+' : '-'} ${Math.abs(b)}}\;${sense}\;${c}`, displayMode: true },
       { kind: 'math', content: String.raw`${a}x ${b >= 0 ? '+' : '-'} ${Math.abs(b)}\;${sense}\;\ln(${c})`, displayMode: true },
       { kind: 'math', content: expectedLatex, displayMode: true },
-      { kind: 'text', content: `So the critical value is x \u2248 ${expected} (4 s.f.).` },
+      { kind: 'text', content: `So the critical value is x \u2248 ${expectedStr} (4 s.f.).` },
     ];
     return {
       kind: 'logarithms',
@@ -499,10 +507,11 @@ export function generateLogarithmsQuestion(input: {
   if (variant === 'evaluate_ln_3sf') {
     const arg = rng.pick([0.15, 0.2, 0.3, 0.6, 0.9, 1.4, 3]);
     const value = to4sf(Math.log(arg));
+    const valueStr = to4sfString(value);
     const katexQuestion = String.raw`\text{Usage of calculator is allowed. Evaluate correct to 4 significant figures: }\;\ln(${arg})`;
     const katexExplanation: KatexExplanationBlock[] = [
       { kind: 'text', content: 'Use a calculator to evaluate the natural log and round to 4 significant figures.' },
-      { kind: 'math', content: String.raw`\ln(${arg})\approx ${value}`, displayMode: true },
+      { kind: 'math', content: String.raw`\ln(${arg})\approx ${valueStr}`, displayMode: true },
     ];
 
     return {
@@ -516,7 +525,7 @@ export function generateLogarithmsQuestion(input: {
       katexQuestion,
       katexExplanation,
       expectedNumber: value,
-      expectedLatex: String.raw`${value}`,
+      expectedLatex: String.raw`${valueStr}`,
     };
   }
 
@@ -526,6 +535,7 @@ export function generateLogarithmsQuestion(input: {
       ? rng.pick([1.2, 1.4, 1.6, 1.8])
       : rng.pick([1.1, 1.3, 1.5, 1.7, 1.9, 2.1]);
     const x = to4sf(Math.exp(k) - c);
+    const xStr = to4sfString(x);
 
     const katexQuestion = String.raw`\text{Usage of calculator is allowed. Solve and give }x\text{ correct to 4 significant figures: }\;\ln(x+${c})=${k}`;
     const katexExplanation: KatexExplanationBlock[] = [
@@ -533,7 +543,7 @@ export function generateLogarithmsQuestion(input: {
       { kind: 'math', content: String.raw`\ln(x+${c})=${k} \iff x+${c}=e^{${k}}`, displayMode: true },
       { kind: 'math', content: String.raw`x=e^{${k}}-${c}`, displayMode: true },
       { kind: 'text', content: 'Now evaluate with a calculator and round to 4 significant figures.' },
-      { kind: 'math', content: String.raw`x\approx ${x}`, displayMode: true },
+      { kind: 'math', content: String.raw`x\approx ${xStr}`, displayMode: true },
     ];
 
     return {
@@ -547,7 +557,7 @@ export function generateLogarithmsQuestion(input: {
       katexQuestion,
       katexExplanation,
       expectedNumber: x,
-      expectedLatex: String.raw`${x}`,
+      expectedLatex: String.raw`${xStr}`,
     };
   }
 

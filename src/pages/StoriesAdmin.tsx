@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { v4 as uuidv4 } from 'uuid';
 import { useLocation, useNavigate } from 'react-router-dom';
@@ -21,7 +21,7 @@ import {
 	AlertDialogHeader,
 	AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
-import { Pencil, Plus, Trash2, BarChart3, Users } from 'lucide-react';
+import { Pencil, Plus, Trash2, BarChart3, Users, Download, Upload } from 'lucide-react';
 import { toast } from 'sonner';
 
 export default function StoriesAdmin() {
@@ -81,6 +81,138 @@ export default function StoriesAdmin() {
 	const [deleteOpen, setDeleteOpen] = useState(false);
 	const [deleteCourseId, setDeleteCourseId] = useState<string | null>(null);
 	const [deleteCourseTitle, setDeleteCourseTitle] = useState<string>('');
+
+	const importCourseInputRef = useRef<HTMLInputElement | null>(null);
+	const [isImportingCourse, setIsImportingCourse] = useState(false);
+
+	const downloadJson = async (defaultFileName: string, data: any) => {
+		const dataText = JSON.stringify(data, null, 2);
+		if (window.data?.exportJsonToFile) {
+			const res = await window.data.exportJsonToFile({ defaultFileName, dataText });
+			if (res?.canceled) return;
+			return;
+		}
+		const blob = new Blob([dataText], { type: 'application/json' });
+		const url = URL.createObjectURL(blob);
+		const a = document.createElement('a');
+		a.href = url;
+		a.download = defaultFileName;
+		a.click();
+		URL.revokeObjectURL(url);
+	};
+
+	const readJsonFile = async (file: File): Promise<any> => {
+		const text = await new Promise<string>((resolve, reject) => {
+			const reader = new FileReader();
+			reader.onerror = () => reject(new Error('Failed to read file'));
+			reader.onload = () => resolve(String(reader.result ?? ''));
+			reader.readAsText(file);
+		});
+		return JSON.parse(text);
+	};
+
+	const exportCourse = async (courseId: string) => {
+		try {
+			const course = await db.storyCourses.get(courseId);
+			if (!course) {
+				toast.error('Course not found');
+				return;
+			}
+			const chapters = await db.storyChapters.where('courseId').equals(courseId).toArray();
+			const ordered = chapters.slice().sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+			const data = {
+				kind: 'story_course_export',
+				schemaVersion: 1,
+				exportedAt: new Date().toISOString(),
+				course,
+				chapters: ordered,
+			};
+
+			const now = new Date();
+			const yyyy = now.getFullYear();
+			const mm = String(now.getMonth() + 1).padStart(2, '0');
+			const dd = String(now.getDate()).padStart(2, '0');
+			const hh = String(now.getHours()).padStart(2, '0');
+			const min = String(now.getMinutes()).padStart(2, '0');
+			const timestampPart = `${yyyy}${mm}${dd}-${hh}${min}`;
+			const safeTitle = String(course.title || 'course').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+			const fileName = `MathInk-course-${safeTitle || 'course'}-${timestampPart}.json`;
+			await downloadJson(fileName, data);
+			toast.success('Course exported');
+		} catch (e) {
+			console.error(e);
+			toast.error('Failed to export course');
+		}
+	};
+
+	const importCourseFromFile = async (file: File) => {
+		setIsImportingCourse(true);
+		try {
+			const data = await readJsonFile(file);
+			if (!data || typeof data !== 'object') {
+				toast.error('Invalid file');
+				return;
+			}
+			if (String((data as any).kind ?? '') !== 'story_course_export') {
+				toast.error('Unsupported file type');
+				return;
+			}
+			const srcCourse = (data as any).course as StoryCourse | undefined;
+			const srcChapters = (data as any).chapters as StoryChapter[] | undefined;
+			if (!srcCourse || !Array.isArray(srcChapters)) {
+				toast.error('Missing course/chapters');
+				return;
+			}
+
+			const now = Date.now();
+			const newCourseId = uuidv4();
+			const chapterIdMap = new Map<string, string>();
+			for (const ch of srcChapters) {
+				chapterIdMap.set(ch.id, uuidv4());
+			}
+
+			const chaptersOrdered = srcChapters.slice().sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+			const nextChapterIds = chaptersOrdered.map((ch) => chapterIdMap.get(ch.id)!).filter(Boolean);
+
+			const courseRow: StoryCourse = {
+				...srcCourse,
+				id: newCourseId,
+				title: String(srcCourse.title || 'Course') + ' (imported)',
+				description: srcCourse.description,
+				chapterIds: nextChapterIds,
+				assignedUserIds: [],
+				visible: srcCourse.visible !== false,
+				createdAt: now,
+				updatedAt: now,
+			};
+
+			const chapterRows: StoryChapter[] = chaptersOrdered.map((ch, idx) => {
+				const newId = chapterIdMap.get(ch.id)!;
+				return {
+					...ch,
+					id: newId,
+					courseId: newCourseId,
+					order: idx + 1,
+					createdAt: now,
+					updatedAt: now,
+				};
+			});
+
+			await db.transaction('rw', db.storyCourses, db.storyChapters, async () => {
+				await db.storyCourses.add(courseRow);
+				if (chapterRows.length) await db.storyChapters.bulkAdd(chapterRows);
+			});
+
+			toast.success('Course imported');
+			navigate(`/stories-admin/course/${newCourseId}`);
+		} catch (e) {
+			console.error(e);
+			toast.error('Failed to import course');
+		} finally {
+			setIsImportingCourse(false);
+			if (importCourseInputRef.current) importCourseInputRef.current.value = '';
+		}
+	};
 
 	const onCreateCourse = async () => {
 		const t = title.trim();
@@ -175,6 +307,24 @@ export default function StoriesAdmin() {
 					<div className="text-muted-foreground mt-2">Create and manage courses/chapters.</div>
 				</div>
 				<div className="flex gap-2">
+					<input
+						ref={importCourseInputRef}
+						type="file"
+						accept="application/json"
+						className="hidden"
+						onChange={(e) => {
+							const file = e.target.files && e.target.files[0];
+							if (!file) return;
+							void importCourseFromFile(file);
+						}}
+					/>
+					<Button
+						variant="outline"
+						disabled={isImportingCourse}
+						onClick={() => importCourseInputRef.current?.click()}
+					>
+						<Upload className="h-4 w-4 mr-2" /> Import course
+					</Button>
 					<Button variant="outline" onClick={() => navigate('/stories-admin/analytics')}>
 						<BarChart3 className="h-4 w-4 mr-2" /> Analytics
 					</Button>
@@ -251,6 +401,14 @@ export default function StoriesAdmin() {
 												<TableCell className="text-right">{c.visible === false ? 'No' : 'Yes'}</TableCell>
 												<TableCell className="text-right">
 													<div className="flex justify-end gap-2">
+														<Button
+															size="icon"
+															variant="outline"
+															aria-label="Export course"
+															onClick={() => void exportCourse(c.id)}
+														>
+															<Download className="h-4 w-4" />
+														</Button>
 														<Button
 															size="icon"
 															variant="outline"
