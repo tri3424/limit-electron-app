@@ -53,7 +53,7 @@ jobs:
       - name: Verify installer for this version exists
         shell: pwsh
         run: |
-          $expected = "MathInk-Setup-$env:BUILD_VERSION.exe"
+          $expected = "MathInk Setup-$env:BUILD_VERSION.exe"
           $path = Join-Path -Path "dist" -ChildPath $expected
           if (-not (Test-Path $path)) {
             Write-Output "Expected installer not found: $path"
@@ -74,5 +74,4 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: Limit-Windows-${{ steps.build_version.outputs.version }}-${{ github.sha }}
-          path: dist/MathInk-Setup-${{ steps.build_version.outputs.version }}.exe
-
+          path: dist/MathInk Setup-${{ steps.build_version.outputs.version }}.exe

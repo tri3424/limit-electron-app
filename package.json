@@ -1,7 +1,7 @@
 {
   "name": "mathink",
   "private": true,
-  "version": "1.0.12",
+  "version": "1.5.4",
   "description": "MathInk Desktop Application",
   "type": "module",
   "main": "electron/main.cjs",
@@ -129,7 +129,7 @@
   "build": {
     "appId": "com.subhadeep.mathink",
     "productName": "MathInk",
-    "artifactName": "MathInk-Setup-${version}.${ext}",
+    "artifactName": "MathInk Setup-${version}.${ext}",
     "directories": {
       "output": "dist",
       "buildResources": "build-resources"

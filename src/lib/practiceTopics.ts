@@ -97,7 +97,7 @@ export const PRACTICE_TOPICS: PracticeTopic[] = [
   },
   {
     id: 'graph_straight_line',
-    title: 'Graphs: Straight Line',
+    title: 'Graphs',
     description: 'Interpret straight-line graphs (MCQ).',
     enabled: true,
     difficulties: ['easy', 'medium', 'hard', 'ultimate'],

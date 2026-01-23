@@ -468,26 +468,21 @@ export function Layout({ children }: LayoutProps) {
       {/* Top Navigation */}
       <header className="z-40 border-b border-border/70 bg-gradient-to-r from-primary via-accent to-primary text-primary-foreground shadow-sm backdrop-blur supports-[backdrop-filter]:bg-opacity-90">
         <div className="max-w-7xl mx-auto h-16 md:h-18 px-3 md:px-4 flex items-center justify-between">
-          {/* Left: logo / brand */}
-          <div className="flex items-center gap-2">
-            <Link to={HOME_ROUTE} className="flex items-center gap-2">
-              						<span className="tk-app-icon" aria-label="MathInk">
-							<span className="tk-app-icon-tile tk-app-icon-tile-1" aria-hidden="true">+</span>
-							<span className="tk-app-icon-tile tk-app-icon-tile-2" aria-hidden="true">−</span>
-							<span className="tk-app-icon-tile tk-app-icon-tile-3" aria-hidden="true">×</span>
-							<span className="tk-app-icon-tile tk-app-icon-tile-4" aria-hidden="true">=</span>
-						</span>
-						<span className="tk-logo-font tk-logo-interactive text-xl md:text-2xl font-extrabold tracking-tight drop-shadow-[0_2px_2px_rgba(0,0,0,0.35)]">
-							<span className="bg-gradient-to-b from-cyan-200 to-sky-200 bg-clip-text text-transparent">M</span>
-							<span className="bg-gradient-to-b from-emerald-200 to-lime-200 bg-clip-text text-transparent">a</span>
+          									{/* Left: logo / brand */}
+									<div className="flex items-center gap-2">
+										<Link to={HOME_ROUTE} className="flex items-center gap-2">
+														<img className="tk-app-favicon" src="/favicon.ico" alt="MathInk" />
+														<span className="tk-logo-font tk-logo-interactive text-xl md:text-2xl font-extrabold tracking-tight drop-shadow-[0_2px_2px_rgba(0,0,0,0.35)]">
+															<span className="bg-gradient-to-b from-cyan-200 to-sky-200 bg-clip-text text-transparent">M</span>
+															<span className="bg-gradient-to-b from-emerald-200 to-lime-200 bg-clip-text text-transparent">a</span>
                 <span className="bg-gradient-to-b from-amber-200 to-yellow-200 bg-clip-text text-transparent">t</span>
                 <span className="bg-gradient-to-b from-orange-200 to-rose-200 bg-clip-text text-transparent">h</span>
                 <span className="bg-gradient-to-b from-violet-300 to-fuchsia-400 bg-clip-text text-transparent">I</span>
                 <span className="bg-gradient-to-b from-sky-200 to-cyan-200 bg-clip-text text-transparent">n</span>
                 <span className="bg-gradient-to-b from-emerald-200 to-teal-200 bg-clip-text text-transparent">k</span>
               </span>
-            </Link>
-          </div>
+										</Link>
+									</div>
 
           {/* Right: primary navigation and user info */}
           <div className="flex items-center gap-2">

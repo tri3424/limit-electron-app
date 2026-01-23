@@ -244,6 +244,9 @@ export default function SettingsPracticeAdminFrequency() {
               { key: 'mcq_graph_equation', label: 'Graph -> equation (MCQ)', defaultValue: 50 },
               { key: 'y_intercept_from_equation', label: 'y-intercept from equation', defaultValue: 40 },
               { key: 'gradient_from_equation', label: 'gradient from equation', defaultValue: 10 },
+              { key: 'line_circle_intersections_coords_ab', label: 'Line meets curve: coordinates of A and B', defaultValue: 0 },
+              { key: 'line_circle_intersections_length_ab', label: 'Line meets curve: length of AB', defaultValue: 0 },
+              { key: 'line_circle_intersections_midpoint_ab', label: 'Line meets curve: midpoint of AB', defaultValue: 0 },
             ],
           };
         }

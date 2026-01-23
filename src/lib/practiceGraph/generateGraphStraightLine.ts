@@ -123,6 +123,36 @@ function lineToKatex(m: number, d: number) {
   return `y = ${mPart}${dPart}`;
 }
 
+function fmtLineAxByC(input: { a: number; b: number; c: number }) {
+  const { a, b, c } = input;
+  const aPart = a === 0 ? '' : (a === 1 ? 'x' : a === -1 ? '-x' : `${a}x`);
+  const bPartRaw = b === 0 ? '' : (b === 1 ? 'y' : b === -1 ? '-y' : `${b}y`);
+  const bPart = bPartRaw ? (aPart ? (b > 0 ? ` + ${bPartRaw}` : ` - ${bPartRaw.replace('-', '')}`) : bPartRaw) : '';
+  const lhs = `${aPart}${bPart}`.trim() || '0';
+  return `${lhs} = ${c}`;
+}
+
+function fmtCircleFromDiameter(input: { ax: number; ay: number; bx: number; by: number }) {
+  const { ax, ay, bx, by } = input;
+  // Circle with diameter AB:
+  // (x-ax)(x-bx) + (y-ay)(y-by) = 0
+  // => x^2 + y^2 - (ax+bx)x - (ay+by)y + (ax*bx + ay*by) = 0
+  const sx = ax + bx;
+  const sy = ay + by;
+  const k = ax * bx + ay * by;
+
+  const xTerm = sx === 0 ? '' : sx > 0 ? ` - ${sx}x` : ` + ${Math.abs(sx)}x`;
+  const yTerm = sy === 0 ? '' : sy > 0 ? ` - ${sy}y` : ` + ${Math.abs(sy)}y`;
+  const cTerm = k === 0 ? '' : k > 0 ? ` + ${k}` : ` - ${Math.abs(k)}`;
+  return `x^2 + y^2${xTerm}${yTerm}${cTerm} = 0`;
+}
+
+function normalizeIntTriple(a: number, b: number, c: number) {
+  // Make a,b,c reasonably small / consistent sign.
+  const sign = (a < 0 || (a === 0 && b < 0)) ? -1 : 1;
+  return { a: a * sign, b: b * sign, c: c * sign };
+}
+
 export function generateGraphStraightLineMcq(input: {
   topicId: PracticeTopicId;
   difficulty: PracticeDifficulty;
@@ -138,25 +168,286 @@ export function generateGraphStraightLineMcq(input: {
     const wMcq = Math.max(0, Number(w.mcq_graph_equation ?? 0));
     const wYInt = Math.max(0, Number(w.y_intercept_from_equation ?? 0));
     const wGrad = Math.max(0, Number(w.gradient_from_equation ?? 0));
-    const total = wMcq + wYInt + wGrad;
+    const wCoords = Math.max(0, Number((w as any).line_circle_intersections_coords_ab ?? 0));
+    const wLen = Math.max(0, Number((w as any).line_circle_intersections_length_ab ?? 0));
+    const wMid = Math.max(0, Number((w as any).line_circle_intersections_midpoint_ab ?? 0));
+    const total = wMcq + wYInt + wGrad + wCoords + wLen + wMid;
 
     if (total > 0) {
       const r = rng.next() * total;
       if (r < wMcq) return 'mcq_graph_equation';
       if (r < wMcq + wYInt) return 'y_intercept_from_equation';
-      return 'gradient_from_equation';
+      if (r < wMcq + wYInt + wGrad) return 'gradient_from_equation';
+      if (r < wMcq + wYInt + wGrad + wCoords) return 'line_circle_intersections_coords_ab';
+      if (r < wMcq + wYInt + wGrad + wCoords + wLen) return 'line_circle_intersections_length_ab';
+      return 'line_circle_intersections_midpoint_ab';
     }
 
     const roll = rng.int(0, 9);
     if (input.difficulty === 'easy') {
       // Make y-intercept questions more common than slope questions.
-      return roll < 4 ? 'mcq_graph_equation' : roll < 9 ? 'y_intercept_from_equation' : 'gradient_from_equation';
+      return roll < 4
+        ? 'mcq_graph_equation'
+        : roll < 9
+          ? 'y_intercept_from_equation'
+          : 'gradient_from_equation';
     }
     if (input.difficulty === 'medium') {
-      return roll < 5 ? 'mcq_graph_equation' : roll < 9 ? 'y_intercept_from_equation' : 'gradient_from_equation';
+      return roll < 5
+        ? 'mcq_graph_equation'
+        : roll < 9
+          ? 'y_intercept_from_equation'
+          : 'gradient_from_equation';
     }
-    return roll < 5 ? 'mcq_graph_equation' : roll < 9 ? 'y_intercept_from_equation' : 'gradient_from_equation';
+    // For hard/ultimate, allow the AB-intersection family occasionally.
+    if (roll <= 5) return 'mcq_graph_equation';
+    if (roll <= 7) return 'y_intercept_from_equation';
+    if (roll === 8) return 'gradient_from_equation';
+    return rng.int(0, 2) === 0
+      ? 'line_circle_intersections_coords_ab'
+      : rng.int(0, 1) === 0
+        ? 'line_circle_intersections_length_ab'
+        : 'line_circle_intersections_midpoint_ab';
   })();
+
+  if (variant.startsWith('line_circle_intersections_')) {
+    // Build an easy-to-solve configuration:
+    // - Choose integer points A and B such that |AB| is an integer.
+    // - Define the circle with diameter AB (guarantees A and B are intersection points).
+    // - Define the line passing through A and B.
+
+    const triples: Array<{ dx: number; dy: number }> =
+      input.difficulty === 'easy'
+        ? [
+            { dx: 3, dy: 4 },
+            { dx: 4, dy: 3 },
+            { dx: 6, dy: 8 },
+            { dx: 8, dy: 6 },
+          ]
+        : input.difficulty === 'medium'
+          ? [
+              { dx: 3, dy: 4 },
+              { dx: 4, dy: 3 },
+              { dx: 5, dy: 12 },
+              { dx: 12, dy: 5 },
+              { dx: 6, dy: 8 },
+              { dx: 8, dy: 6 },
+            ]
+          : [
+              { dx: 3, dy: 4 },
+              { dx: 4, dy: 3 },
+              { dx: 5, dy: 12 },
+              { dx: 12, dy: 5 },
+              { dx: 7, dy: 24 },
+              { dx: 24, dy: 7 },
+              { dx: 8, dy: 15 },
+              { dx: 15, dy: 8 },
+            ];
+
+    const pick = triples[rng.int(0, triples.length - 1)]!;
+    const sx = input.difficulty === 'easy' ? 5 : input.difficulty === 'medium' ? 7 : 10;
+    const sy = input.difficulty === 'easy' ? 5 : input.difficulty === 'medium' ? 7 : 10;
+    const ax = rng.int(-sx, sx);
+    const ay = rng.int(-sy, sy);
+    const bx = ax + pick.dx;
+    const by = ay + pick.dy;
+
+    const dx = bx - ax;
+    const dy = by - ay;
+    const lengthAB = Math.sqrt(dx * dx + dy * dy);
+
+    // Line through A and B: dy*x - dx*y = dy*ax - dx*ay
+    const line0 = normalizeIntTriple(dy, -dx, dy * ax - dx * ay);
+    const lineEq = fmtLineAxByC(line0);
+    const circleEq = fmtCircleFromDiameter({ ax, ay, bx, by });
+
+    const midX = (ax + bx) / 2;
+    const midY = (ay + by) / 2;
+
+    // Graph spec (static in explanation): plot circle + line + mark A,B.
+    const cx = midX;
+    const cy = midY;
+    const r = lengthAB / 2;
+
+    const pad = input.difficulty === 'easy' ? 4 : input.difficulty === 'medium' ? 5 : 6;
+    const xMin = Math.floor(Math.min(ax, bx, cx - r) - pad);
+    const xMax = Math.ceil(Math.max(ax, bx, cx + r) + pad);
+    const yMin = Math.floor(Math.min(ay, by, cy - r) - pad);
+    const yMax = Math.ceil(Math.max(ay, by, cy + r) + pad);
+
+    const circlePts: Array<{ x: number; y: number }> = [];
+    const n = 240;
+    for (let i = 0; i <= n; i++) {
+      const t = (i / n) * Math.PI * 2;
+      circlePts.push({ x: cx + r * Math.cos(t), y: cy + r * Math.sin(t) });
+    }
+
+    // Avoid vertical line configurations (dx=0) in our triples, but still keep fallback.
+    const lineFn = dx === 0
+      ? ((x: number) => Number.NaN)
+      : ((x: number) => (dy / dx) * (x - ax) + ay);
+
+    const graphSpec = {
+      width: 720,
+      height: 520,
+      window: { xMin, xMax, yMin, yMax },
+      equalAspect: true,
+      caption: 'Line and circle intersect at points A and B',
+      plot: [
+        { kind: 'polyline' as const, points: circlePts, stroke: '#2563eb', strokeWidth: 2 },
+        ...(dx === 0
+          ? [{ kind: 'polyline' as const, points: [{ x: ax, y: yMin }, { x: ax, y: yMax }], stroke: '#dc2626', strokeWidth: 2 }]
+          : [{ kind: 'function' as const, fn: lineFn, stroke: '#dc2626', strokeWidth: 2 }]),
+        { kind: 'point' as const, at: { x: ax, y: ay }, r: 4, fill: '#111827' },
+        { kind: 'point' as const, at: { x: bx, y: by }, r: 4, fill: '#111827' },
+        { kind: 'label' as const, at: { x: ax + 0.4, y: ay + 0.4 }, text: 'A', fill: '#111827', fontSize: 16 },
+        { kind: 'label' as const, at: { x: bx + 0.4, y: by + 0.4 }, text: 'B', fill: '#111827', fontSize: 16 },
+      ],
+    };
+
+    const promptBlocksBase = [
+      { kind: 'text' as const, content: 'The line ' },
+      { kind: 'math' as const, content: lineEq },
+      { kind: 'text' as const, content: ' meets the curve ' },
+      { kind: 'math' as const, content: circleEq },
+      { kind: 'text' as const, content: ' at the points ' },
+      { kind: 'math' as const, content: 'A' },
+      { kind: 'text' as const, content: ' and ' },
+      { kind: 'math' as const, content: 'B' },
+      { kind: 'text' as const, content: '.' },
+    ];
+
+    const promptKatexBase = String.raw`\text{The line }${lineEq}\text{ meets the curve }${circleEq}\text{ at the points }A\text{ and }B.`;
+
+    if (variant === 'line_circle_intersections_coords_ab') {
+      return {
+        kind: 'graph',
+        id: stableId('graph-straight-line', input.seed, `line-circle-coords-${ax}-${ay}-${bx}-${by}`),
+        topicId: 'graph_straight_line',
+        difficulty: input.difficulty,
+        seed: input.seed,
+        katexQuestion: '',
+        generatorParams: {
+          kind: variant,
+          graphInExplanationOnly: true,
+          expectedParts: [ax, ay, bx, by],
+          expectedPartsOrdered: true,
+          expectedTolerance: 0.02,
+        },
+        promptText: '',
+        promptBlocks: [
+          ...promptBlocksBase,
+          { kind: 'text' as const, content: ' Find the coordinates of ' },
+          { kind: 'math' as const, content: 'A' },
+          { kind: 'text' as const, content: ' and ' },
+          { kind: 'math' as const, content: 'B' },
+          { kind: 'text' as const, content: '.' },
+        ],
+        promptKatex: undefined,
+        inputFields: [
+          { id: 'xA', label: String.raw`x_{A}`, kind: 'number' },
+          { id: 'yA', label: String.raw`y_{A}`, kind: 'number' },
+          { id: 'xB', label: String.raw`x_{B}`, kind: 'number' },
+          { id: 'yB', label: String.raw`y_{B}`, kind: 'number' },
+        ],
+        graphSpec,
+        svgDataUrl: '',
+        svgAltText: 'A circle and a straight line intersecting at two points labeled A and B.',
+        katexExplanation: {
+          steps: [
+            { katex: promptKatexBase, text: 'We are told that A and B are the intersection points, so they satisfy both equations (the line and the curve).' },
+            { katex: String.raw`\text{Solve simultaneously by substitution.}`, text: 'Use the line equation to express one variable in terms of the other, then substitute into the curve.' },
+            { katex: String.raw`\text{Line: }${lineEq}`, text: 'Rearrange the line to make substitution straightforward.' },
+            { katex: String.raw`\text{Curve: }${circleEq}`, text: 'Substitute from the line into the curve to get a quadratic in one variable.' },
+            { katex: String.raw`\Rightarrow\ (x,y)=(${ax},${ay})\ \text{or}\ (x,y)=(${bx},${by})`, text: 'The two solutions correspond to the two intersection points A and B.' },
+            { katex: String.raw`A=(${ax},${ay}),\quad B=(${bx},${by})`, text: 'Report both intersection points as coordinates.' },
+          ],
+          summary: 'At intersections, both equations hold. Substitute the line into the curve to get two solutions (A and B).',
+        },
+      };
+    }
+
+    if (variant === 'line_circle_intersections_length_ab') {
+      return {
+        kind: 'graph',
+        id: stableId('graph-straight-line', input.seed, `line-circle-length-${ax}-${ay}-${bx}-${by}`),
+        topicId: 'graph_straight_line',
+        difficulty: input.difficulty,
+        seed: input.seed,
+        katexQuestion: '',
+        generatorParams: {
+          kind: variant,
+          graphInExplanationOnly: true,
+          expectedValue: lengthAB,
+        },
+        promptText: '',
+        promptBlocks: [
+          ...promptBlocksBase,
+          { kind: 'text' as const, content: ' Find the length of the line ' },
+          { kind: 'math' as const, content: 'AB' },
+          { kind: 'text' as const, content: '.' },
+        ],
+        promptKatex: undefined,
+        inputFields: [{ id: 'ans', label: 'Length of AB', kind: 'number' }],
+        graphSpec,
+        svgDataUrl: '',
+        svgAltText: 'A circle and a straight line intersecting at two points labeled A and B.',
+        katexExplanation: {
+          steps: [
+            { katex: promptKatexBase, text: 'To find the length AB, first determine the intersection points A and B (they satisfy both equations).' },
+            { katex: String.raw`A=(${ax},${ay}),\quad B=(${bx},${by})`, text: 'Solving the simultaneous equations gives these two points.' },
+            { katex: String.raw`AB = \sqrt{(x_B-x_A)^2 + (y_B-y_A)^2}`, text: 'Use the distance formula between two points.' },
+            { katex: String.raw`AB = \sqrt{(${bx}-${ax})^2 + (${by}-${ay})^2}`, text: 'Substitute the coordinate differences.' },
+            { katex: String.raw`AB = \sqrt{${dx * dx} + ${dy * dy}} = ${Number(lengthAB.toFixed(6))}`, text: 'Compute the magnitude of the displacement.' },
+            { katex: String.raw`\boxed{AB = ${Number(lengthAB.toFixed(6))}}`, text: 'So the length of AB is the magnitude shown above.' },
+          ],
+          summary: String.raw`\text{Find }A\text{ and }B\text{, then apply the distance formula }AB = \sqrt{(x_{B}-x_{A})^2 + (y_{B}-y_{A})^2}.`,
+        },
+      };
+    }
+
+    // midpoint
+    return {
+      kind: 'graph',
+      id: stableId('graph-straight-line', input.seed, `line-circle-mid-${ax}-${ay}-${bx}-${by}`),
+      topicId: 'graph_straight_line',
+      difficulty: input.difficulty,
+      seed: input.seed,
+      katexQuestion: '',
+      generatorParams: {
+        kind: variant,
+        graphInExplanationOnly: true,
+        expectedParts: [midX, midY],
+        expectedPartsOrdered: true,
+        expectedTolerance: 0.02,
+      },
+      promptText: '',
+      promptBlocks: [
+        ...promptBlocksBase,
+        { kind: 'text' as const, content: ' Find the midpoint of the line ' },
+        { kind: 'math' as const, content: 'AB' },
+        { kind: 'text' as const, content: '.' },
+      ],
+      promptKatex: undefined,
+      inputFields: [
+        { id: 'mx', label: 'x-coordinate of midpoint', kind: 'number' },
+        { id: 'my', label: 'y-coordinate of midpoint', kind: 'number' },
+      ],
+      graphSpec,
+      svgDataUrl: '',
+      svgAltText: 'A circle and a straight line intersecting at two points labeled A and B.',
+      katexExplanation: {
+        steps: [
+          { katex: promptKatexBase, text: 'The midpoint is halfway between A and B. First identify A and B by solving the simultaneous equations.' },
+          { katex: String.raw`A=(${ax},${ay}),\quad B=(${bx},${by})`, text: 'These are the intersection points.' },
+          { katex: String.raw`M = \left(\frac{x_A+x_B}{2},\frac{y_A+y_B}{2}\right)`, text: 'Use the midpoint formula.' },
+          { katex: String.raw`M = \left(\frac{${ax}+${bx}}{2},\frac{${ay}+${by}}{2}\right)`, text: 'Substitute the coordinates.' },
+          { katex: String.raw`M = (${midX},${midY})`, text: 'This is the midpoint of segment AB.' },
+        ],
+        summary: String.raw`\text{Once }A\text{ and }B\text{ are known, the midpoint is }\left(\frac{x_{A}+x_{B}}{2},\frac{y_{A}+y_{B}}{2}\right).`,
+      },
+    };
+  }
 
   if (variant !== 'mcq_graph_equation') {
     const slopeRange = input.difficulty === 'easy' ? 5 : input.difficulty === 'medium' ? 7 : 9;

@@ -189,6 +189,7 @@ export type GraphPracticeQuestion = {
   kind: 'graph';
   generatorParams: Record<string, any>;
   promptText: string;
+  promptBlocks?: Array<{ kind: 'text'; content: string } | { kind: 'math'; content: string }>;
   promptKatex?: string;
   katexOptions?: string[];
   correctIndex?: number;

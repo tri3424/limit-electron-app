@@ -91,7 +91,14 @@ const PRACTICE_VARIANTS: Partial<Record<PracticeTopicId, string[]>> = {
     'committee_men_women',
   ],
   polynomials: ['factor_theorem'],
-  graph_straight_line: ['mcq_graph_equation', 'y_intercept_from_equation', 'gradient_from_equation'],
+  graph_straight_line: [
+    'mcq_graph_equation',
+    'y_intercept_from_equation',
+    'gradient_from_equation',
+    'line_circle_intersections_coords_ab',
+    'line_circle_intersections_length_ab',
+    'line_circle_intersections_midpoint_ab',
+  ],
   word_problems: [
     'mensuration_cuboid_height',
     'probability_complement',
@@ -2811,6 +2818,7 @@ export default function Practice() {
 
           const tol = typeof gp.expectedTolerance === 'number' ? Number(gp.expectedTolerance) : 0.02;
           const fmt = String(gp.expectedFormat ?? '');
+          const ordered = gp.expectedPartsOrdered === true;
 
           const toSigFigs = (n: number, sf: number) => {
             const x = Number(n);
@@ -2825,6 +2833,15 @@ export default function Practice() {
           const norm = (n: number) => (fmt === 'sigfig_4' ? toSigFigs(n, 4) : n);
           const exp = expectedParts.map(norm);
           const usr = userNums.map(norm);
+
+          if (ordered) {
+            // Compare in fixed order (useful for labeled multi-input answers like X_A, Y_A, X_B, Y_B).
+            for (let i = 0; i < exp.length; i++) {
+              const d = Math.abs((usr[i] ?? Number.NaN) - exp[i]!);
+              if (!Number.isFinite(d) || d > tol) return false;
+            }
+            return true;
+          }
 
           // Order does not matter: greedily match each expected value to a remaining user value.
           const remaining = usr.slice();
@@ -3516,6 +3533,31 @@ export default function Practice() {
             <div className="mt-6 w-full">
               {(question as any).kind === 'graph' ? (
                 <div className="w-full select-none">
+                  {(() => {
+                    const pb = (question as any).promptBlocks as any[] | undefined;
+                    if (!Array.isArray(pb) || !pb.length) return null;
+                    return (
+                      <div className="tk-wp-expl-text font-slab w-full min-w-0 max-w-full overflow-x-hidden text-xl md:text-2xl leading-snug text-center text-foreground whitespace-normal break-words">
+                        <span className="inline-flex flex-wrap items-baseline justify-center gap-x-1 gap-y-1">
+                          {pb.map((b, i) => {
+                            if (b?.kind === 'math') {
+                              return (
+                                <span key={`gm-${i}`} className="inline-block align-baseline max-w-full">
+                                  <Katex latex={String(b.content ?? '')} displayMode={false} />
+                                </span>
+                              );
+                            }
+                            return (
+                              <span key={`gt-${i}`} className="whitespace-normal">
+                                {String(b?.content ?? '')}
+                              </span>
+                            );
+                          })}
+                        </span>
+                      </div>
+                    );
+                  })()}
+
                   {(question as GraphPracticeQuestion).promptText ? (
                     <div className={`tk-wp-expl-text w-full min-w-0 max-w-full overflow-x-hidden text-xl md:text-2xl leading-snug text-left text-foreground whitespace-normal break-words ${(question as any).topicId === 'clock_reading' ? 'font-slab' : ''}`}>
                       {(() => {
@@ -4018,8 +4060,16 @@ export default function Practice() {
                       );
                     })()
                   : (
-                      <div className="max-w-sm mx-auto space-y-3">
-                        {(question as GraphPracticeQuestion).inputFields!.map((f, idx) => {
+                      (() => {
+                        const gq = question as GraphPracticeQuestion;
+                        const gp = (gq.generatorParams ?? {}) as any;
+                        const fields = gq.inputFields ?? [];
+                        const isABCoords =
+                          gp?.kind === 'line_circle_intersections_coords_ab'
+                          && fields.length === 4
+                          && fields.every((f) => typeof f?.label === 'string' && /_\{?[AB]\}?/.test(String(f.label)));
+
+                        const renderField = (f: any, idx: number) => {
                           const values = [answer1, answer2, answer3, ...extraAnswers];
                           const value = values[idx] ?? '';
                           const setValue = (next: string) => {
@@ -4034,9 +4084,15 @@ export default function Practice() {
                               return out;
                             });
                           };
+
+                          const labelRaw = String(f?.label ?? '');
+                          const labelHasMath = /[_^\\]/.test(labelRaw);
+
                           return (
-                            <div key={f.id} className="space-y-1">
-                              <Label className="text-xs text-muted-foreground">{f.label}</Label>
+                            <div key={String(f.id ?? idx)} className="space-y-1">
+                              <Label className="text-xs text-muted-foreground">
+                                {labelHasMath ? <Katex latex={labelRaw} displayMode={false} /> : labelRaw}
+                              </Label>
                               {f.kind === 'text' ? (
                                 <MathLiveInput
                                   value={value}
@@ -4050,10 +4106,10 @@ export default function Practice() {
                                   value={value}
                                   inputMode="decimal"
                                   onChange={(e) => {
-                                    const gp = ((question as GraphPracticeQuestion).generatorParams ?? {}) as any;
-                                    const fixed2 = gp.expectedFormat === 'fixed2';
-                                    const forbidPi = gp.expectedForbidPi === true;
-                                    const maxDecimals = fixed2 ? 2 : (gp.expectedFormat === 'sigfig_4' ? 4 : undefined);
+                                    const gp2 = ((question as GraphPracticeQuestion).generatorParams ?? {}) as any;
+                                    const fixed2 = gp2.expectedFormat === 'fixed2';
+                                    const forbidPi = gp2.expectedForbidPi === true;
+                                    const maxDecimals = fixed2 ? 2 : (gp2.expectedFormat === 'sigfig_4' ? 4 : undefined);
                                     const raw = e.target.value;
                                     if (forbidPi && /pi|π/i.test(raw)) {
                                       const cleaned = raw.replace(/pi/gi, '').replace(/π/g, '');
@@ -4070,8 +4126,22 @@ export default function Practice() {
                               )}
                             </div>
                           );
-                        })}
-                      </div>
+                        };
+
+                        if (isABCoords) {
+                          return (
+                            <div className="grid grid-cols-2 gap-3 max-w-md mx-auto">
+                              {fields.map((f, idx) => renderField(f, idx))}
+                            </div>
+                          );
+                        }
+
+                        return (
+                          <div className="max-w-sm mx-auto space-y-3">
+                            {fields.map((f, idx) => renderField(f, idx))}
+                          </div>
+                        );
+                      })()
                     ))
               ) : null}
 
@@ -4798,20 +4868,11 @@ export default function Practice() {
                         <div className="tk-wp-expl-text text-lg leading-relaxed text-foreground">
                           {(() => {
                             const s = String((question as GraphPracticeQuestion).katexExplanation.summary ?? '');
-                            const hasLatex = /\\frac\{|\^\{|\^\d|_\{|\\int\b|\\cdot\b|\\sqrt\b|\\left\b|\\right\b/.test(s);
+                            const hasLatex = /\\text\{|\\frac\{|\^\{|\^\d|_\{|\\int\b|\\cdot\b|\\sqrt\b|\\left\b|\\right\b/.test(s);
                             if (!hasLatex) return s;
-                            const parts = s.split(
-                              /(\\left\([\s\S]*?\\right\)|\\frac\{[^}]+\}\{[^}]+\}|\\cdot|\\int\b|\\sqrt\b|-?\d*x\^\{\d+\}|x\^\{\d+\}|-?\d*x\^\d+|x\^\d+)/g
-                            );
-                            return (
-                              <span>
-                                {parts.filter((p) => p.length > 0).map((p, i) => {
-                                  const isMath =
-                                    /^(\\left\([\s\S]*?\\right\)|\\frac\{[^}]+\}\{[^}]+\}|\\cdot|\\int\b|\\sqrt\b|-?\d*x\^\{\d+\}|x\^\{\d+\}|-?\d*x\^\d+|x\^\d+)$/.test(p);
-                                  return isMath ? <Katex key={i} latex={p} /> : <span key={i}>{p}</span>;
-                                })}
-                              </span>
-                            );
+
+                            // Render the whole summary as KaTeX inline. Splitting into fragments breaks commands like \text{...}.
+                            return <Katex latex={s} displayMode={false} />;
                           })()}
                         </div>
                       </div>
