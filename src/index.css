@@ -64,6 +64,8 @@
 .tk-math-inline {
   display: inline;
   max-width: 100%;
+  line-height: 1.25;
+  overflow: visible;
 }
 
 .tk-math-fit {
@@ -109,8 +111,19 @@
   scrollbar-gutter: stable;
 }
 
+ .tk-math-scroll-inline {
+   display: inline-block;
+   width: auto;
+   max-width: 100%;
+   overflow-x: auto;
+   overflow-y: hidden;
+   vertical-align: baseline;
+   position: relative;
+ }
+
  .tk-prompt-inline-math {
-   line-height: 1;
+   line-height: 1.25;
+   overflow: visible;
  }
 
  .tk-prompt-inline-math .katex {
@@ -459,57 +472,140 @@ All colors MUST be HSL.
     display: inline-flex;
     align-items: baseline;
     position: relative;
-    overflow: hidden;
-    translate: 0 0;
-    transform-origin: center;
-    transition:
-      transform 220ms cubic-bezier(0.2, 0.9, 0.2, 1.2),
-      filter 240ms ease,
-      text-shadow 240ms ease;
-    will-change: transform, filter;
+    cursor: pointer;
+    user-select: none;
+    transform-origin: left center;
+    transition: transform 200ms ease, filter 200ms ease;
     animation: tk-logo-float 2.8s ease-in-out infinite;
   }
 
-  @keyframes tk-logo-float {
-    0%,
-    100% {
-      translate: 0 0;
+  .tk-navbar-wordmark {
+    letter-spacing: -0.02em;
+    line-height: 1;
+    display: inline-block;
+    padding: 0px;
+    background: transparent;
+    border: none;
+    text-shadow: 0 0 10px rgba(255, 255, 255, 0.18);
+    color: inherit;
+    filter: drop-shadow(0 0 12px rgba(255, 255, 255, 0.14));
+    opacity: 0;
+    transform: translateY(6px);
+    animation: tk-navbar-wordmark-intro 780ms cubic-bezier(0.2, 0.9, 0.2, 1) both;
+    will-change: opacity, transform, filter;
+  }
+
+  .tk-navbar-wordmark-letter {
+    display: inline-block;
+    color: transparent;
+    -webkit-background-clip: text;
+    background-clip: text;
+    background-size: 120% 100%;
+    background-position: 50% 0;
+    text-shadow: 0 0 12px rgba(255, 255, 255, 0.22);
+  }
+
+  .tk-navbar-wordmark-letter:nth-child(1) {
+    background-image: linear-gradient(
+      135deg,
+      rgba(255, 255, 255, 0.99) 0%,
+      rgba(134, 239, 172, 0.98) 38%,
+      rgba(34, 211, 238, 0.98) 62%,
+      rgba(236, 254, 255, 0.99) 100%
+    );
+  }
+  .tk-navbar-wordmark-letter:nth-child(2) {
+    background-image: linear-gradient(
+      135deg,
+      rgba(255, 255, 255, 0.99) 0%,
+      rgba(125, 211, 252, 0.98) 38%,
+      rgba(45, 212, 191, 0.98) 62%,
+      rgba(236, 254, 255, 0.99) 100%
+    );
+  }
+  .tk-navbar-wordmark-letter:nth-child(3) {
+    background-image: linear-gradient(
+      135deg,
+      rgba(255, 255, 255, 0.99) 0%,
+      rgba(110, 231, 183, 0.98) 38%,
+      rgba(250, 204, 21, 0.92) 62%,
+      rgba(236, 254, 255, 0.99) 100%
+    );
+  }
+  .tk-navbar-wordmark-letter:nth-child(4) {
+    background-image: linear-gradient(
+      135deg,
+      rgba(255, 255, 255, 0.99) 0%,
+      rgba(253, 230, 138, 0.96) 36%,
+      rgba(52, 211, 153, 0.98) 64%,
+      rgba(236, 254, 255, 0.99) 100%
+    );
+  }
+  .tk-navbar-wordmark-letter:nth-child(5) {
+    background-image: linear-gradient(
+      135deg,
+      rgba(255, 255, 255, 0.99) 0%,
+      rgba(103, 232, 249, 0.98) 38%,
+      rgba(167, 243, 208, 0.98) 62%,
+      rgba(236, 254, 255, 0.99) 100%
+    );
+  }
+  .tk-navbar-wordmark-letter:nth-child(6) {
+    background-image: linear-gradient(
+      135deg,
+      rgba(255, 255, 255, 0.99) 0%,
+      rgba(45, 212, 191, 0.98) 38%,
+      rgba(129, 140, 248, 0.92) 62%,
+      rgba(236, 254, 255, 0.99) 100%
+    );
+  }
+  .tk-navbar-wordmark-letter:nth-child(7) {
+    background-image: linear-gradient(
+      135deg,
+      rgba(255, 255, 255, 0.99) 0%,
+      rgba(134, 239, 172, 0.98) 36%,
+      rgba(253, 230, 138, 0.96) 64%,
+      rgba(236, 254, 255, 0.99) 100%
+    );
+  }
+
+  @keyframes tk-navbar-wordmark-intro {
+    from {
+      opacity: 0;
+      transform: translateY(6px);
+      filter: drop-shadow(0 0 0 rgba(255, 255, 255, 0));
     }
-    50% {
-      translate: 0 -1px;
+    to {
+      opacity: 1;
+      transform: translateY(0px);
+      filter: drop-shadow(0 0 12px rgba(255, 255, 255, 0.14));
     }
   }
 
-  .tk-logo-interactive > span {
-    transition: transform 180ms ease, filter 200ms ease, text-shadow 200ms ease;
-    will-change: transform;
+  .tk-navbar-wordmark::after {
+    content: '';
+    position: absolute;
+    inset: -10px -14px;
+    pointer-events: none;
+    background: radial-gradient(closest-side, rgba(255, 255, 255, 0.12), transparent 70%);
+    opacity: 0.3;
+    filter: blur(10px);
+    transform: translateZ(0);
   }
 
-  @keyframes tk-logo-letter-pop {
-    0% {
-      transform: translateY(0px) rotate(0deg) scale(1);
-    }
-    45% {
-      transform: translateY(-2px) rotate(var(--tk-rot, 0deg)) scale(1.05);
-    }
-    100% {
-      transform: translateY(-1px) rotate(calc(var(--tk-rot, 0deg) * 0.35)) scale(1.02);
-    }
+  .tk-navbar-wordmark.tk-logo-interactive {
+    animation: tk-navbar-wordmark-intro 780ms cubic-bezier(0.2, 0.9, 0.2, 1) both;
+    transition: filter 220ms ease, text-shadow 220ms ease;
   }
 
-  @keyframes tk-logo-letter-jump {
-    0% {
-      transform: translateY(0px) rotate(calc(var(--tk-rot, 0deg) * 0.25)) scale(1);
-    }
-    35% {
-      transform: translateY(-6px) rotate(var(--tk-rot, 0deg)) scale(1.06);
-    }
-    70% {
-      transform: translateY(0px) rotate(calc(var(--tk-rot, 0deg) * 0.2)) scale(1);
-    }
-    100% {
-      transform: translateY(0px) rotate(calc(var(--tk-rot, 0deg) * 0.2)) scale(1);
-    }
+  .tk-navbar-wordmark.tk-logo-interactive:hover {
+    transform: translateY(0px);
+    filter: brightness(1.08) saturate(1.08) drop-shadow(0 0 14px rgba(255, 255, 255, 0.18));
+    text-shadow: 0 0 14px rgba(255, 255, 255, 0.24);
+  }
+
+  .tk-navbar-wordmark.tk-logo-interactive:hover > .tk-navbar-wordmark-letter {
+    filter: brightness(1.06) saturate(1.08);
   }
 
   .tk-logo-interactive:hover {
@@ -517,8 +613,13 @@ All colors MUST be HSL.
     transform: translateY(-1px) scale(1.03);
     filter: drop-shadow(0 14px 24px rgba(0, 0, 0, 0.22));
     text-shadow:
+      0 2px 0 rgba(0, 0, 0, 0.22),
       0 3px 14px rgba(0, 0, 0, 0.3),
       0 0 18px rgba(255, 255, 255, 0.12);
+  }
+
+  .tk-navbar-wordmark:hover {
+    background-position: 40% 0;
   }
 
   .tk-logo-interactive:hover > span {
@@ -526,6 +627,12 @@ All colors MUST be HSL.
     animation: tk-logo-letter-jump 900ms cubic-bezier(0.2, 0.9, 0.2, 1.2) both infinite;
   }
 
+  .tk-navbar-wordmark.tk-logo-interactive:hover > .tk-navbar-wordmark-letter {
+    text-shadow: 0 0 14px rgba(255, 255, 255, 0.12);
+    animation: none;
+  }
+
+  /* ... */
   .tk-logo-interactive:hover > span:nth-child(1) {
     --tk-rot: -2deg;
     animation-delay: 0ms;
@@ -711,6 +818,16 @@ All colors MUST be HSL.
     .tk-logo-interactive > span {
       transition: none;
       animation: none;
+    }
+
+    .tk-navbar-wordmark {
+      opacity: 1;
+      transform: none;
+      animation: none;
+    }
+
+    .tk-navbar-wordmark::after {
+      display: none;
     }
   }
 

@@ -2183,12 +2183,13 @@ function ExamSession({
 
 						{showFeedback ? (
 							<div className="space-y-3 pt-6">
-								<div className="bg-white border border-border rounded-md p-3 flex items-center justify-between">
+								<div className="bg-gradient-to-r from-emerald-700/90 via-emerald-600/85 to-emerald-700/90 border border-emerald-200/30 rounded-md p-3 flex items-center justify-between text-white shadow-lg shadow-emerald-900/20 backdrop-blur-sm">
 									<div className="text-sm font-semibold">Your answer has been recorded</div>
 									<Button
 										type="button"
 										variant="outline"
 										disabled={isFinalizing}
+										className="border-white/60 bg-white/10 text-white hover:bg-white/15 hover:text-white"
 										onClick={async () => {
 											if (isFinalizing) return;
 											// Mark current question as submitted if not already
@@ -2502,8 +2503,8 @@ function ExamSession({
 										{/* Score Display - only show for attempted questions */}
 										{finalStatus === 'attempted' && hasAnswer && (
 											<div className={`${scorePercent > 0
-												? 'bg-gradient-to-r from-emerald-500/15 via-emerald-400/10 to-emerald-500/15 border-emerald-600 text-emerald-950'
-												: 'bg-gradient-to-r from-red-500/15 via-red-400/10 to-red-500/15 border-red-600 text-red-950'} rounded-md border p-3`}>
+												? 'bg-gradient-to-r from-emerald-700/90 via-emerald-600/85 to-emerald-700/90 border-emerald-200/30 text-white shadow-lg shadow-emerald-900/20 backdrop-blur-sm'
+												: 'bg-gradient-to-r from-red-700/90 via-red-600/85 to-red-700/90 border-red-200/30 text-white shadow-lg shadow-red-900/20 backdrop-blur-sm'} rounded-md border p-3`}>
 												<div className="text-sm font-semibold">Score: {scorePercent}%</div>
 											</div>
 										)}
@@ -2559,7 +2560,7 @@ function ExamSession({
 				<div className="space-y-4 pt-4">
 					<Card className="p-6">
 						<h2 className="text-xl font-semibold mb-2">Review period has ended</h2>
-						<p className="text-sm text-muted-foreground mb-4">
+						<p className="text-sm text-muted-foreground">
 							{allQuestionsReviewed 
 								? "You have completed reviewing all questions." 
 								: "The review period has expired. You have been redirected."}
@@ -3486,8 +3487,8 @@ function PracticeRunner({ moduleData, baseQuestions, onExit, glossaryEntries, gl
 						{showFeedback && (
 							<div className="space-y-3">
 								<div className={`${(lastScorePercent ?? (lastWasCorrect ? 100 : 0)) > 0
-									? 'bg-gradient-to-r from-emerald-500/15 via-emerald-400/10 to-emerald-500/15 border-emerald-600 text-emerald-950'
-									: 'bg-gradient-to-r from-red-500/15 via-red-400/10 to-red-500/15 border-red-600 text-red-950'} rounded-md border p-3 flex items-center justify-between`}>
+									? 'bg-gradient-to-r from-emerald-700/90 via-emerald-600/85 to-emerald-700/90 border-emerald-200/30 text-white shadow-lg shadow-emerald-900/20 backdrop-blur-sm'
+									: 'bg-gradient-to-r from-red-700/90 via-red-600/85 to-red-700/90 border-red-200/30 text-white shadow-lg shadow-red-900/20 backdrop-blur-sm'} rounded-md border p-3 flex items-center justify-between`}>
 									<div className="text-sm font-semibold">
 										Score: {(() => {
 											const pct = lastScorePercent ?? (lastWasCorrect === null ? 0 : (lastWasCorrect ? 100 : 0));
@@ -3496,6 +3497,7 @@ function PracticeRunner({ moduleData, baseQuestions, onExit, glossaryEntries, gl
 									</div>
 									<Button
 										variant="outline"
+										className={(lastScorePercent ?? (lastWasCorrect ? 100 : 0)) > 0 ? 'border-white/60 bg-white/10 text-white hover:bg-white/15 hover:text-white' : 'border-white/60 bg-white/10 text-white hover:bg-white/15 hover:text-white'}
 										onClick={async () => {
 											// Check daily limit before moving to next question
 											if (moduleData.type === 'practice') {

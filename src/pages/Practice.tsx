@@ -168,7 +168,15 @@ const PRACTICE_VARIANTS: Partial<Record<PracticeTopicId, string[]>> = {
     'diameter_endpoints_equation',
     'diameter_endpoints_center',
   ],
-  differentiation: ['basic_polynomial', 'stationary_points'],
+  differentiation: [
+    'basic_polynomial',
+    'stationary_points',
+    'sqrt_params_point_gradient',
+    'power_linear_point_gradient',
+    'rational_yaxis_gradient',
+    'linear_minus_rational_xaxis_gradients',
+    'stationary_points_coords',
+  ],
   integration: ['indefinite', 'definite'],
 };
 
@@ -406,6 +414,30 @@ export default function Practice() {
       cur = cur.parentElement;
     }
     return null;
+  };
+
+  const equalsTo3SigFigs = (expected: number, raw: string): boolean => {
+    const s = sanitizeNumericInput(String(raw ?? ''), { maxDecimals: 12 }).trim();
+    if (!s) return false;
+    const sf = countSigFigs(s);
+    if (sf !== 3) return false;
+    const v = Number(s);
+    if (!Number.isFinite(v)) return false;
+    const eRounded = Number(expected.toPrecision(3));
+    const vRounded = Number(v.toPrecision(3));
+    return vRounded === eRounded;
+  };
+
+  const equalsTo3SigFigsLenient = (expected: number, raw: string): boolean => {
+    // Accept any numeric input (including integers) as long as it matches the expected value
+    // when both are rounded to 3 significant figures.
+    const s = sanitizeNumericInput(String(raw ?? ''), { maxDecimals: 12 }).trim();
+    if (!s) return false;
+    const v = Number(s);
+    if (!Number.isFinite(v)) return false;
+    const eRounded = Number(expected.toPrecision(3));
+    const vRounded = Number(v.toPrecision(3));
+    return vRounded === eRounded;
   };
 
   const captureAppVisualStateScreenshotDataUrl = async (scrollContainer?: HTMLElement | null): Promise<string> => {
@@ -798,6 +830,206 @@ export default function Practice() {
       .replace(/\^/g, '\\^{}')
       .replace(/~/g, '\\textasciitilde{}')
       .replace(/\r\n|\r|\n/g, ' \\ ');
+
+  type AnswerFieldSpec = {
+    id: string;
+    label: string;
+    labelIsLatex?: boolean;
+    inputKind: 'mathlive' | 'input';
+    inputMode?: 'none' | 'text' | 'decimal' | 'numeric';
+    ariaLabel?: string;
+    sanitize?: (raw: string) => string;
+  };
+
+  const getAnswerValueAt = (idx: number) => {
+    const values = [answer1, answer2, answer3, ...extraAnswers];
+    return String(values[idx] ?? '');
+  };
+
+  const setAnswerValueAt = (idx: number, next: string) => {
+    if (idx === 0) return setAnswer1(next);
+    if (idx === 1) return setAnswer2(next);
+    if (idx === 2) return setAnswer3(next);
+    const j = idx - 3;
+    setExtraAnswers((prev) => {
+      const out = prev.slice();
+      while (out.length <= j) out.push('');
+      out[j] = next;
+      return out;
+    });
+  };
+
+  const getAnswerFieldSpecs = (q: PracticeQuestion | null): AnswerFieldSpec[] => {
+    if (!q) return [];
+    const qAny: any = q as any;
+
+    // Differentiation multi-part answers.
+    if (qAny.kind === 'calculus' && qAny.topicId === 'differentiation' && Array.isArray(qAny.expectedParts) && qAny.expectedParts.length > 0) {
+      const parts = qAny.expectedParts as string[];
+      const v = String(qAny.variantId ?? '');
+
+      if (v === 'sqrt_params_point_gradient' && parts.length === 2) {
+        return [
+          { id: 'a', label: 'a', inputKind: 'input', inputMode: 'decimal', sanitize: sanitizeRationalInput },
+          { id: 'b', label: 'b', inputKind: 'input', inputMode: 'decimal', sanitize: sanitizeRationalInput },
+        ];
+      }
+
+      if (['power_linear_point_gradient', 'rational_yaxis_gradient'].includes(v) && parts.length === 1) {
+        return [{ id: 'grad', label: 'Gradient', inputKind: 'input', inputMode: 'decimal', sanitize: sanitizeRationalInput }];
+      }
+
+      if (v === 'linear_minus_rational_xaxis_gradients' && parts.length === 2) {
+        const is3sf = String(qAny.answerFormat ?? '') === 'decimal_3sf';
+        return [
+          {
+            id: 'grad1',
+            label: 'Gradient 1',
+            inputKind: 'input',
+            inputMode: 'decimal',
+            sanitize: is3sf ? ((raw: string) => sanitizeNumericInput(raw, { maxDecimals: 12 })) : sanitizeRationalInput,
+          },
+          {
+            id: 'grad2',
+            label: 'Gradient 2',
+            inputKind: 'input',
+            inputMode: 'decimal',
+            sanitize: is3sf ? ((raw: string) => sanitizeNumericInput(raw, { maxDecimals: 12 })) : sanitizeRationalInput,
+          },
+        ];
+      }
+
+      if (v === 'stationary_points_coords') {
+        // expectedParts is [x1,y1,x2,y2,...]
+        const count = Math.max(2, parts.length);
+        return Array.from({ length: count }).map((_, idx) => {
+          const pointIdx = Math.floor(idx / 2) + 1;
+          const isX = idx % 2 === 0;
+          const label = `${isX ? 'x' : 'y'}${pointIdx}`;
+          return { id: label, label, inputKind: 'input', inputMode: 'decimal', sanitize: sanitizeRationalInput };
+        });
+      }
+
+      if (v === 'stationary_points') {
+        return parts.map((_, idx: number) => ({
+          id: `x${idx + 1}`,
+          label: `x${idx + 1}`,
+          inputKind: 'input',
+          inputMode: 'decimal',
+          sanitize: sanitizeRationalInput,
+        }));
+      }
+    }
+
+    // Fallback: coordinate-pair style multi-part calculus questions.
+    // Some prompts ask for coordinates of point(s) where gradient is m, which can yield multiple points.
+    // If expectedParts looks like [x1,y1,x2,y2,...], render 2*n inputs with x/y labels.
+    if (qAny.kind === 'calculus' && Array.isArray(qAny.expectedParts) && qAny.expectedParts.length >= 4 && qAny.expectedParts.length % 2 === 0) {
+      const v = String(qAny.variantId ?? '');
+      const code = String(qAny.code ?? '');
+      const hintText = `${v} ${code} ${String(qAny.katexQuestion ?? '')}`.toLowerCase();
+      const looksLikeCoords = hintText.includes('coord') || hintText.includes('point') || hintText.includes('gradient');
+      if (looksLikeCoords) {
+        const count = qAny.expectedParts.length as number;
+        return Array.from({ length: count }).map((_, idx) => {
+          const pointIdx = Math.floor(idx / 2) + 1;
+          const isX = idx % 2 === 0;
+          const label = `${isX ? 'x' : 'y'}${pointIdx}`;
+          return { id: label, label, inputKind: 'input', inputMode: 'decimal', sanitize: sanitizeRationalInput };
+        });
+      }
+    }
+
+    // Fallback: two-gradient answers (e.g. gradients at two x-intercepts).
+    if (qAny.kind === 'calculus' && Array.isArray(qAny.expectedParts) && qAny.expectedParts.length === 2) {
+      const v = String(qAny.variantId ?? '');
+      const code = String(qAny.code ?? '');
+      const hintText = `${v} ${code} ${String(qAny.katexQuestion ?? '')}`.toLowerCase();
+      const looksLikeTwoGradients = hintText.includes('gradient') && (hintText.includes('points') || hintText.includes('point'));
+      if (looksLikeTwoGradients) {
+        const is3sf = String(qAny.answerFormat ?? '') === 'decimal_3sf' || hintText.includes('3 s.f');
+        return [
+          {
+            id: 'grad1',
+            label: 'Gradient 1',
+            inputKind: 'input',
+            inputMode: 'decimal',
+            sanitize: is3sf ? ((raw: string) => sanitizeNumericInput(raw, { maxDecimals: 12 })) : sanitizeRationalInput,
+          },
+          {
+            id: 'grad2',
+            label: 'Gradient 2',
+            inputKind: 'input',
+            inputMode: 'decimal',
+            sanitize: is3sf ? ((raw: string) => sanitizeNumericInput(raw, { maxDecimals: 12 })) : sanitizeRationalInput,
+          },
+        ];
+      }
+    }
+
+    // Fallback: single numeric gradient answer (avoid MathLive for plain numeric entry).
+    if (qAny.kind === 'calculus' && Array.isArray(qAny.expectedParts) && qAny.expectedParts.length === 1) {
+      const v = String(qAny.variantId ?? '');
+      const code = String(qAny.code ?? '');
+      const hintText = `${v} ${code} ${String(qAny.katexQuestion ?? '')}`.toLowerCase();
+      const looksLikeSingleGradient = hintText.includes('gradient') && !hintText.includes('coordinates');
+      if (looksLikeSingleGradient) {
+        return [{ id: 'grad', label: 'Gradient', inputKind: 'input', inputMode: 'decimal', sanitize: sanitizeRationalInput }];
+      }
+    }
+
+    return [];
+  };
+
+  const renderAnswerFields = (specs: AnswerFieldSpec[]) => {
+    const cols = specs.length <= 1 ? 1 : specs.length <= 2 ? 2 : specs.length <= 4 ? 4 : 6;
+    const colClass = cols === 1
+      ? 'grid-cols-1'
+      : cols === 2
+        ? 'grid-cols-2'
+        : cols === 4
+          ? 'grid-cols-4'
+          : 'grid-cols-6';
+    const gridClass = `grid ${colClass} gap-3 max-w-4xl mx-auto`;
+
+    return (
+      <div className={gridClass}>
+        {specs.map((f, idx) => {
+          const value = getAnswerValueAt(idx);
+          const setValue = (next: string) => setAnswerValueAt(idx, next);
+          const labelHasMath = !!f.labelIsLatex || /[_^\\]/.test(String(f.label ?? ''));
+          return (
+            <div key={f.id} className="space-y-1">
+              <Label className="text-xs text-muted-foreground">
+                {labelHasMath ? <Katex latex={String(f.label)} displayMode={false} /> : String(f.label)}
+              </Label>
+              {f.inputKind === 'mathlive' ? (
+                <MathLiveInput
+                  value={value}
+                  onChange={setValue as any}
+                  disabled={submitted}
+                  className="text-2xl font-normal text-left tk-expr-input"
+                />
+              ) : (
+                <Input
+                  value={value}
+                  inputMode={f.inputMode}
+                  onChange={(e) => {
+                    const raw = e.target.value;
+                    const next = typeof f.sanitize === 'function' ? f.sanitize(raw) : raw;
+                    setValue(next);
+                  }}
+                  disabled={submitted}
+                  aria-label={f.ariaLabel}
+                  className="h-12 text-2xl font-normal text-center py-1 font-slab"
+                />
+              )}
+            </div>
+          );
+        })}
+      </div>
+    );
+  };
 
   const preventScrollCapture = (e: React.WheelEvent | React.TouchEvent | React.KeyboardEvent) => {
     // Keep scrollbars visible (for overflow affordance) but prevent the user from scrolling the KaTeX container.
@@ -1506,6 +1738,7 @@ export default function Practice() {
       difficulty: q.difficulty,
       seed: q.seed,
       katexQuestion: q.katexQuestion,
+      promptBlocks: Array.isArray(q.promptBlocks) ? q.promptBlocks : undefined,
       katexExplanation: pruneExplanation(q.katexExplanation),
       variantId: q.variantId,
       generatorParams: q.generatorParams,
@@ -1563,22 +1796,31 @@ export default function Practice() {
   }, [recordShownEvent]);
 
   const recordSubmitEvent = useCallback(
-    async (payload: { isCorrect: boolean; userAnswer: string }) => {
+    async (payload: { isCorrect: boolean; userAnswer: string; userAnswerParts?: string[] }) => {
       const id = activePracticeEventIdRef.current;
       const shownAt = activePracticeEventShownAtRef.current;
       if (!id) return;
       try {
+        const baseSnapshot = question ? buildPracticeSnapshot(question as any) : null;
+        const snapshotJson = baseSnapshot
+          ? JSON.stringify({
+              ...baseSnapshot,
+              userAnswerParts: Array.isArray(payload.userAnswerParts) ? payload.userAnswerParts : undefined,
+              userAnswer: payload.userAnswer,
+            })
+          : undefined;
         await db.practiceEvents.update(id, {
           submittedAt: Date.now(),
           isCorrect: payload.isCorrect,
           userAnswer: payload.userAnswer,
           shownAt: shownAt ?? undefined,
+          snapshotJson,
         } as any);
       } catch (e) {
         console.error(e);
       }
     },
-    []
+    [buildPracticeSnapshot, question]
   );
 
   const recordNextEvent = useCallback(async () => {
@@ -2045,10 +2287,10 @@ export default function Practice() {
   };
 
   const checkSingleFractionAnswer = (expected: Fraction, raw: string, opts?: { requireSimplest?: boolean }) => {
-    const parsed = parseFraction(raw);
+    const parsed = parseFraction(String(raw ?? '').replace(/[−–]/g, '-'));
     if (!parsed) return false;
     if (opts?.requireSimplest) {
-      if (!isSimplestFractionInput(raw, expected)) return false;
+      if (!isSimplestFractionInput(String(raw ?? '').replace(/[−–]/g, '-'), expected)) return false;
     }
     return fractionsEqual(parsed, expected);
   };
@@ -2349,23 +2591,13 @@ export default function Practice() {
         return xOk && yOk;
       }
       case 'factorisation': {
+        const fq = q as any;
         const norm = (s: string) => String(s ?? '')
           .trim()
           .replace(/[−–]/g, '-')
           .replace(/\u200b/g, '')
-          .replace(/\s+/g, '')
-          // MathLive emits LaTeX; normalize it to our lightweight compare format.
-          .replace(/\\left/g, '')
-          .replace(/\\right/g, '')
-          .replace(/-\\frac\{(\d+)\}\{(\d+)\}/g, '-$1/$2')
-          .replace(/\\frac\{(-?\d+)\}\{(\d+)\}/g, '$1/$2')
-          .replace(/\\cdot/g, '')
-          .replace(/\*/g, '')
-          .replace(/\^\{([^}]+)\}/g, '^$1')
-          .replace(/_\{([^}]+)\}/g, '_$1')
-          .toLowerCase();
-
-        const fq = q as any;
+          .replace(/\s+/g, '');
+        // MathLive emits LaTeX; normalize it to our lightweight compare format.
         const expectedCount = Math.max(2, Math.min(3, Number(fq.expectedFactors?.length ?? 2)));
 
         const factors = [norm(answer1), norm(answer2), norm(answer3)].filter(Boolean);
@@ -2594,8 +2826,110 @@ export default function Practice() {
       case 'calculus': {
         const cq = q as any;
 
-        // Stationary-points questions can have multiple x-values.
+        // Differentiation variants can have multi-part answers.
         if (cq.topicId === 'differentiation' && Array.isArray(cq.expectedParts) && cq.expectedParts.length > 0) {
+          // Special-case: some differentiation variants expect (a,b) parameters.
+          if (String(cq.variantId ?? '') === 'sqrt_params_point_gradient' && cq.expectedParts.length === 2) {
+            const parseExpected = (s: string): Fraction | null => parseFractionFromMathRaw(String(s ?? ''));
+            const expA = parseExpected(cq.expectedParts[0]);
+            const expB = parseExpected(cq.expectedParts[1]);
+            if (!expA || !expB) return false;
+
+            const requireSimplestA = normalizeFraction(expA).d !== 1;
+            const requireSimplestB = normalizeFraction(expB).d !== 1;
+
+            const okA = checkSingleFractionAnswer(expA, String(answer1 ?? ''), { requireSimplest: requireSimplestA });
+            const okB = checkSingleFractionAnswer(expB, String(answer2 ?? ''), { requireSimplest: requireSimplestB });
+            return okA && okB;
+          }
+
+          // Single gradient as a fraction/integer (must be simplest when a fraction).
+          if (['power_linear_point_gradient', 'rational_yaxis_gradient'].includes(String(cq.variantId ?? '')) && cq.expectedParts.length === 1) {
+            const exp = parseFractionFromMathRaw(String(cq.expectedParts[0] ?? ''));
+            if (!exp) return false;
+            const requireSimplest = normalizeFraction(exp).d !== 1;
+            return checkSingleFractionAnswer(exp, String(answer1 ?? ''), { requireSimplest });
+          }
+
+          // Generic single numeric answer (e.g. some gradient-at-a-point variants may not be in the allowlist).
+          if (cq.expectedParts.length === 1) {
+            const exp = parseFractionFromMathRaw(String(cq.expectedParts[0] ?? ''));
+            if (!exp) return false;
+            const requireSimplest = normalizeFraction(exp).d !== 1;
+            return checkSingleFractionAnswer(exp, String(answer1 ?? ''), { requireSimplest });
+          }
+
+          // Two gradients at two x-intercepts: allow either order, each must be simplest if fractional.
+          if (String(cq.variantId ?? '') === 'linear_minus_rational_xaxis_gradients' && cq.expectedParts.length === 2) {
+            const is3sf = String((cq as any).answerFormat ?? '') === 'decimal_3sf';
+            if (is3sf) {
+              const n1 = Number(String(cq.expectedParts[0] ?? ''));
+              const n2 = Number(String(cq.expectedParts[1] ?? ''));
+              if (!Number.isFinite(n1) || !Number.isFinite(n2)) return false;
+              const ok12 = equalsTo3SigFigs(n1, String(answer1 ?? '')) && equalsTo3SigFigs(n2, String(answer2 ?? ''));
+              const ok21 = equalsTo3SigFigs(n2, String(answer1 ?? '')) && equalsTo3SigFigs(n1, String(answer2 ?? ''));
+              return ok12 || ok21;
+            }
+            const exp1 = parseFractionFromMathRaw(String(cq.expectedParts[0] ?? ''));
+            const exp2 = parseFractionFromMathRaw(String(cq.expectedParts[1] ?? ''));
+            if (!exp1 || !exp2) return false;
+            const r1 = normalizeFraction(exp1).d !== 1;
+            const r2 = normalizeFraction(exp2).d !== 1;
+            const ok12 = checkSingleFractionAnswer(exp1, String(answer1 ?? ''), { requireSimplest: r1 })
+              && checkSingleFractionAnswer(exp2, String(answer2 ?? ''), { requireSimplest: r2 });
+            const ok21 = checkSingleFractionAnswer(exp2, String(answer1 ?? ''), { requireSimplest: r2 })
+              && checkSingleFractionAnswer(exp1, String(answer2 ?? ''), { requireSimplest: r1 });
+            return ok12 || ok21;
+          }
+
+          // Coordinate-pair answers: expectedParts is [x1,y1,x2,y2,...].
+          // Allow swapping whole points, but do NOT allow mixing x/y across points.
+          // Compare numerically (fractions/decimals/integers) to be tolerant of equivalent forms.
+          {
+            const parts = cq.expectedParts as any[];
+            const hasEvenParts = Array.isArray(parts) && parts.length >= 2 && parts.length % 2 === 0;
+            const hintText = `${String(cq.variantId ?? '')} ${String((cq as any).code ?? '')} ${String(cq.katexQuestion ?? '')}`.toLowerCase();
+            const looksLikeCoords = hintText.includes('coord') || hintText.includes('point') || hintText.includes('gradient');
+            if (hasEvenParts && looksLikeCoords) {
+              const need = parts.length;
+              const values = [answer1, answer2, answer3, ...extraAnswers].slice(0, need).map((v) => String(v ?? ''));
+              if (values.some((v) => !String(v ?? '').trim())) return false;
+
+              const parse = (s: string) => parseFractionFromMathRaw(String(s ?? ''));
+              const exp = parts.map((p) => parse(String(p ?? '')));
+              const inp = values.map((p) => parse(String(p ?? '')));
+              if (exp.some((x) => !x) || inp.some((x) => !x)) return false;
+
+              type Pair = { x: Fraction; y: Fraction };
+              const toPairs = (arr: Fraction[]): Pair[] => {
+                const out: Pair[] = [];
+                for (let i = 0; i < arr.length; i += 2) out.push({ x: arr[i] as Fraction, y: arr[i + 1] as Fraction });
+                return out;
+              };
+
+              const expPairs = toPairs(exp as Fraction[]);
+              const inPairs = toPairs(inp as Fraction[]);
+
+              const canon = (p: Pair) => {
+                const xx = normalizeFraction(p.x);
+                const yy = normalizeFraction(p.y);
+                return `${xx.n}/${xx.d},${yy.n}/${yy.d}`;
+              };
+
+              const expCanon = expPairs.map(canon).sort();
+              const inCanon = inPairs.map(canon).sort();
+              if (expCanon.length !== inCanon.length) return false;
+              return expCanon.every((v, i) => v === inCanon[i]);
+            }
+          }
+
+          // Stationary-points x-values (original variant) - keep existing behavior.
+          if (String(cq.variantId ?? '') !== 'stationary_points') {
+            // If another differentiation variant uses expectedParts but isn't handled above, fall back.
+            // (Should not happen for the variants we support.)
+            return false;
+          }
+
           const normalizeSingle = (raw: string) => {
             const cleaned = String(raw ?? '')
               .trim()
@@ -2617,6 +2951,40 @@ export default function Practice() {
           const a = [...inputs].sort();
           const b = [...expected].sort();
           return a.every((v, i) => v === b[i]);
+        }
+
+        // Generic calculus fallback: two gradients (e.g. at two x-intercepts).
+        // Some question types outside our explicit differentiation variant mapping may still carry expectedParts=[g1,g2].
+        if (Array.isArray(cq.expectedParts) && cq.expectedParts.length === 2) {
+          const hintText = `${String(cq.variantId ?? '')} ${String((cq as any).code ?? '')} ${String(cq.katexQuestion ?? '')}`.toLowerCase();
+          const looksLikeTwoGradients = hintText.includes('gradient') && (hintText.includes('points') || hintText.includes('point'));
+          if (looksLikeTwoGradients) {
+            const is3sf = String((cq as any).answerFormat ?? '') === 'decimal_3sf' || hintText.includes('3 s.f');
+
+            const rawA1 = String(answer1 ?? '');
+            const rawA2 = String(answer2 ?? '');
+            if (!rawA1.trim() || !rawA2.trim()) return false;
+
+            if (is3sf) {
+              const n1 = Number(String(cq.expectedParts[0] ?? ''));
+              const n2 = Number(String(cq.expectedParts[1] ?? ''));
+              if (!Number.isFinite(n1) || !Number.isFinite(n2)) return false;
+              const ok12 = equalsTo3SigFigsLenient(n1, rawA1) && equalsTo3SigFigsLenient(n2, rawA2);
+              const ok21 = equalsTo3SigFigsLenient(n2, rawA1) && equalsTo3SigFigsLenient(n1, rawA2);
+              return ok12 || ok21;
+            }
+
+            const exp1 = parseFractionFromMathRaw(String(cq.expectedParts[0] ?? ''));
+            const exp2 = parseFractionFromMathRaw(String(cq.expectedParts[1] ?? ''));
+            if (!exp1 || !exp2) return false;
+            const r1 = normalizeFraction(exp1).d !== 1;
+            const r2 = normalizeFraction(exp2).d !== 1;
+            const ok12 = checkSingleFractionAnswer(exp1, rawA1, { requireSimplest: r1 })
+              && checkSingleFractionAnswer(exp2, rawA2, { requireSimplest: r2 });
+            const ok21 = checkSingleFractionAnswer(exp2, rawA1, { requireSimplest: r2 })
+              && checkSingleFractionAnswer(exp1, rawA2, { requireSimplest: r1 });
+            return ok12 || ok21;
+          }
         }
 
         // Definite integrals should accept numeric fractions/decimals like -2/3.
@@ -3737,25 +4105,75 @@ export default function Practice() {
                       <div className="w-full select-none">
                         <div className="tk-wp-expl-text font-slab w-full min-w-0 max-w-full overflow-x-hidden text-lg md:text-xl leading-relaxed text-left text-foreground whitespace-normal break-words">
                           <span className="inline-flex flex-wrap items-baseline gap-x-1 gap-y-1">
-                            {promptBlocks.map((b, i) => {
-                              if (b?.kind === 'text' && String(b?.content ?? '') === '\n') {
-                                return ' ';
-                              }
-                              if (b?.kind === 'math') {
-                                return (
-                                  <span key={`pm-${i}`} className="tk-prompt-inline-math inline-flex items-baseline max-w-full min-w-0">
-                                    <span className="tk-math-scroll inline-block align-baseline max-w-full">
-                                      <Katex latex={String(b.content ?? '')} displayMode={false} />
+                            {(() => {
+                              const out: any[] = [];
+                              for (let i = 0; i < promptBlocks.length; i++) {
+                                const b = promptBlocks[i];
+                                const content = String(b?.content ?? '');
+
+                                if (b?.kind === 'text' && content === '\n') {
+                                  const prev = i > 0 ? promptBlocks[i - 1] : undefined;
+                                  const next = i + 1 < promptBlocks.length ? promptBlocks[i + 1] : undefined;
+                                  const nextText = String(next?.content ?? '');
+                                  const shouldKeepInline =
+                                    prev?.kind === 'math'
+                                    && next?.kind === 'text'
+                                    && /^(\s*)at the point\b/i.test(nextText);
+                                  const shouldKeepInlinePlural =
+                                    prev?.kind === 'math'
+                                    && next?.kind === 'text'
+                                    && /^(\s*)at the points\b/i.test(nextText);
+                                  if (shouldKeepInline || shouldKeepInlinePlural) {
+                                    // Do not force a new line for this pattern; keep text aligned with the equation.
+                                    out.push(<span key={`pbr-${i}`} className="inline"> </span>);
+                                  } else {
+                                    out.push(<span key={`pbr-${i}`} className="basis-full h-0" />);
+                                  }
+                                  continue;
+                                }
+
+                                // Keep patterns like: [math gradient] + ["at this point."] together
+                                // so the text doesn't wrap onto a new line before the explicit newline.
+                                if (
+                                  b?.kind === 'math' &&
+                                  typeof promptBlocks[i + 1]?.content !== 'undefined' &&
+                                  promptBlocks[i + 1]?.kind === 'text' &&
+                                  String(promptBlocks[i + 1]?.content ?? '').startsWith('at this point.')
+                                ) {
+                                  const nextText = String(promptBlocks[i + 1]?.content ?? '');
+                                  out.push(
+                                    <span key={`pmg-${i}`} className="inline-flex items-baseline whitespace-nowrap">
+                                      <span className="tk-prompt-inline-math inline-flex items-baseline max-w-full min-w-0">
+                                        <span className="tk-math-scroll-inline align-baseline max-w-full">
+                                          <Katex latex={String(b.content ?? '')} displayMode={false} />
+                                        </span>
+                                      </span>
+                                      <span className="ml-1">{nextText}</span>
                                     </span>
+                                  );
+                                  i += 1;
+                                  continue;
+                                }
+
+                                if (b?.kind === 'math') {
+                                  out.push(
+                                    <span key={`pm-${i}`} className="tk-prompt-inline-math inline-flex items-baseline max-w-full min-w-0">
+                                      <span className="tk-math-scroll-inline align-baseline max-w-full">
+                                        <Katex latex={String(b.content ?? '')} displayMode={false} />
+                                      </span>
+                                    </span>
+                                  );
+                                  continue;
+                                }
+
+                                out.push(
+                                  <span key={`pt-${i}`} className="whitespace-normal">
+                                    {content}
                                   </span>
                                 );
                               }
-                              return (
-                                <span key={`pt-${i}`} className="whitespace-normal">
-                                  {String(b?.content ?? '')}
-                                </span>
-                              );
-                            })}
+                              return out;
+                            })()}
                           </span>
                         </div>
                       </div>
@@ -4397,29 +4815,43 @@ export default function Practice() {
                     (() => {
                       const cq = question as any;
                       const parts = Array.isArray(cq.expectedParts) ? (cq.expectedParts as string[]) : [];
-                      const isStationary = cq.topicId === 'differentiation' && parts.length > 0;
+                      const isDiffMulti = cq.topicId === 'differentiation' && parts.length > 0;
 
-                      if (isStationary) {
-                        const count = Math.max(1, Math.min(3, parts.length));
-                        const labels = Array.from({ length: count }, (_, i) => `x${count === 1 ? '' : ` ${i + 1}`}`);
-                        const setters = [setAnswer1, setAnswer2, setAnswer3] as const;
-                        const values = [answer1, answer2, answer3];
-                        const grid = count === 1 ? 'grid grid-cols-1 gap-3 max-w-sm mx-auto' : count === 2 ? 'grid grid-cols-2 gap-3 max-w-md mx-auto' : 'grid grid-cols-3 gap-3 max-w-2xl mx-auto';
-                        return (
-                          <div className={grid}>
-                            {labels.map((label, idx) => (
-                              <div key={idx} className="space-y-1">
-                                <Input
-                                  value={values[idx] ?? ''}
-                                  inputMode="decimal"
-                                  onChange={(e) => setters[idx](sanitizeRationalInput(e.target.value))}
-                                  disabled={submitted}
-                                  className="h-12 text-2xl font-normal text-center py-1"
-                                />
-                              </div>
-                            ))}
-                          </div>
-                        );
+                      const isSqrtParams =
+                        cq.topicId === 'differentiation'
+                        && String(cq.variantId ?? '') === 'sqrt_params_point_gradient'
+                        && parts.length === 2;
+
+                      const isGradientOne =
+                        cq.topicId === 'differentiation'
+                        && ['power_linear_point_gradient', 'rational_yaxis_gradient'].includes(String(cq.variantId ?? ''))
+                        && parts.length === 1;
+
+                      const isGradientTwo =
+                        cq.topicId === 'differentiation'
+                        && String(cq.variantId ?? '') === 'linear_minus_rational_xaxis_gradients'
+                        && parts.length === 2;
+
+                      const isStationaryCoords =
+                        cq.topicId === 'differentiation'
+                        && String(cq.variantId ?? '') === 'stationary_points_coords'
+                        && parts.length > 0;
+
+                      if (isDiffMulti) {
+                        const specs = getAnswerFieldSpecs(question as PracticeQuestion);
+                        if (specs.length > 0) {
+                          const hint = String((cq as any).calculatorHint ?? '').trim();
+                          return (
+                            <div className="space-y-2">
+                              {renderAnswerFields(specs)}
+                              {hint ? (
+                                <div className="text-xs text-muted-foreground max-w-2xl mx-auto">
+                                  {hint}
+                                </div>
+                              ) : null}
+                            </div>
+                          );
+                        }
                       }
 
                       return (
@@ -4688,19 +5120,27 @@ export default function Practice() {
                     const normalized = typeof qAny?.normalize === 'function'
                       ? String(qAny.normalize(raw))
                       : raw.replace(/\s+/g, '').toLowerCase();
+                    const specs = getAnswerFieldSpecs(question as PracticeQuestion);
+                    const allInputs = [answer1, answer2, answer3, ...extraAnswers]
+                      .slice(0, specs.length > 0 ? specs.length : 3)
+                      .map((x) => String(x ?? ''));
                     console.log('[practice][answer-debug]', {
                       kind: qAny?.kind,
                       topicId: qAny?.topicId,
                       expectedNormalized: qAny?.expectedNormalized,
                       expectedLatex: qAny?.expectedLatex,
                       expectedRaw: qAny?.expected,
-                      userAnswerParts: [answer1, answer2, answer3],
+                      userAnswerParts: allInputs,
                       userAnswerRaw: raw,
                       userAnswerNormalized: normalized,
                     });
                   }
                   setSubmitted(true);
                   setIsCorrect(ok);
+                  const specs = getAnswerFieldSpecs(question as PracticeQuestion);
+                  const allInputs = [answer1, answer2, answer3, ...extraAnswers]
+                    .slice(0, specs.length > 0 ? specs.length : 3)
+                    .map((x) => String(x ?? ''));
                   void recordSubmitEvent({
                     isCorrect: ok,
                     userAnswer: (() => {
@@ -4710,9 +5150,10 @@ export default function Practice() {
                         }
                         return 'N/A';
                       }
-                      const parts = [answer1, answer2, answer3].filter((x) => String(x ?? '').trim().length > 0);
+                      const parts = allInputs.filter((x) => String(x ?? '').trim().length > 0);
                       return parts.length ? parts.join(' | ') : 'N/A';
                     })(),
+                    userAnswerParts: allInputs,
                   });
                   if ((question as any).kind === 'quadratic') {
                     const qAny: any = question as any;

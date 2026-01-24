@@ -309,92 +309,6 @@ export default function Settings() {
   const handleExportData = async () => {
     try {
       const questions = await db.questions.toArray();
-      const modules = await db.modules.toArray();
-      const attempts = await db.attempts.toArray();
-      const tags = await db.tags.toArray();
-      const settingsArray = await db.settings.toArray();
-      const integrityEvents = await db.integrityEvents.toArray();
-      const dailyStats = await db.dailyStats.toArray();
-      const users = await db.users.toArray();
-      const globalGlossary = await db.globalGlossary.toArray();
-      const intelligenceSignals = await db.intelligenceSignals.toArray();
-      const errorReports = await db.errorReports.toArray();
-      const songsRaw = await db.songs.toArray();
-      const songModules = await db.songModules.toArray();
-      const lyricsSource = await db.lyricsSource.toArray();
-      const binaryAssetsRaw = await db.binaryAssets.toArray();
-
-      const songs = await Promise.all(
-        songsRaw.map(async (s) => {
-          const audioFilePath = (s as any).audioFilePath as string;
-          const audioFileUrl = (s as any).audioFileUrl as string;
-          // If the song is stored as a local file, include bytes for offline backup.
-          if (window.songs?.readAudioFile && audioFilePath && audioFileUrl && audioFileUrl.startsWith('file:')) {
-            try {
-              const res = await window.songs.readAudioFile({ filePath: audioFilePath });
-              return { ...s, audioDataBase64: res.dataBase64 } as any;
-            } catch {
-              return s as any;
-            }
-          }
-          // If already a data URL, it can be restored as-is.
-          if (typeof audioFileUrl === 'string' && audioFileUrl.startsWith('data:')) {
-            return { ...s, audioDataUrl: audioFileUrl } as any;
-          }
-          return s as any;
-        }),
-      );
-
-      const binaryAssets = await Promise.all(
-        binaryAssetsRaw.map(async (a) => {
-          try {
-            const blob = (a as any).data as Blob;
-            const readerRes = await new Promise<string>((resolve, reject) => {
-              const reader = new FileReader();
-              reader.onerror = () => reject(new Error('Failed to read asset blob'));
-              reader.onload = () => {
-                const res = reader.result;
-                if (typeof res !== 'string') {
-                  reject(new Error('Unexpected FileReader result'));
-                  return;
-                }
-                const commaIdx = res.indexOf(',');
-                resolve(commaIdx >= 0 ? res.slice(commaIdx + 1) : res);
-              };
-              reader.readAsDataURL(blob);
-            });
-            return {
-              ...a,
-              dataBase64: readerRes,
-              data: undefined,
-            } as any;
-          } catch {
-            return { ...a, data: undefined } as any;
-          }
-        }),
-      );
-
-      const data = {
-        questions,
-        modules,
-        attempts,
-        tags,
-        settings: settingsArray,
-        integrityEvents,
-        dailyStats,
-        users,
-        globalGlossary,
-        intelligenceSignals,
-        errorReports,
-        songs,
-        songModules,
-        lyricsSource,
-        binaryAssets,
-        exportedAt: new Date().toISOString(),
-        schemaVersion: 23,
-      };
-
-      // Derive top tags from question usage to include in filename
       const tagFrequency = new Map<string, number>();
       for (const q of questions as any[]) {
         if (!Array.isArray(q.tags)) continue;
@@ -430,6 +344,210 @@ export default function Settings() {
       const timestampPart = `${yyyy}${mm}${dd}-${hh}${min}`;
 
       const fileName = `MathInk-app-data-backup-${tagsPart}-${timestampPart}.json`;
+
+      const yieldToUi = async () => {
+        await new Promise<void>((r) => setTimeout(r, 0));
+      };
+
+      const readBlobBase64 = async (blob: Blob): Promise<string> => {
+        return new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onerror = () => reject(new Error('Failed to read asset blob'));
+          reader.onload = () => {
+            const res = reader.result;
+            if (typeof res !== 'string') {
+              reject(new Error('Unexpected FileReader result'));
+              return;
+            }
+            const commaIdx = res.indexOf(',');
+            resolve(commaIdx >= 0 ? res.slice(commaIdx + 1) : res);
+          };
+          reader.readAsDataURL(blob);
+        });
+      };
+
+      const streamApi = window.data?.beginExportJson && window.data?.writeExportChunk && window.data?.finishExportJson;
+      if (streamApi) {
+        const beginRes = await window.data!.beginExportJson!({ defaultFileName: fileName });
+        if (beginRes?.canceled || !beginRes.exportId) return;
+        const exportId = beginRes.exportId;
+        const write = async (chunk: string) => {
+          await window.data!.writeExportChunk!({ exportId, chunk });
+        };
+
+        const writeArray = async (label: string, items: any[], transform?: (x: any, idx: number) => Promise<any>) => {
+          await write(`\n  \"${label}\": [\n`);
+          for (let i = 0; i < items.length; i++) {
+            const v = transform ? await transform(items[i], i) : items[i];
+            const json = JSON.stringify(v);
+            await write(`    ${json}${i === items.length - 1 ? '' : ','}\n`);
+            if (i % 10 === 0) await yieldToUi();
+          }
+          await write('  ]');
+        };
+
+        await write('{');
+        await writeArray('questions', questions);
+
+        const modules = await db.modules.toArray();
+        await write(',');
+        await writeArray('modules', modules);
+
+        const attempts = await db.attempts.toArray();
+        await write(',');
+        await writeArray('attempts', attempts);
+
+        const tags = await db.tags.toArray();
+        await write(',');
+        await writeArray('tags', tags);
+
+        const settingsArray = await db.settings.toArray();
+        await write(',');
+        await writeArray('settings', settingsArray);
+
+        const integrityEvents = await db.integrityEvents.toArray();
+        await write(',');
+        await writeArray('integrityEvents', integrityEvents);
+
+        const dailyStats = await db.dailyStats.toArray();
+        await write(',');
+        await writeArray('dailyStats', dailyStats);
+
+        const users = await db.users.toArray();
+        await write(',');
+        await writeArray('users', users);
+
+        const globalGlossary = await db.globalGlossary.toArray();
+        await write(',');
+        await writeArray('globalGlossary', globalGlossary);
+
+        const intelligenceSignals = await db.intelligenceSignals.toArray();
+        await write(',');
+        await writeArray('intelligenceSignals', intelligenceSignals);
+
+        const errorReports = await db.errorReports.toArray();
+        await write(',');
+        await writeArray('errorReports', errorReports);
+
+        const songsRaw = await db.songs.toArray();
+        await write(',');
+        await writeArray('songs', songsRaw, async (s: any) => {
+          const audioFilePath = (s as any).audioFilePath as string;
+          const audioFileUrl = (s as any).audioFileUrl as string;
+          if (window.songs?.readAudioFile && audioFilePath && audioFileUrl && audioFileUrl.startsWith('file:')) {
+            try {
+              const res = await window.songs.readAudioFile({ filePath: audioFilePath });
+              return { ...s, audioDataBase64: res.dataBase64 };
+            } catch {
+              return s;
+            }
+          }
+          if (typeof audioFileUrl === 'string' && audioFileUrl.startsWith('data:')) {
+            return { ...s, audioDataUrl: audioFileUrl };
+          }
+          return s;
+        });
+
+        const songModules = await db.songModules.toArray();
+        await write(',');
+        await writeArray('songModules', songModules);
+
+        const lyricsSource = await db.lyricsSource.toArray();
+        await write(',');
+        await writeArray('lyricsSource', lyricsSource);
+
+        const binaryAssetsRaw = await db.binaryAssets.toArray();
+        await write(',');
+        await writeArray('binaryAssets', binaryAssetsRaw, async (a: any) => {
+          try {
+            const blob = (a as any).data as Blob;
+            if (blob && typeof blob.size === 'number' && blob.size > 0) {
+              const dataBase64 = await readBlobBase64(blob);
+              return { ...a, dataBase64, data: undefined };
+            }
+            return { ...a, data: undefined };
+          } catch {
+            return { ...a, data: undefined };
+          }
+        });
+
+        await write(',\n');
+        await write(`  \"exportedAt\": ${JSON.stringify(new Date().toISOString())},\n`);
+        await write('  \"schemaVersion\": 23\n');
+        await write('}\n');
+
+        await window.data!.finishExportJson!({ exportId });
+        toast.success('Data exported successfully');
+        return;
+      }
+
+      const modules = await db.modules.toArray();
+      const attempts = await db.attempts.toArray();
+      const tags = await db.tags.toArray();
+      const settingsArray = await db.settings.toArray();
+      const integrityEvents = await db.integrityEvents.toArray();
+      const dailyStats = await db.dailyStats.toArray();
+      const users = await db.users.toArray();
+      const globalGlossary = await db.globalGlossary.toArray();
+      const intelligenceSignals = await db.intelligenceSignals.toArray();
+      const errorReports = await db.errorReports.toArray();
+      const songsRaw = await db.songs.toArray();
+      const songModules = await db.songModules.toArray();
+      const lyricsSource = await db.lyricsSource.toArray();
+      const binaryAssetsRaw = await db.binaryAssets.toArray();
+
+      const songs = [] as any[];
+      for (let i = 0; i < songsRaw.length; i++) {
+        const s: any = songsRaw[i];
+        const audioFilePath = (s as any).audioFilePath as string;
+        const audioFileUrl = (s as any).audioFileUrl as string;
+        if (window.songs?.readAudioFile && audioFilePath && audioFileUrl && audioFileUrl.startsWith('file:')) {
+          try {
+            const res = await window.songs.readAudioFile({ filePath: audioFilePath });
+            songs.push({ ...s, audioDataBase64: res.dataBase64 });
+          } catch {
+            songs.push(s);
+          }
+        } else if (typeof audioFileUrl === 'string' && audioFileUrl.startsWith('data:')) {
+          songs.push({ ...s, audioDataUrl: audioFileUrl });
+        } else {
+          songs.push(s);
+        }
+        if (i % 10 === 0) await yieldToUi();
+      }
+
+      const binaryAssets = [] as any[];
+      for (let i = 0; i < binaryAssetsRaw.length; i++) {
+        const a: any = binaryAssetsRaw[i];
+        try {
+          const blob = (a as any).data as Blob;
+          const dataBase64 = blob ? await readBlobBase64(blob) : '';
+          binaryAssets.push({ ...a, dataBase64, data: undefined });
+        } catch {
+          binaryAssets.push({ ...a, data: undefined });
+        }
+        if (i % 10 === 0) await yieldToUi();
+      }
+
+      const data = {
+        questions,
+        modules,
+        attempts,
+        tags,
+        settings: settingsArray,
+        integrityEvents,
+        dailyStats,
+        users,
+        globalGlossary,
+        intelligenceSignals,
+        errorReports,
+        songs,
+        songModules,
+        lyricsSource,
+        binaryAssets,
+        exportedAt: new Date().toISOString(),
+        schemaVersion: 23,
+      };
 
       const dataText = JSON.stringify(data, null, 2);
       if (window.data?.exportJsonToFile) {

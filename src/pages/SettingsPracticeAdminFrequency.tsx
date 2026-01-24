@@ -283,6 +283,11 @@ export default function SettingsPracticeAdminFrequency() {
             variants: [
               { key: 'basic_polynomial', label: 'Basic derivative', defaultValue: 70 },
               { key: 'stationary_points', label: 'Stationary points (double derivation)', defaultValue: 30 },
+              { key: 'sqrt_params_point_gradient', label: 'Find a and b (curve through point + gradient)', defaultValue: 20 },
+              { key: 'power_linear_point_gradient', label: 'Gradient at point: y=(ax+b)^n', defaultValue: 0 },
+              { key: 'rational_yaxis_gradient', label: 'Gradient at y-axis crossing: y=k/(x-a)^2', defaultValue: 0 },
+              { key: 'linear_minus_rational_xaxis_gradients', label: 'Gradients at x-axis crossings: y=x-p/(x+q)', defaultValue: 0 },
+              { key: 'stationary_points_coords', label: 'Coordinates where gradient is 0 (stationary points)', defaultValue: 0 },
             ],
           };
         }

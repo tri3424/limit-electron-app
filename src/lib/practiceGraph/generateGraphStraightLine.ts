@@ -534,17 +534,22 @@ export function generateGraphStraightLineMcq(input: {
       unique.push(lineToKatex(m, d + unique.length));
     }
 
-    const order = [0, 1, 2, 3];
-    for (let i = order.length - 1; i > 0; i--) {
+    const wrongs = unique.filter((u) => u !== lineLatex).slice(0, 3);
+    for (let i = wrongs.length - 1; i > 0; i--) {
       const j = rng.int(0, i);
-      const tmp = order[i];
-      order[i] = order[j];
-      order[j] = tmp;
+      const tmp = wrongs[i];
+      wrongs[i] = wrongs[j];
+      wrongs[j] = tmp;
     }
 
-    const shuffled = order.map((i) => unique[i]);
-    const correctIndex = shuffled.indexOf(lineLatex);
-    return { shuffled, correctIndex };
+    // Bias the correct answer toward option D more often.
+    // Probabilities: A 20%, B 20%, C 20%, D 40%
+    const r = rng.next();
+    const targetIndex = r < 0.2 ? 0 : r < 0.4 ? 1 : r < 0.6 ? 2 : 3;
+
+    const shuffled = wrongs.slice();
+    shuffled.splice(targetIndex, 0, lineLatex);
+    return { shuffled, correctIndex: targetIndex };
   })();
 
   const lineFn = (x: number) => m * x + d;

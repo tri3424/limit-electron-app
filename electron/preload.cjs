@@ -30,4 +30,16 @@ contextBridge.exposeInMainWorld('data', {
   exportJsonToFile: async (payload) => {
     return ipcRenderer.invoke('data:exportJsonToFile', payload);
   },
+  beginExportJson: async (payload) => {
+    return ipcRenderer.invoke('data:beginExportJson', payload);
+  },
+  writeExportChunk: async (payload) => {
+    return ipcRenderer.invoke('data:writeExportChunk', payload);
+  },
+  finishExportJson: async (payload) => {
+    return ipcRenderer.invoke('data:finishExportJson', payload);
+  },
+  abortExportJson: async (payload) => {
+    return ipcRenderer.invoke('data:abortExportJson', payload);
+  },
 });

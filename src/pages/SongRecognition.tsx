@@ -14,7 +14,7 @@ import { Check, ChevronsUpDown } from "lucide-react";
 
 export default function SongRecognition() {
 	const navigate = useNavigate();
-	const { user } = useAuth();
+	const { user, isAdmin } = useAuth();
 
 	const appSettings = useLiveQuery<AppSettings | undefined>(() => db.settings.get("1"), []);
 	const songRecognitionEnabled = appSettings?.songRecognitionEnabled === true;
@@ -55,6 +55,11 @@ export default function SongRecognition() {
 	const listeningEvents = useLiveQuery<SongListeningEvent[]>(async () => {
 		if (!user) return [] as SongListeningEvent[];
 		try {
+			if (isAdmin) {
+				return await db.songListeningEvents
+					.filter((e) => typeof e.listenedMs === 'number' && e.listenedMs > 0)
+					.toArray();
+			}
 			return await db.songListeningEvents
 				.where("userId")
 				.equals(user.id)
@@ -63,7 +68,7 @@ export default function SongRecognition() {
 		} catch {
 			return [] as SongListeningEvent[];
 		}
-	}, [user?.id, songIdsKey]);
+	}, [isAdmin, user?.id, songIdsKey]);
 
 	const listenedMsBySongId = useMemo(() => {
 		const map = new Map<string, number>();

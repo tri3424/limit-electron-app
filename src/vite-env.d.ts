@@ -23,6 +23,10 @@ declare global {
 		};
 		data?: {
 			exportJsonToFile: (payload: { defaultFileName: string; dataText: string }) => Promise<{ canceled: boolean; filePath?: string }>;
+			beginExportJson?: (payload: { defaultFileName: string }) => Promise<{ canceled: boolean; exportId?: string; filePath?: string }>;
+			writeExportChunk?: (payload: { exportId: string; chunk: string }) => Promise<{ ok: true }>;
+			finishExportJson?: (payload: { exportId: string }) => Promise<{ ok: true; filePath?: string }>;
+			abortExportJson?: (payload: { exportId: string }) => Promise<{ ok: true }>;
 		};
 	}
 

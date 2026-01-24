@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { useNavigate } from 'react-router-dom';
 import { ArrowLeft } from 'lucide-react';
@@ -68,8 +68,9 @@ export default function Scorecard() {
 
   const events = useLiveQuery(async () => {
     if (!user?.id) return [];
+    if (isAdmin) return db.practiceEvents.toArray();
     return db.practiceEvents.where('userId').equals(user.id).toArray();
-  }, [user?.id]) || [];
+  }, [isAdmin, user?.id]) || [];
 
   const timeline = useMemo(() => {
     const out = [...events];
@@ -87,7 +88,28 @@ export default function Scorecard() {
     } catch {
       return null;
     }
-  }, [selected]);
+  }, [selected?.snapshotJson]);
+
+  const renderPromptBlocks = useCallback((blocks: any[]) => {
+    if (!Array.isArray(blocks) || !blocks.length) return null;
+    return (
+      <div className="font-slab text-xl leading-relaxed whitespace-normal break-words">
+        {blocks.map((b: any, i: number) => {
+          if (b?.kind === 'text' && String(b?.content ?? '') === '\n') {
+            return <br key={`br-${i}`} />;
+          }
+          if (b?.kind === 'math') {
+            return (
+              <span key={`m-${i}`} className="inline-block align-baseline mx-1">
+                <Katex latex={String(b.content ?? '')} displayMode={false} />
+              </span>
+            );
+          }
+          return <span key={`t-${i}`}>{String(b?.content ?? '')}</span>;
+        })}
+      </div>
+    );
+  }, []);
 
   const rows = useMemo(() => {
     const buckets = new Map<string, { date: string; mode: 'individual' | 'mixed'; topicId: string; total: number; correct: number; wrong: number; totalTimeMs: number }>();
@@ -226,6 +248,7 @@ export default function Scorecard() {
                 <TableHeader>
                   <TableRow>
                     <TableHead className="w-[190px]">Time</TableHead>
+                    <TableHead className="w-[180px]">User</TableHead>
                     <TableHead>Topic</TableHead>
                     <TableHead className="w-[170px]">Variant</TableHead>
                     <TableHead className="text-right w-[110px]">Result</TableHead>
@@ -237,6 +260,10 @@ export default function Scorecard() {
                     timeline.map((e: any) => (
                       <TableRow key={String(e.id)}>
                         <TableCell className="text-sm font-medium">{fmtTime(e.submittedAt ?? e.shownAt)}</TableCell>
+                        <TableCell className="text-sm">
+                          <span className="font-medium">{String(e.username ?? '—')}</span>
+                          <span className="text-muted-foreground">{e.userId ? ` (${String(e.userId).slice(0, 8)}…)` : ''}</span>
+                        </TableCell>
                         <TableCell className="text-sm">{topicTitle(String(e.topicId ?? ''), e.mode)}</TableCell>
                         <TableCell className="text-sm font-mono">{String(e.variantId ?? '—')}</TableCell>
                         <TableCell className="text-right tabular-nums">
@@ -258,7 +285,7 @@ export default function Scorecard() {
                     ))
                   ) : (
                     <TableRow>
-                      <TableCell colSpan={5} className="text-center text-muted-foreground py-10">
+                      <TableCell colSpan={6} className="text-center text-muted-foreground py-10">
                         No practice activity yet.
                       </TableCell>
                     </TableRow>
@@ -285,7 +312,45 @@ export default function Scorecard() {
               <span className="font-mono">{String(selected?.variantId ?? '—')}</span>
             </div>
 
-            {detailSnapshot?.katexQuestion ? (
+            {detailSnapshot?.userAnswerParts ? (
+              <div className="rounded-md border bg-background p-3">
+                <div className="text-xs text-muted-foreground mb-2">Your answer</div>
+                {String(detailSnapshot?.variantId ?? '') === 'sqrt_params_point_gradient' && Array.isArray(detailSnapshot.userAnswerParts) ? (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm">
+                    <div>
+                      <span className="text-muted-foreground">a: </span>
+                      <span className="font-medium">{String(detailSnapshot.userAnswerParts[0] ?? '—') || '—'}</span>
+                    </div>
+                    <div>
+                      <span className="text-muted-foreground">b: </span>
+                      <span className="font-medium">{String(detailSnapshot.userAnswerParts[1] ?? '—') || '—'}</span>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="text-sm font-medium break-words">
+                    {Array.isArray(detailSnapshot.userAnswerParts)
+                      ? detailSnapshot.userAnswerParts.map((x: any) => String(x ?? '')).filter((x: string) => x.trim().length > 0).join(' | ') || '—'
+                      : '—'}
+                  </div>
+                )}
+              </div>
+            ) : null}
+
+            {detailSnapshot?.correctAnswerKatex ? (
+              <div className="rounded-md border bg-background p-3">
+                <div className="text-xs text-muted-foreground mb-2">Correct answer</div>
+                <div className="text-xl leading-snug">
+                  <Katex latex={String(detailSnapshot.correctAnswerKatex)} displayMode />
+                </div>
+              </div>
+            ) : null}
+
+            {Array.isArray(detailSnapshot?.promptBlocks) && detailSnapshot.promptBlocks.length ? (
+              <div className="rounded-md border bg-background p-3">
+                <div className="text-xs text-muted-foreground mb-2">Question</div>
+                {renderPromptBlocks(detailSnapshot.promptBlocks)}
+              </div>
+            ) : detailSnapshot?.katexQuestion ? (
               <div className="rounded-md border bg-background p-3">
                 <div className="text-xs text-muted-foreground mb-2">Question (KaTeX)</div>
                 <div className="text-xl leading-snug">

@@ -937,6 +937,7 @@ export function generatePracticeQuestion(input: {
         difficulty: input.difficulty,
         seed: input.seed,
         katexQuestion: q.katexQuestion,
+        promptBlocks: (q as any).promptBlocks,
         katexExplanation: q.katexExplanation,
         expectedNormalized: q.expectedNormalized,
         expectedNormalizedNote: undefined,

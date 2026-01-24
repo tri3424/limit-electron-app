@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { useNavigate } from 'react-router-dom';
 import { ArrowLeft, BarChart3 } from 'lucide-react';
@@ -136,7 +136,28 @@ export default function SettingsPracticeAdminAnalytics() {
     } catch {
       return null;
     }
-  }, [selected]);
+  }, [selected?.snapshotJson]);
+
+  const renderPromptBlocks = useCallback((blocks: any[]) => {
+    if (!Array.isArray(blocks) || !blocks.length) return null;
+    return (
+      <div className="font-slab text-xl leading-relaxed whitespace-normal break-words">
+        {blocks.map((b: any, i: number) => {
+          if (b?.kind === 'text' && String(b?.content ?? '') === '\n') {
+            return <br key={`br-${i}`} />;
+          }
+          if (b?.kind === 'math') {
+            return (
+              <span key={`m-${i}`} className="inline-block align-baseline mx-1">
+                <Katex latex={String(b.content ?? '')} displayMode={false} />
+              </span>
+            );
+          }
+          return <span key={`t-${i}`}>{String(b?.content ?? '')}</span>;
+        })}
+      </div>
+    );
+  }, []);
 
   return (
     <div className="max-w-6xl mx-auto space-y-6 py-8">
@@ -329,12 +350,35 @@ export default function SettingsPracticeAdminAnalytics() {
                   <Card className="p-3">
                     <div className="text-xs text-muted-foreground">Answer</div>
                     <div className="space-y-1">
-                      <div className="text-sm font-medium break-words">{String(selected.userAnswer ?? '—')}</div>
-                      {looksLikeLatex(String(selected.userAnswer ?? '')) ? (
-                        <div className="text-lg leading-snug">
-                          <Katex latex={String(selected.userAnswer ?? '')} displayMode />
-                        </div>
-                      ) : null}
+                      {detailSnapshot?.userAnswerParts ? (
+                        String(detailSnapshot?.variantId ?? '') === 'sqrt_params_point_gradient' && Array.isArray(detailSnapshot.userAnswerParts) ? (
+                          <div className="grid grid-cols-1 gap-1 text-sm">
+                            <div>
+                              <span className="text-muted-foreground">a: </span>
+                              <span className="font-medium">{String(detailSnapshot.userAnswerParts[0] ?? '—') || '—'}</span>
+                            </div>
+                            <div>
+                              <span className="text-muted-foreground">b: </span>
+                              <span className="font-medium">{String(detailSnapshot.userAnswerParts[1] ?? '—') || '—'}</span>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="text-sm font-medium break-words">
+                            {Array.isArray(detailSnapshot.userAnswerParts)
+                              ? detailSnapshot.userAnswerParts.map((x: any) => String(x ?? '')).filter((x: string) => x.trim().length > 0).join(' | ') || '—'
+                              : '—'}
+                          </div>
+                        )
+                      ) : (
+                        <>
+                          <div className="text-sm font-medium break-words">{String(selected.userAnswer ?? '—')}</div>
+                          {looksLikeLatex(String(selected.userAnswer ?? '')) ? (
+                            <div className="text-lg leading-snug">
+                              <Katex latex={String(selected.userAnswer ?? '')} displayMode />
+                            </div>
+                          ) : null}
+                        </>
+                      )}
                     </div>
                   </Card>
                 </div>
@@ -342,6 +386,11 @@ export default function SettingsPracticeAdminAnalytics() {
                 {detailSnapshot ? (
                   <Card className="p-4 space-y-3">
                     <div className="text-sm font-semibold">Question</div>
+                    {Array.isArray(detailSnapshot.promptBlocks) && detailSnapshot.promptBlocks.length ? (
+                      <div className="text-xl leading-snug">
+                        {renderPromptBlocks(detailSnapshot.promptBlocks)}
+                      </div>
+                    ) : null}
                     {detailSnapshot.promptKatex ? (
                       <div className="text-xl leading-snug">
                         <Katex latex={detailSnapshot.promptKatex} displayMode />

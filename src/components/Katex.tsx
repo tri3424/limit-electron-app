@@ -34,17 +34,7 @@ export function Katex({ latex, displayMode, className }: Props) {
 
   const html = useMemo(() => {
     try {
-      const shouldInjectAllowBreaks =
-        !!displayMode
-        && /[a-zA-Z0-9]/.test(normalizedLatex)
-        && !normalizedLatex.includes('\\text')
-        && !normalizedLatex.includes('\\begin{array}')
-        && !normalizedLatex.includes('\\cline')
-        && !normalizedLatex.includes('\\hline');
-      const maybeWithBreaks = shouldInjectAllowBreaks
-        ? injectAllowBreaksForPolynomials(normalizedLatex)
-        : normalizedLatex;
-      return katex.renderToString(maybeWithBreaks, {
+      return katex.renderToString(normalizedLatex, {
         throwOnError: false,
         displayMode: !!displayMode,
         strict: 'warn',

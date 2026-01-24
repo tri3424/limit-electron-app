@@ -1,6 +1,6 @@
 'use strict';
 
-const { app, BrowserWindow, Menu, ipcMain, dialog, session, shell } = require('electron');
+const { app, BrowserWindow, Menu, ipcMain, dialog, session, shell, nativeImage } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const { pathToFileURL } = require('url');
@@ -28,6 +28,28 @@ function canWriteToDir(dirPath) {
 
 let mainWindow;
 const isDev = !app.isPackaged;
+
+function getAppIconPath() {
+	const candidates = [];
+	if (app.isPackaged) {
+		candidates.push(path.join(process.resourcesPath, 'icon.png'));
+		candidates.push(path.join(process.resourcesPath, 'icon.ico'));
+	}
+
+	candidates.push(path.join(__dirname, '..', 'build', 'icon.png'));
+	candidates.push(path.join(__dirname, '..', 'build', 'icon.ico'));
+
+	for (const p of candidates) {
+		try {
+			if (p && fs.existsSync(p)) return p;
+		} catch {
+			// ignore
+		}
+	}
+
+	return undefined;
+}
+
 function clampRect(rect, maxW, maxH) {
 	const x = Math.max(0, Math.min(maxW - 1, Math.floor(rect.x)));
 	const y = Math.max(0, Math.min(maxH - 1, Math.floor(rect.y)));
@@ -53,6 +75,9 @@ function normalizeOptionLabel(text) {
 }
 
 function createWindow() {
+	const iconPath = getAppIconPath();
+	const windowIcon = iconPath ? nativeImage.createFromPath(iconPath) : undefined;
+	const hasValidIcon = !!(windowIcon && !windowIcon.isEmpty());
   mainWindow = new BrowserWindow({
     width: 1200,
     height: 800,
@@ -65,7 +90,7 @@ function createWindow() {
       webSecurity: false,
       preload: path.join(__dirname, 'preload.cjs'),
     },
-    icon: path.join(__dirname, '..', 'build', 'icon.ico'),
+		...(hasValidIcon ? { icon: windowIcon } : {}),
     autoHideMenuBar: true,
   });
 
@@ -88,6 +113,76 @@ function createWindow() {
 		} catch {
 			// ignore
 		}
+	});
+
+	const activeExportStreams = new Map();
+
+	ipcMain.handle('data:beginExportJson', async (_event, payload) => {
+		if (!mainWindow || mainWindow.isDestroyed()) {
+			throw new Error('Main window is not available');
+		}
+		const defaultFileName = payload && typeof payload.defaultFileName === 'string' ? payload.defaultFileName : 'MathInk-backup.json';
+		const pick = await dialog.showSaveDialog(mainWindow, {
+			title: 'Export data',
+			defaultPath: defaultFileName,
+			filters: [{ name: 'JSON', extensions: ['json'] }],
+		});
+		if (pick.canceled || !pick.filePath) {
+			return { canceled: true };
+		}
+		const exportId = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+		const stream = fs.createWriteStream(pick.filePath, { encoding: 'utf8' });
+		activeExportStreams.set(exportId, { stream, filePath: pick.filePath });
+		return { canceled: false, exportId, filePath: pick.filePath };
+	});
+
+	ipcMain.handle('data:writeExportChunk', async (_event, payload) => {
+		const exportId = payload && typeof payload.exportId === 'string' ? payload.exportId : '';
+		const chunk = payload && typeof payload.chunk === 'string' ? payload.chunk : '';
+		if (!exportId) throw new Error('Missing exportId');
+		const entry = activeExportStreams.get(exportId);
+		if (!entry || !entry.stream) throw new Error('Export not found');
+		if (!chunk) return { ok: true };
+		await new Promise((resolve, reject) => {
+			entry.stream.write(chunk, 'utf8', (err) => (err ? reject(err) : resolve()));
+		});
+		return { ok: true };
+	});
+
+	ipcMain.handle('data:finishExportJson', async (_event, payload) => {
+		const exportId = payload && typeof payload.exportId === 'string' ? payload.exportId : '';
+		if (!exportId) throw new Error('Missing exportId');
+		const entry = activeExportStreams.get(exportId);
+		if (!entry || !entry.stream) throw new Error('Export not found');
+		await new Promise((resolve, reject) => {
+			entry.stream.end(() => resolve());
+			entry.stream.on('error', reject);
+		});
+		activeExportStreams.delete(exportId);
+		return { ok: true, filePath: entry.filePath };
+	});
+
+	ipcMain.handle('data:abortExportJson', async (_event, payload) => {
+		const exportId = payload && typeof payload.exportId === 'string' ? payload.exportId : '';
+		if (!exportId) throw new Error('Missing exportId');
+		const entry = activeExportStreams.get(exportId);
+		if (!entry || !entry.stream) return { ok: true };
+		try {
+			await new Promise((resolve) => {
+				entry.stream.end(() => resolve());
+			});
+		} catch {
+			// ignore
+		}
+		activeExportStreams.delete(exportId);
+		try {
+			if (entry.filePath && fs.existsSync(entry.filePath)) {
+				fs.unlinkSync(entry.filePath);
+			}
+		} catch {
+			// ignore
+		}
+		return { ok: true };
 	});
 
   if (isDev) {

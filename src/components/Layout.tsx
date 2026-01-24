@@ -213,8 +213,6 @@ export function Layout({ children }: LayoutProps) {
 		setOmniLoading(false);
 	};
 
-	const logoSrc = `${import.meta.env.BASE_URL}favicon.ico`;
-
   const adminNavigation = [
     { name: 'Home', href: HOME_ROUTE, icon: Home },
 		{ name: 'Courses', href: '/stories-admin', icon: BookText },
@@ -471,16 +469,15 @@ export function Layout({ children }: LayoutProps) {
           									{/* Left: logo / brand */}
 									<div className="flex items-center gap-2">
 										<Link to={HOME_ROUTE} className="flex items-center gap-2">
-														<img className="tk-app-favicon" src="/favicon.ico" alt="MathInk" />
-														<span className="tk-logo-font tk-logo-interactive text-xl md:text-2xl font-extrabold tracking-tight drop-shadow-[0_2px_2px_rgba(0,0,0,0.35)]">
-															<span className="bg-gradient-to-b from-cyan-200 to-sky-200 bg-clip-text text-transparent">M</span>
-															<span className="bg-gradient-to-b from-emerald-200 to-lime-200 bg-clip-text text-transparent">a</span>
-                <span className="bg-gradient-to-b from-amber-200 to-yellow-200 bg-clip-text text-transparent">t</span>
-                <span className="bg-gradient-to-b from-orange-200 to-rose-200 bg-clip-text text-transparent">h</span>
-                <span className="bg-gradient-to-b from-violet-300 to-fuchsia-400 bg-clip-text text-transparent">I</span>
-                <span className="bg-gradient-to-b from-sky-200 to-cyan-200 bg-clip-text text-transparent">n</span>
-                <span className="bg-gradient-to-b from-emerald-200 to-teal-200 bg-clip-text text-transparent">k</span>
-              </span>
+																	<span className="tk-logo-font tk-navbar-wordmark tk-logo-interactive text-lg md:text-3xl font-black tracking-tight" aria-label="MathInk">
+																		<span className="tk-navbar-wordmark-letter">M</span>
+																		<span className="tk-navbar-wordmark-letter">a</span>
+																		<span className="tk-navbar-wordmark-letter">t</span>
+																		<span className="tk-navbar-wordmark-letter">h</span>
+																		<span className="tk-navbar-wordmark-letter">I</span>
+																		<span className="tk-navbar-wordmark-letter">n</span>
+																		<span className="tk-navbar-wordmark-letter">k</span>
+																	</span>
 										</Link>
 									</div>
 
