@@ -14,6 +14,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Textarea } from '@/components/ui/textarea';
 import { Katex } from '@/components/Katex';
 import { PolynomialLongDivision } from '@/components/PolynomialLongDivision';
+import { PromptBlocksFlow } from '@/components/PromptBlocksFlow';
 import { ArrowLeft, Bug, CircleHelp } from 'lucide-react';
 import MathLiveInput from '@/components/MathLiveInput';
 import InteractiveGraph from '@/components/InteractiveGraph';
@@ -178,6 +179,11 @@ const PRACTICE_VARIANTS: Partial<Record<PracticeTopicId, string[]>> = {
     'linear_minus_rational_xaxis_gradients',
     'stationary_points_coords',
     'tangent_or_normal_equation',
+    'tangent_equation_at_point',
+    'normal_equation_at_point',
+    'normal_y_intercept_coords',
+    'normal_x_intercept_coords',
+    'tangents_intersection_coords',
   ],
   integration: ['indefinite', 'definite'],
 };
@@ -828,6 +834,14 @@ export default function Practice() {
   const wpKatexInnerRef = useRef<HTMLDivElement | null>(null);
   const [wpKatexScale, setWpKatexScale] = useState(1);
 
+  const nextSeedRef = useRef<number>(Date.now());
+  const computeNextSeed = () => {
+    const now = Date.now();
+    const next = Math.max(now, (nextSeedRef.current ?? now) + 1);
+    nextSeedRef.current = next;
+    return next;
+  };
+
   const escapeKatexText = (s: string) =>
     String(s ?? '')
       .replace(/\\/g, '\\textbackslash{}')
@@ -883,6 +897,14 @@ export default function Practice() {
         return [
           { id: 'a', label: 'a', inputKind: 'input', inputMode: 'decimal', sanitize: sanitizeRationalInput },
           { id: 'b', label: 'b', inputKind: 'input', inputMode: 'decimal', sanitize: sanitizeRationalInput },
+        ];
+      }
+
+      // Coordinate response for tangent/normal applications: always x,y.
+      if (['normal_y_intercept_coords', 'normal_x_intercept_coords', 'tangents_intersection_coords'].includes(v) && parts.length === 2) {
+        return [
+          { id: 'x', label: 'x', inputKind: 'input', inputMode: 'decimal', sanitize: sanitizeRationalInput },
+          { id: 'y', label: 'y', inputKind: 'input', inputMode: 'decimal', sanitize: sanitizeRationalInput },
         ];
       }
 
@@ -1294,6 +1316,8 @@ export default function Practice() {
     const topicVariantAnswerKinds = (freq?.topicVariantAnswerKinds ?? {}) as Record<string, Record<string, string>>;
     const mixedModuleItemWeights = (freq?.mixedModuleItemWeights ?? {}) as Record<string, Record<number, number>>;
 
+    const hasTextFilter = Boolean(onlyQuestionTextQuery.trim());
+
     const adminFilterOverridesFrequencies = Boolean(isAdmin && activeTopicScope);
 
     const hasConfiguredWeights = (w: unknown) => {
@@ -1385,12 +1409,29 @@ export default function Practice() {
     const tryGenerate = (
       fn: (seed: number) => PracticeQuestion,
       accept?: (q: PracticeQuestion) => boolean,
-      opts?: { strict?: boolean }
+      opts?: { strict?: boolean; seedBase?: number }
     ) => {
       const hasTextFilter = Boolean(onlyQuestionTextQuery.trim());
-      for (let attempt = 0; attempt < 1200; attempt++) {
-        const seed = seedValue + attempt;
+      const currentQuestionId = (question as any)?.id ? String((question as any).id) : '';
+      const currentQuestionKey = (() => {
+        try {
+          return currentQuestionId ? String(getQuestionDedupKey(question as any) ?? '') : '';
+        } catch {
+          return '';
+        }
+      })();
+      const seedBase = typeof opts?.seedBase === 'number' ? opts.seedBase : seedValue;
+      const maxAttempts = hasTextFilter ? 12000 : 1200;
+      for (let attempt = 0; attempt < maxAttempts; attempt++) {
+        const seed = seedBase + attempt;
         const q = fn(seed);
+
+        // Even under keyword filters, never repeat the exact same instance.
+        if (hasTextFilter) {
+          if (currentQuestionId && String(q.id ?? '') === currentQuestionId) continue;
+          const k = getQuestionDedupKey(q);
+          if (k && currentQuestionKey && String(k) === String(currentQuestionKey)) continue;
+        }
         if (!hasTextFilter && recentSet.has(q.id)) continue;
         if (!hasTextFilter) {
           const k = getQuestionDedupKey(q);
@@ -1430,7 +1471,7 @@ export default function Practice() {
       // If a keyword filter is active and we couldn't find a match, don't fall back
       // to a random question (that defeats the purpose of /only).
       if (onlyQuestionTextQuery.trim()) return null;
-      return fn(seedValue);
+      return fn(seedBase);
     };
 
     const probabilityCooldown = 8;
@@ -1490,11 +1531,11 @@ export default function Practice() {
           const effectiveWeightsForTopic = (forced ?? multi ?? weightsForTopic) as any;
           const strictTopic = !!forced || !!multi || hasConfiguredWeights(effectiveWeightsForTopic);
 
-          const avoidVariantId = !strictTopic && item.topicId === 'word_problems'
+          const avoidVariantId = !hasTextFilter && !strictTopic && item.topicId === 'word_problems'
             ? (lastVariantByTopic.word_problems as string | undefined)
             : undefined;
 
-          const q = tryGenerate(
+          const q0 = tryGenerate(
             (seed) =>
               generatePracticeQuestion({
                 topicId: item.topicId,
@@ -1508,8 +1549,23 @@ export default function Practice() {
             { strict: strictTopic }
           );
 
+          const q = q0 ?? (onlyQuestionTextQuery.trim()
+            ? tryGenerate(
+                (seed) =>
+                  generatePracticeQuestion({
+                    topicId: item.topicId,
+                    difficulty: item.difficulty,
+                    seed,
+                    avoidVariantId,
+                    variantWeights: effectiveWeightsForTopic,
+                    answerKindByVariant: topicVariantAnswerKinds?.[item.topicId],
+                  }),
+                item.topicId === 'word_problems' ? acceptWordProblem : undefined,
+                { strict: strictTopic, seedBase: computeNextSeed() }
+              )
+            : null);
+
           if (!q) {
-            toast.error(`No matching question found for filter: "${onlyQuestionTextQuery.trim()}"`);
             return;
           }
 
@@ -1565,9 +1621,9 @@ export default function Practice() {
         const weightsForTopic = (forced ?? (topicVariantWeights?.[item.topicId] as any)) as any;
         const effectiveWeightsForTopic = (forced ?? multi ?? weightsForTopic) as any;
         const strictTopic = !!forced || !!multi || hasConfiguredWeights(effectiveWeightsForTopic);
-        const avoidVariantId = !strictTopic ? (lastVariantByTopic[item.topicId] as string | undefined) : undefined;
+        const avoidVariantId = !hasTextFilter && !strictTopic ? (lastVariantByTopic[item.topicId] as string | undefined) : undefined;
 
-        const q = tryGenerate(
+        const q0 = tryGenerate(
           (seed) =>
             generatePracticeQuestion({
               topicId: item.topicId,
@@ -1580,10 +1636,24 @@ export default function Practice() {
           item.topicId === 'word_problems' ? acceptWordProblem : undefined,
           { strict: strictMixed || strictTopic }
         );
-        if (!q) {
-          toast.error(`No matching question found for filter: "${onlyQuestionTextQuery.trim()}"`);
-          return;
-        }
+
+        const q = q0 ?? (onlyQuestionTextQuery.trim()
+          ? tryGenerate(
+              (seed) =>
+                generatePracticeQuestion({
+                  topicId: item.topicId,
+                  difficulty: item.difficulty,
+                  seed,
+                  avoidVariantId,
+                  variantWeights: effectiveWeightsForTopic,
+                  answerKindByVariant: topicVariantAnswerKinds?.[item.topicId],
+                }),
+              item.topicId === 'word_problems' ? acceptWordProblem : undefined,
+              { strict: strictMixed || strictTopic, seedBase: computeNextSeed() }
+            )
+          : null);
+
+        if (!q) return;
         setQuestion(q);
         rememberQuestionId(q.id);
         rememberQuestionKey(getQuestionDedupKey(q));
@@ -1604,9 +1674,9 @@ export default function Practice() {
     const multi = variantMultiOverride?.topicId === topicId ? buildMultiVariantWeights(topicId, variantMultiOverride.variantIds) : null;
     const effectiveWeightsForTopic = (forced ?? multi ?? weightsForTopic) as any;
     const strict = !!forced || !!multi || hasConfiguredWeights(effectiveWeightsForTopic);
-    const avoidVariantId = !strict ? (lastVariantByTopic[topicId] as string | undefined) : undefined;
+    const avoidVariantId = !hasTextFilter && !strict ? (lastVariantByTopic[topicId] as string | undefined) : undefined;
 
-    const q = tryGenerate(
+    const q0 = tryGenerate(
       (seed) =>
         generatePracticeQuestion({
           topicId: topicId,
@@ -1619,10 +1689,24 @@ export default function Practice() {
       topicId === 'word_problems' ? acceptWordProblem : undefined,
       { strict }
     );
-    if (!q) {
-      toast.error(`No matching question found for filter: "${onlyQuestionTextQuery.trim()}"`);
-      return;
-    }
+
+    const q = q0 ?? (onlyQuestionTextQuery.trim()
+      ? tryGenerate(
+          (seed) =>
+            generatePracticeQuestion({
+              topicId: topicId,
+              difficulty: difficulty,
+              seed,
+              avoidVariantId,
+              variantWeights: effectiveWeightsForTopic,
+              answerKindByVariant: topicVariantAnswerKinds?.[topicId],
+            }),
+          topicId === 'word_problems' ? acceptWordProblem : undefined,
+          { strict, seedBase: computeNextSeed() }
+        )
+      : null);
+
+    if (!q) return;
     setQuestion(q);
     rememberQuestionId(q.id);
     rememberQuestionKey(getQuestionDedupKey(q));
@@ -1637,7 +1721,7 @@ export default function Practice() {
 
   useEffect(() => {
     if (keywordApplyNonce <= 0) return;
-    const seed = pendingKeywordSeedRef.current ?? Date.now();
+    const seed = pendingKeywordSeedRef.current ?? computeNextSeed();
     pendingKeywordSeedRef.current = null;
     setSessionSeed(seed);
     generateNext(seed);
@@ -1974,7 +2058,7 @@ export default function Practice() {
       setVariantOverride(null);
       setOnlyQuestionTextQuery(raw);
       setOnlyQuestionTextTopicScope(currentTopicForSearchScope);
-      pendingKeywordSeedRef.current = Date.now();
+      pendingKeywordSeedRef.current = computeNextSeed();
       setKeywordApplyNonce((n) => n + 1);
       toast.success(`Filtering questions by text: "${raw}"`);
       return;
@@ -2058,6 +2142,7 @@ export default function Practice() {
       setVariantMultiOverride(null);
       setOnlyQuestionTextQuery(q);
       setOnlyQuestionTextTopicScope(currentTopicForSearchScope);
+      pendingKeywordSeedRef.current = computeNextSeed();
       toast.success(`Filtering questions by text: "${q}"`);
       return;
     }
@@ -2074,7 +2159,7 @@ export default function Practice() {
       setVariantOverride(null);
       setOnlyQuestionTextQuery(q);
       setOnlyQuestionTextTopicScope(currentTopicForSearchScope);
-      pendingKeywordSeedRef.current = Date.now();
+      pendingKeywordSeedRef.current = computeNextSeed();
       setKeywordApplyNonce((n) => n + 1);
       toast.success(`Filtering questions by text: "${q}"`);
       return;
@@ -2162,6 +2247,8 @@ export default function Practice() {
     extract(anyQ.katexQuestion, 2);
     extract(anyQ.question, 2);
     extract(anyQ.prompt, 2);
+    extract(anyQ.promptText, 2);
+    extract(anyQ.promptKatex, 2);
     extract(anyQ.text, 2);
     extract(anyQ.title, 2);
 
@@ -3612,7 +3699,7 @@ export default function Practice() {
                   variant="outline"
                   size="sm"
                   onClick={() => {
-                    const nextSeed = Date.now();
+                    const nextSeed = computeNextSeed();
                     setSessionSeed(nextSeed);
                     generateNext(nextSeed);
                   }}
@@ -3990,6 +4077,10 @@ export default function Practice() {
                     .replace(/\\text\(([^)]*)\)/g, '$1')
                     // If \text appears without a brace, drop it.
                     .replace(/\\text\b\{?/g, '')
+                    // Degree notation: ^\circ or \circ -> °
+                    .replace(/\^\{\\circ\}/g, '°')
+                    .replace(/\^\\circ/g, '°')
+                    .replace(/\\circ/g, '°')
                     .replace(/\\!+/g, '')
                     // Line breaks and spacing escapes.
                     .replace(/\\\\/g, ' ')
@@ -4005,8 +4096,26 @@ export default function Practice() {
                     .replace(/\\+/g, '')
                     .replace(/~/g, ' ')
                     .replace(/[{}]/g, '')
+                    // Remove unnecessary parentheses around signed temperatures.
+                    // e.g. "(-26)°C" -> "-26°C"
+                    .replace(/\(\s*(-?\d+(?:\.\d+)?)\s*\)\s*°\s*([cCfF])\b/g, '$1°$2')
+                    .replace(/\(\s*(-?\d+(?:\.\d+)?)\s*\)\s*°\b/g, '$1°')
                     .replace(/\s+/g, ' ')
                     .trim();
+
+                  const isDegreeOnlyLatex = (src: string) => {
+                    const s = String(src ?? '').trim();
+                    if (!s) return false;
+                    // If it contains "real" math constructs, we should keep KaTeX.
+                    if (/\\frac\{|\\(?:dfrac|tfrac)\{|\\sqrt\b|\\pi\b|\\ln\b|\\log\b|\\cdot\b|\\int\b|_=|\$/.test(s)) return false;
+                    // If it has scripts other than the degree symbol, keep KaTeX.
+                    const stripped = s
+                      .replace(/\^\{\\circ\}/g, '')
+                      .replace(/\^\\circ/g, '')
+                      .replace(/\\circ/g, '')
+                      .replace(/\^\{\d+\}/g, '');
+                    return !/[\^_]/.test(stripped);
+                  };
 
                   const preserveFractions = (src: string) => {
                     const fracs: string[] = [];
@@ -4031,7 +4140,9 @@ export default function Practice() {
 
                   const wpLatex = isWordProblem ? String((question as any).katexQuestion ?? '').trim() : '';
                   const wpShouldRenderAsKatex =
-                    !!wpLatex && /\^|_|\\frac\{|\\(?:dfrac|tfrac)\{|\\sqrt\b|\\pi\b|\\ln\b|\\log\b|\\cdot\b|\\int\b/.test(wpLatex);
+                    !!wpLatex
+                    && !isDegreeOnlyLatex(wpLatex)
+                    && (/\^|_|\\frac\{|\\(?:dfrac|tfrac)\{|\\sqrt\b|\\pi\b|\\ln\b|\\log\b|\\cdot\b|\\int\b/.test(wpLatex));
 
                   if (isWordProblem && wpShouldRenderAsKatex) {
                     return (
@@ -4039,6 +4150,17 @@ export default function Practice() {
                         <Katex latex={wpLatex} displayMode />
                       </div>
                     );
+                  }
+
+                  if (isWordProblem && wpLatex && isDegreeOnlyLatex(wpLatex)) {
+                    const cleaned = stripLatex(wpLatex);
+                    if (cleaned) {
+                      return (
+                        <div className={`w-full min-w-0 max-w-full select-none font-slab text-xl md:text-2xl leading-snug text-left whitespace-normal break-words`}>
+                          {cleaned}
+                        </div>
+                      );
+                    }
                   }
 
                   if (isWordProblem && wpPromptText.trim().length) {
@@ -4122,79 +4244,12 @@ export default function Practice() {
                   if (Array.isArray(promptBlocks) && promptBlocks.length) {
                     return (
                       <div className="w-full select-none">
-                        <div className="tk-wp-expl-text font-slab w-full min-w-0 max-w-full overflow-x-hidden text-lg md:text-xl leading-relaxed text-left text-foreground whitespace-normal break-words">
-                          <span className="inline-flex flex-wrap items-baseline gap-x-1 gap-y-1">
-                            {(() => {
-                              const out: any[] = [];
-                              for (let i = 0; i < promptBlocks.length; i++) {
-                                const b = promptBlocks[i];
-                                const content = String(b?.content ?? '');
-
-                                if (b?.kind === 'text' && content === '\n') {
-                                  const prev = i > 0 ? promptBlocks[i - 1] : undefined;
-                                  const next = i + 1 < promptBlocks.length ? promptBlocks[i + 1] : undefined;
-                                  const nextText = String(next?.content ?? '');
-                                  const shouldKeepInline =
-                                    prev?.kind === 'math'
-                                    && next?.kind === 'text'
-                                    && /^(\s*)at the point\b/i.test(nextText);
-                                  const shouldKeepInlinePlural =
-                                    prev?.kind === 'math'
-                                    && next?.kind === 'text'
-                                    && /^(\s*)at the points\b/i.test(nextText);
-                                  if (shouldKeepInline || shouldKeepInlinePlural) {
-                                    // Do not force a new line for this pattern; keep text aligned with the equation.
-                                    out.push(<span key={`pbr-${i}`} className="inline"> </span>);
-                                  } else {
-                                    out.push(<span key={`pbr-${i}`} className="basis-full h-0" />);
-                                  }
-                                  continue;
-                                }
-
-                                // Keep patterns like: [math gradient] + ["at this point."] together
-                                // so the text doesn't wrap onto a new line before the explicit newline.
-                                if (
-                                  b?.kind === 'math' &&
-                                  typeof promptBlocks[i + 1]?.content !== 'undefined' &&
-                                  promptBlocks[i + 1]?.kind === 'text' &&
-                                  String(promptBlocks[i + 1]?.content ?? '').startsWith('at this point.')
-                                ) {
-                                  const nextText = String(promptBlocks[i + 1]?.content ?? '');
-                                  out.push(
-                                    <span key={`pmg-${i}`} className="inline-flex items-baseline whitespace-nowrap">
-                                      <span className="tk-prompt-inline-math inline-flex items-baseline max-w-full min-w-0">
-                                        <span className="tk-math-scroll-inline align-baseline max-w-full">
-                                          <Katex latex={String(b.content ?? '')} displayMode={false} />
-                                        </span>
-                                      </span>
-                                      <span className="ml-1">{nextText}</span>
-                                    </span>
-                                  );
-                                  i += 1;
-                                  continue;
-                                }
-
-                                if (b?.kind === 'math') {
-                                  out.push(
-                                    <span key={`pm-${i}`} className="tk-prompt-inline-math inline-flex items-baseline max-w-full min-w-0">
-                                      <span className="tk-math-scroll-inline align-baseline max-w-full">
-                                        <Katex latex={String(b.content ?? '')} displayMode={false} />
-                                      </span>
-                                    </span>
-                                  );
-                                  continue;
-                                }
-
-                                out.push(
-                                  <span key={`pt-${i}`} className="whitespace-normal">
-                                    {content}
-                                  </span>
-                                );
-                              }
-                              return out;
-                            })()}
-                          </span>
-                        </div>
+                        <PromptBlocksFlow
+                          blocks={promptBlocks as any}
+                          className="tk-wp-expl-text text-lg md:text-xl leading-relaxed text-foreground"
+                          textClassName="font-slab"
+                          align="left"
+                        />
                       </div>
                     );
                   }
@@ -5210,7 +5265,7 @@ export default function Practice() {
                     variant="outline"
                     onClick={() => {
                       void recordNextEvent();
-                      const nextSeed = Date.now();
+                      const nextSeed = computeNextSeed();
                       setSessionSeed(nextSeed);
                       if (mode === 'mixed') {
                         setMixedCursor((c) => c + 1);

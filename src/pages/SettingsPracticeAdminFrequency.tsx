@@ -289,6 +289,11 @@ export default function SettingsPracticeAdminFrequency() {
               { key: 'linear_minus_rational_xaxis_gradients', label: 'Gradients at x-axis crossings: y=x-p/(x+q)', defaultValue: 0 },
               { key: 'stationary_points_coords', label: 'Coordinates where gradient is 0 (stationary points)', defaultValue: 0 },
               { key: 'tangent_or_normal_equation', label: 'Equation of tangent/normal at x=a', defaultValue: 0 },
+              { key: 'tangent_equation_at_point', label: 'Tangent equation at x=a', defaultValue: 0 },
+              { key: 'normal_equation_at_point', label: 'Normal equation at x=a', defaultValue: 0 },
+              { key: 'normal_y_intercept_coords', label: 'Normal meets y-axis: coordinates', defaultValue: 0 },
+              { key: 'normal_x_intercept_coords', label: 'Normal meets x-axis: coordinates', defaultValue: 0 },
+              { key: 'tangents_intersection_coords', label: 'Intersection of two tangents: coordinates', defaultValue: 0 },
             ],
           };
         }

@@ -152,7 +152,7 @@ export function simplifyLatexForDisplay(rawLatex: string): string {
     const d = Number(b);
     const r = reduceNumericFraction(n, d);
     if (r.d === 1) return String(r.n);
-    return String.raw`\\frac{${r.n}}{${r.d}}`;
+    return `\\frac{${r.n}}{${r.d}}`;
   });
 
   // x^0 and x^1

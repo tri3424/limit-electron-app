@@ -2564,6 +2564,15 @@ export function generateWordProblemQuestion(input: {
   }
 
   if (mixSub === 4) {
+    const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'] as const;
+    const day1 = days[rng.int(0, days.length - 1)] ?? 'Monday';
+    let day2 = days[rng.int(0, days.length - 1)] ?? 'Tuesday';
+    let tries = 0;
+    while (day2 === day1 && tries < 12) {
+      tries += 1;
+      day2 = days[rng.int(0, days.length - 1)] ?? 'Tuesday';
+    }
+
     const monday =
       input.difficulty === 'easy'
         ? rng.int(-20, 20)
@@ -2589,17 +2598,17 @@ export function generateWordProblemQuestion(input: {
     const mondayPrompt = `${noBreakNeg(monday)}°C`;
     const mondayLatex = monday < 0 ? `(${monday})` : String(monday);
 
-    const q = String.raw`\text{The temperature on Monday is }${mondayLatex}^{\circ}\text{C. The temperature on Tuesday is }${delta}^{\circ}\text{C ${isHigher ? 'higher' : 'lower'}. Work out the temperature on Tuesday.}`;
+    const q = String.raw`\text{The temperature on ${day1} is }${mondayLatex}^{\circ}\text{C. The temperature on ${day2} is }${delta}^{\circ}\text{C ${isHigher ? 'higher' : 'lower'}. Work out the temperature on ${day2}.}`;
     const working: KatexExplanationBlock[] = [
       { kind: 'text', content: `Translate the words into an operation: “${isHigher ? 'higher' : 'lower'}” means ${isHigher ? 'add' : 'subtract'}.` },
-      { kind: 'math', content: String.raw`\text{Tuesday} = ${mondayLatex} ${isHigher ? '+' : '-'} ${delta}`, displayMode: true },
+      { kind: 'math', content: String.raw`\text{${day2}} = ${mondayLatex} ${isHigher ? '+' : '-'} ${delta}`, displayMode: true },
       { kind: 'text', content: 'Calculate.' },
       { kind: 'math', content: String.raw`${mondayLatex} ${isHigher ? '+' : '-'} ${delta} = ${tuesday}`, displayMode: true },
     ];
     const expl = scaffoldExplanation({
       title: 'Number skill: integer change in temperature.',
-      givens: [`Monday = ${mondayPrompt}`, `Tuesday is ${delta}°C ${isHigher ? 'higher' : 'lower'}`],
-      goal: 'Find Tuesday’s temperature.',
+      givens: [`${day1} = ${mondayPrompt}`, `${day2} is ${delta}°C ${isHigher ? 'higher' : 'lower'}`],
+      goal: `Find ${day2}’s temperature.`,
       method: [
         isHigher
           ? `Add ${delta} to ${monday} because “higher” means increase.`
@@ -2608,13 +2617,13 @@ export function generateWordProblemQuestion(input: {
       working,
       checks: [
         isHigher
-          ? 'Tuesday should be greater than Monday because the temperature increased.'
-          : 'Tuesday should be less than Monday because the temperature decreased.',
+          ? `${day2} should be greater than ${day1} because the temperature increased.`
+          : `${day2} should be less than ${day1} because the temperature decreased.`,
       ],
     });
     return mk({
       idSuffix: 'mini-temp',
-      promptText: `The temperature on Monday is ${mondayPrompt}. The temperature on Tuesday is ${delta}°C ${isHigher ? 'higher' : 'lower'}. Work out the temperature on Tuesday.`,
+      promptText: `The temperature on ${day1} is ${mondayPrompt}. The temperature on ${day2} is ${delta}°C ${isHigher ? 'higher' : 'lower'}. Work out the temperature on ${day2}.`,
       katexQuestion: q,
       katexExplanation: expl,
       answerKind: 'integer',

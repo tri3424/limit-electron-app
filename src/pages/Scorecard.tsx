@@ -14,6 +14,7 @@ import { PRACTICE_TOPICS } from '@/lib/practiceTopics';
 import { Katex } from '@/components/Katex';
 import InteractiveGraph from '@/components/InteractiveGraph';
 import { PolynomialLongDivision } from '@/components/PolynomialLongDivision';
+import { PromptBlocksFlow } from '@/components/PromptBlocksFlow';
 
 type Row = {
   date: string;
@@ -95,21 +96,12 @@ export default function Scorecard() {
   const renderPromptBlocks = useCallback((blocks: any[]) => {
     if (!Array.isArray(blocks) || !blocks.length) return null;
     return (
-      <div className="font-slab text-xl leading-relaxed whitespace-normal break-words">
-        {blocks.map((b: any, i: number) => {
-          if (b?.kind === 'text' && String(b?.content ?? '') === '\n') {
-            return <br key={`br-${i}`} />;
-          }
-          if (b?.kind === 'math') {
-            return (
-              <span key={`m-${i}`} className="inline-block align-baseline mx-1">
-                <Katex latex={String(b.content ?? '')} displayMode={false} />
-              </span>
-            );
-          }
-          return <span key={`t-${i}`}>{String(b?.content ?? '')}</span>;
-        })}
-      </div>
+      <PromptBlocksFlow
+        blocks={blocks as any}
+        className="text-xl leading-relaxed"
+        textClassName="font-slab"
+        align="left"
+      />
     );
   }, []);
 
