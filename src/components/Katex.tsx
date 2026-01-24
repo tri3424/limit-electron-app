@@ -1,5 +1,6 @@
 import katex from 'katex';
 import { useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { simplifyLatexForDisplay } from '@/lib/universalMathNormalize';
 
 type Props = {
   latex: string;
@@ -29,7 +30,8 @@ export function Katex({ latex, displayMode, className }: Props) {
   const normalizedLatex = useMemo(() => {
     // Some generators/content can include unicode minus/dash characters.
     // Normalize them to ASCII '-' so KaTeX treats them as the standard operator.
-    return String(latex ?? '').replace(/[−–]/g, '-');
+    const s = String(latex ?? '').replace(/[−–]/g, '-');
+    return simplifyLatexForDisplay(s);
   }, [latex]);
 
   const html = useMemo(() => {

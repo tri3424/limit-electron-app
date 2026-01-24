@@ -253,7 +253,14 @@ export default function InteractiveGraph(props: {
 
       for (let i = 0; i <= n; i++) {
         const x = xMin + (i / n) * (xMax - xMin);
-        const y = fn(x);
+        let y: number;
+        try {
+          y = fn(x);
+        } catch {
+          pushSeg();
+          prev = null;
+          continue;
+        }
 
         if (!isFinite(y) || Math.abs(y) > yClip) {
           pushSeg();
@@ -348,6 +355,9 @@ export default function InteractiveGraph(props: {
       }
 
       if (p.kind === 'function') {
+        if (typeof (p as any).fn !== 'function') {
+          continue;
+        }
         const n = Math.min(2400, Math.max(600, Math.floor(innerW * 2)));
         // Keep yClip large enough that we can draw up to the viewport boundary for vertical asymptotes.
         const yClip = p.yClip ?? Math.max(200, Math.max(Math.abs(renderView.yMin), Math.abs(renderView.yMax)) * 200);

@@ -497,21 +497,18 @@ export function generateDifferentiationQuestion(input: { seed: number; difficult
 
   if (variant === 'tangent_or_normal_equation') {
     const ask = rng.next() < 0.5 ? ('tangent' as const) : ('normal' as const);
-    const xChoices = input.difficulty === 'easy' ? [1, 2, 3] : input.difficulty === 'medium' ? [1, 2, 3, 4] : [1, 2, 3, 4, 5];
-    const x0 = xChoices[rng.int(0, xChoices.length - 1)] ?? 2;
+    const LIM = 2000;
+    const maxX0 = input.difficulty === 'easy' ? 10 : input.difficulty === 'medium' ? 15 : 20;
+    const x0 = rng.int(1, maxX0);
 
-    const pChoices = input.difficulty === 'easy' ? [2, 3] : input.difficulty === 'medium' ? [2, 3, 4] : [2, 3, 4, 5];
-    const p = pChoices[rng.int(0, pChoices.length - 1)] ?? 3;
-
-    const qNegChoices = input.difficulty === 'easy' ? [-1, -2] : [-1, -2, -3];
-    const qPosChoices = input.difficulty === 'easy' ? [1, 2] : input.difficulty === 'medium' ? [1, 2, 3] : [1, 2, 3, 4];
-    const useNegativePower = rng.next() < 0.65;
-    const q = useNegativePower
-      ? (qNegChoices[rng.int(0, qNegChoices.length - 1)] ?? -2)
-      : (qPosChoices[rng.int(0, qPosChoices.length - 1)] ?? 2);
-
-    const Achoices = input.difficulty === 'easy' ? [1, 2, 3] : input.difficulty === 'medium' ? [1, 2, 3, 4] : [1, 2, 3, 4, 5];
-    const A = Achoices[rng.int(0, Achoices.length - 1)] ?? 2;
+    type PolyTerm = {
+      coeff: number;
+      pow: number;
+      // For negative powers we store the base coefficient before multiplying by x0^k,
+      // so we can compute the derivative at x0 cleanly.
+      negBase?: number;
+      negSign?: 1 | -1;
+    };
 
     const cRange = input.difficulty === 'easy' ? 12 : input.difficulty === 'medium' ? 18 : 24;
     const C = rng.int(-cRange, cRange);
@@ -522,30 +519,122 @@ export function generateDifferentiationQuestion(input: { seed: number; difficult
       return out;
     };
 
-    // Choose B so that y(x0) stays integer even when q is negative.
-    const bBaseMax = input.difficulty === 'easy' ? 9 : input.difficulty === 'medium' ? 12 : 16;
-    const bBase = rng.int(1, bBaseMax);
-    const bSign = rng.next() < 0.5 ? 1 : -1;
-    const B = q < 0 ? bSign * bBase * powInt(x0, -q) : bSign * bBase;
-
-    const y0 = q < 0
-      ? A * powInt(x0, p) + bSign * bBase + C
-      : A * powInt(x0, p) + B * powInt(x0, q) + C;
-
-    const m = (() => {
-      const term1 = A * p * powInt(x0, Math.max(0, p - 1));
-      if (q < 0) {
-        // d/dx(Bx^q) = Bq x^{q-1}. With q=-k and B=bSign*bBase*x0^k,
-        // at x0 this becomes -(k*bSign*bBase)/x0 (a clean fraction).
-        const k = -q;
-        const num2 = -k * bSign * bBase;
-        return normalizeFraction({ n: term1 * x0 + num2, d: x0 });
-      }
-      const term2 = B * q * powInt(x0, Math.max(0, q - 1));
-      return normalizeFraction({ n: term1 + term2, d: 1 });
+    const termCount = (() => {
+      if (input.difficulty === 'easy') return rng.int(1, 2);
+      if (input.difficulty === 'medium') return rng.int(2, 3);
+      return rng.int(2, 4);
     })();
 
-    if (!Number.isFinite(y0) || !Number.isFinite(m.n) || !Number.isFinite(m.d) || Math.abs(y0) > 4000 || Math.abs(m.n) > 8000 || !m.n) {
+    const posPowPool = input.difficulty === 'easy'
+      ? [1, 2, 3, 4]
+      : input.difficulty === 'medium'
+        ? [1, 2, 3, 4, 5, 6]
+        : [1, 2, 3, 4, 5, 6, 7];
+    const negPowPool = input.difficulty === 'easy'
+      ? [-1, -2]
+      : input.difficulty === 'medium'
+        ? [-1, -2, -3]
+        : [-1, -2, -3, -4];
+
+    const usedPows = new Set<number>();
+    const terms: PolyTerm[] = [];
+    const coeffBaseMax = input.difficulty === 'easy' ? 9 : input.difficulty === 'medium' ? 12 : 16;
+
+    // Power mix rules:
+    // - Never allow "all negative power" curves.
+    // - Sometimes generate all-positive curves.
+    // - When negatives are present, enforce at least one positive and one negative term.
+    const mixChance = input.difficulty === 'easy' ? 0.35 : input.difficulty === 'medium' ? 0.5 : 0.6;
+    const allowNeg = termCount >= 2 && rng.next() < mixChance;
+    const negCount = allowNeg ? rng.int(1, Math.max(1, termCount - 1)) : 0;
+
+    const pickPow = (pool: number[]) => {
+      let pow = pool[rng.int(0, pool.length - 1)] ?? pool[0] ?? 2;
+      let guard = 0;
+      while (usedPows.has(pow) && guard++ < 40) {
+        pow = pool[rng.int(0, pool.length - 1)] ?? pow;
+      }
+      usedPows.add(pow);
+      return pow;
+    };
+
+    // Generate negative-power terms first (if any), then positive-power terms.
+    // We'll sort by power later for display.
+    for (let i = 0; i < termCount; i++) {
+      const wantNeg = i < negCount;
+      const pow = wantNeg ? pickPow(negPowPool) : pickPow(posPowPool);
+
+      const base = (() => {
+        if (pow >= 0) return rng.int(1, coeffBaseMax);
+        const k = -pow;
+        const maxBaseForCoeff = Math.floor(LIM / powInt(x0, k));
+        if (maxBaseForCoeff < 1) return 0;
+        return rng.int(1, Math.min(coeffBaseMax, maxBaseForCoeff));
+      })();
+      if (!base) {
+        return generateDifferentiationQuestion({ ...input, seed: input.seed + 1 });
+      }
+      const sign = (rng.next() < 0.5 ? 1 : -1) as 1 | -1;
+
+      if (pow < 0) {
+        // Choose coefficient so that term value at x0 is integer:
+        // coeff*x^(-k) with coeff = sign*base*x0^k -> term(x0)=sign*base.
+        const k = -pow;
+        terms.push({ coeff: sign * base * powInt(x0, k), pow, negBase: base, negSign: sign });
+      } else {
+        terms.push({ coeff: sign * base, pow });
+      }
+    }
+
+    // Sort for nicer display: highest power first.
+    terms.sort((a, b) => b.pow - a.pow);
+
+    const termValueAtX0 = (t: PolyTerm): number => {
+      if (t.pow === 0) return t.coeff;
+      if (t.pow > 0) return t.coeff * powInt(x0, t.pow);
+      const denom = powInt(x0, -t.pow);
+      return t.coeff / denom;
+    };
+
+    const y0 = terms.reduce((acc, t) => acc + termValueAtX0(t), 0) + C;
+
+    const powFrac = (base: number, exp: number): Fraction => {
+      if (exp === 0) return { n: 1, d: 1 };
+      if (exp > 0) return { n: powInt(base, exp), d: 1 };
+      return { n: 1, d: powInt(base, -exp) };
+    };
+
+    const addFrac = (a: Fraction, b: Fraction): Fraction => normalizeFraction({ n: a.n * b.d + b.n * a.d, d: a.d * b.d });
+
+    const m = (() => {
+      let out: Fraction = { n: 0, d: 1 };
+      for (const t of terms) {
+        if (t.pow === 0) continue;
+        if (t.pow > 0) {
+          const dCoeff = t.coeff * t.pow;
+          const dPow = t.pow - 1;
+          out = addFrac(out, mulFrac({ n: dCoeff, d: 1 }, powFrac(x0, dPow)));
+          continue;
+        }
+
+        // For negative powers, we stored coeff = sign*base*x0^k.
+        // Derivative at x0 becomes (sign*base*pow)/x0 (clean fraction).
+        const base = t.negBase ?? 1;
+        const sign = t.negSign ?? 1;
+        out = addFrac(out, { n: sign * base * t.pow, d: x0 });
+      }
+      return normalizeFraction(out);
+    })();
+
+    const tooLarge = (v: unknown) => typeof v === 'number' && Number.isFinite(v) && Math.abs(v) > LIM;
+
+    if (!Number.isFinite(y0) || !Number.isFinite(m.n) || !Number.isFinite(m.d) || !m.n) {
+      return generateDifferentiationQuestion({ ...input, seed: input.seed + 1 });
+    }
+
+    // Keep student-facing arithmetic manageable.
+    // Cap point coordinates and slope components.
+    if (tooLarge(y0) || tooLarge(m.n) || tooLarge(m.d)) {
       return generateDifferentiationQuestion({ ...input, seed: input.seed + 1 });
     }
 
@@ -555,6 +644,23 @@ export function generateDifferentiationQuestion(input: { seed: number; difficult
     const Astd = normM.d;
     const Bstd = -normM.n;
     const Cstd = Astd * y0 - Bstd * x0;
+
+    const normalIntercept = subFrac({ n: y0, d: 1 }, mulFrac(normM, { n: x0, d: 1 }));
+
+    // Enforce the same cap for line-equation numbers (avoid huge standard form coefficients).
+    if (
+      tooLarge(cTFrac.n)
+      || tooLarge(cTFrac.d)
+      || tooLarge(normM.n)
+      || tooLarge(normM.d)
+      || tooLarge(Astd)
+      || tooLarge(Bstd)
+      || tooLarge(Cstd)
+      || tooLarge(normalIntercept.n)
+      || tooLarge(normalIntercept.d)
+    ) {
+      return generateDifferentiationQuestion({ ...input, seed: input.seed + 1 });
+    }
 
     const termLatex = (coeff: number, pow: number, isFirst: boolean) => {
       if (coeff === 0) return '';
@@ -567,23 +673,25 @@ export function generateDifferentiationQuestion(input: { seed: number; difficult
     };
 
     const funcLatex = (() => {
-      const parts = [
-        termLatex(A, p, true),
-        termLatex(B, q, false),
-        C === 0 ? '' : C > 0 ? ` + ${C}` : ` - ${Math.abs(C)}`,
-      ].filter(Boolean);
+      const parts: string[] = [];
+      for (let i = 0; i < terms.length; i++) {
+        const t = terms[i] as PolyTerm;
+        parts.push(termLatex(t.coeff, t.pow, i === 0));
+      }
+      if (C !== 0) parts.push(C > 0 ? ` + ${C}` : ` - ${Math.abs(C)}`);
       return parts.join('').trim();
     })();
 
     const derivLatex = (() => {
-      const dA = A * p;
-      const dp = p - 1;
-      const dB = B * q;
-      const dq = q - 1;
-      const parts = [
-        termLatex(dA, dp, true),
-        termLatex(dB, dq, false),
-      ].filter(Boolean);
+      const parts: string[] = [];
+      let first = true;
+      for (const t of terms) {
+        if (t.pow === 0) continue;
+        const dCoeff = t.coeff * t.pow;
+        const dPow = t.pow - 1;
+        parts.push(termLatex(dCoeff, dPow, first));
+        first = false;
+      }
       return String.raw`\frac{dy}{dx} = ${parts.join('').trim()}`;
     })();
 
@@ -600,7 +708,6 @@ export function generateDifferentiationQuestion(input: { seed: number; difficult
     })();
 
     const normalStandardLatex = String.raw`${Astd}y ${Bstd >= 0 ? '+' : '-'} ${Math.abs(Bstd)}x = ${Cstd}`;
-    const normalIntercept = subFrac({ n: y0, d: 1 }, mulFrac(normM, { n: x0, d: 1 }));
     const normalSlopeInterceptLatex = String.raw`y = ${fractionToLatex(normM)}x ${normalIntercept.n === 0 ? '' : normalIntercept.n > 0 ? `+ ${fractionToLatex(normalIntercept)}` : `- ${fractionToLatex({ n: Math.abs(normalIntercept.n), d: normalIntercept.d })}`}`;
 
     const normalFromStandardLatex = String.raw`y = \frac{${Cstd} ${Bstd >= 0 ? '+' : '-'} ${Math.abs(Bstd)}x}{${Astd}}`;
@@ -612,24 +719,24 @@ export function generateDifferentiationQuestion(input: { seed: number; difficult
 
     const expandedCandidatesLatex = expectedCandidatesLatex;
 
-    const yAtX0Latex = String.raw`y(${x0}) = ${A}(${x0})^{${p}} ${B >= 0 ? '+' : '-'} ${Math.abs(B)}(${x0})^{${q}} ${fmtSigned(C)} = ${y0}`;
+    const yPieces = terms.map((t) => {
+      const v = termValueAtX0(t);
+      return String(v);
+    });
+    const yAtX0Latex = String.raw`y(${x0}) = ${yPieces.join(' + ').replace(/\+ -/g, '- ')} ${fmtSigned(C)} = ${y0}`;
 
-    const addFrac = (a: Fraction, b: Fraction): Fraction => normalizeFraction({ n: a.n * b.d + b.n * a.d, d: a.d * b.d });
-    const powFrac = (base: number, exp: number): Fraction => {
-      if (exp === 0) return { n: 1, d: 1 };
-      if (exp > 0) return { n: powInt(base, exp), d: 1 };
-      return { n: 1, d: powInt(base, -exp) };
-    };
+    const mPieces = (() => {
+      const out: string[] = [];
+      for (const t of terms) {
+        if (t.pow === 0) continue;
+        const dCoeff = t.coeff * t.pow;
+        const dPow = t.pow - 1;
+        out.push(String.raw`${dCoeff}(${x0})^{${dPow}}`);
+      }
+      return out;
+    })();
 
-    const dA = A * p;
-    const dp = p - 1;
-    const dB = B * q;
-    const dq = q - 1;
-    const term1At = mulFrac({ n: dA, d: 1 }, powFrac(x0, dp));
-    const term2At = mulFrac({ n: dB, d: 1 }, powFrac(x0, dq));
-    const mAt = addFrac(term1At, term2At);
-
-    const mAtX0Latex = String.raw`m_{\text{tangent}} = \left.\frac{dy}{dx}\right|_{x=${x0}} = ${dA}(${x0})^{${dp}} ${dB >= 0 ? '+' : '-'} ${Math.abs(dB)}(${x0})^{${dq}} = ${fractionToLatex(mAt)}`;
+    const mAtX0Latex = String.raw`m_{\text{tangent}} = \left.\frac{dy}{dx}\right|_{x=${x0}} = ${mPieces.join(' + ').replace(/\+ -/g, '- ')} = ${fractionToLatex(m)}`;
     const normalSlopeLatex = String.raw`m_{\text{normal}} = -\frac{1}{m_{\text{tangent}}} = ${fractionToLatex(normM)}`;
 
     const explanation: KatexExplanationBlock[] = [
@@ -687,7 +794,11 @@ export function generateDifferentiationQuestion(input: { seed: number; difficult
       kind: 'calculus',
       topicId: 'differentiation',
       variantId: 'tangent_or_normal_equation',
-      id: stableId('diff_tangent_normal', input.seed, `${ask}-${A}-${p}-${B}-${q}-${C}-${x0}`),
+      id: stableId(
+        'diff_tangent_normal',
+        input.seed,
+        `${ask}-${terms.map((t) => `${t.coeff}:${t.pow}`).join(',')}-${C}-${x0}`,
+      ),
       seed: input.seed,
       difficulty: input.difficulty,
       katexQuestion: ask === 'tangent'

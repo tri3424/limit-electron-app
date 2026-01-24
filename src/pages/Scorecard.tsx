@@ -295,64 +295,6 @@ export default function Scorecard() {
         </ScrollArea>
       </Card>
 
-      {isAdmin ? (
-        <Card className="p-4">
-          <div className="text-sm font-semibold mb-3">Recent questions (newest first)</div>
-          <ScrollArea className="h-[45vh] rounded-md">
-            <div className="rounded-md border overflow-hidden">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead className="w-[190px]">Time</TableHead>
-                    <TableHead className="w-[180px]">User</TableHead>
-                    <TableHead>Topic</TableHead>
-                    <TableHead className="w-[170px]">Variant</TableHead>
-                    <TableHead className="text-right w-[110px]">Result</TableHead>
-                    <TableHead className="text-right w-[120px]">View</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {timeline.length ? (
-                    timeline.map((e: any) => (
-                      <TableRow key={String(e.id)}>
-                        <TableCell className="text-sm font-medium">{fmtTime(e.submittedAt ?? e.shownAt)}</TableCell>
-                        <TableCell className="text-sm">
-                          <span className="font-medium">{String(e.username ?? '—')}</span>
-                          <span className="text-muted-foreground">{e.userId ? ` (${String(e.userId).slice(0, 8)}…)` : ''}</span>
-                        </TableCell>
-                        <TableCell className="text-sm">{topicTitle(String(e.topicId ?? ''), e.mode)}</TableCell>
-                        <TableCell className="text-sm font-mono">{String(e.variantId ?? '—')}</TableCell>
-                        <TableCell className="text-right tabular-nums">
-                          {e.isCorrect === true ? 'Correct' : e.isCorrect === false ? 'Wrong' : '—'}
-                        </TableCell>
-                        <TableCell className="text-right">
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => {
-                              setSelected(e);
-                              setOpen(true);
-                            }}
-                          >
-                            View
-                          </Button>
-                        </TableCell>
-                      </TableRow>
-                    ))
-                  ) : (
-                    <TableRow>
-                      <TableCell colSpan={6} className="text-center text-muted-foreground py-10">
-                        No practice activity yet.
-                      </TableCell>
-                    </TableRow>
-                  )}
-                </TableBody>
-              </Table>
-            </div>
-          </ScrollArea>
-        </Card>
-      ) : null}
-
       <Dialog open={open} onOpenChange={(v) => setOpen(v)}>
         <DialogContent className="max-w-3xl">
           <DialogHeader>
