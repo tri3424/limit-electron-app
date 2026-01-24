@@ -12,6 +12,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { PRACTICE_TOPICS } from '@/lib/practiceTopics';
 import { Katex } from '@/components/Katex';
+import InteractiveGraph from '@/components/InteractiveGraph';
+import { PolynomialLongDivision } from '@/components/PolynomialLongDivision';
 
 type Row = {
   date: string;
@@ -106,6 +108,60 @@ export default function Scorecard() {
             );
           }
           return <span key={`t-${i}`}>{String(b?.content ?? '')}</span>;
+        })}
+      </div>
+    );
+  }, []);
+
+  const renderExplanationBlocks = useCallback((blocks: any[]) => {
+    if (!Array.isArray(blocks) || !blocks.length) return null;
+    return (
+      <div className="space-y-2">
+        {blocks.map((b: any, idx: number) => {
+          if (!b || typeof b !== 'object') return null;
+          if (b.kind === 'text') {
+            return <div key={idx} className="text-sm leading-relaxed">{String(b.content ?? '')}</div>;
+          }
+          if (b.kind === 'math') {
+            return (
+              <div key={idx} className="text-lg leading-snug">
+                <Katex latex={String(b.content ?? '')} displayMode={!!b.displayMode} />
+              </div>
+            );
+          }
+          if (b.kind === 'math_callout') {
+            return (
+              <div key={idx} className="rounded-md border bg-background p-3 space-y-2">
+                <div className="text-xs text-muted-foreground">{String(b.callout ?? '')}</div>
+                <div className="text-lg leading-snug">
+                  <Katex latex={String(b.content ?? '')} displayMode={!!b.displayMode} />
+                </div>
+              </div>
+            );
+          }
+          if (b.kind === 'graph' && b.graphSpec) {
+            return (
+              <div key={idx} className="space-y-2">
+                <div className="text-xs text-muted-foreground">{String(b.altText ?? 'Graph')}</div>
+                <div className="flex justify-center">
+                  <InteractiveGraph spec={b.graphSpec} altText={String(b.altText ?? 'Graph')} interactive={false} />
+                </div>
+              </div>
+            );
+          }
+          if (b.kind === 'long_division') {
+            return (
+              <div key={idx} className="py-2">
+                <PolynomialLongDivision
+                  divisorLatex={String(b.divisorLatex ?? '')}
+                  dividendLatex={String(b.dividendLatex ?? '')}
+                  quotientLatex={String(b.quotientLatex ?? '')}
+                  steps={Array.isArray(b.steps) ? b.steps : []}
+                />
+              </div>
+            );
+          }
+          return <div key={idx} className="text-xs text-muted-foreground">{String(b?.kind ?? '')}</div>;
         })}
       </div>
     );
@@ -312,10 +368,10 @@ export default function Scorecard() {
               <span className="font-mono">{String(selected?.variantId ?? '—')}</span>
             </div>
 
-            {detailSnapshot?.userAnswerParts ? (
-              <div className="rounded-md border bg-background p-3">
-                <div className="text-xs text-muted-foreground mb-2">Your answer</div>
-                {String(detailSnapshot?.variantId ?? '') === 'sqrt_params_point_gradient' && Array.isArray(detailSnapshot.userAnswerParts) ? (
+            <div className="rounded-md border bg-background p-3">
+              <div className="text-xs text-muted-foreground mb-2">Your answer</div>
+              {detailSnapshot?.userAnswerParts ? (
+                String(detailSnapshot?.variantId ?? '') === 'sqrt_params_point_gradient' && Array.isArray(detailSnapshot.userAnswerParts) ? (
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm">
                     <div>
                       <span className="text-muted-foreground">a: </span>
@@ -332,9 +388,13 @@ export default function Scorecard() {
                       ? detailSnapshot.userAnswerParts.map((x: any) => String(x ?? '')).filter((x: string) => x.trim().length > 0).join(' | ') || '—'
                       : '—'}
                   </div>
-                )}
-              </div>
-            ) : null}
+                )
+              ) : (
+                <div className="text-sm font-medium break-words">
+                  {String(detailSnapshot?.userAnswer ?? selected?.userAnswer ?? '—') || '—'}
+                </div>
+              )}
+            </div>
 
             {detailSnapshot?.correctAnswerKatex ? (
               <div className="rounded-md border bg-background p-3">
@@ -350,6 +410,20 @@ export default function Scorecard() {
                 <div className="text-xs text-muted-foreground mb-2">Question</div>
                 {renderPromptBlocks(detailSnapshot.promptBlocks)}
               </div>
+            ) : detailSnapshot?.promptText ? (
+              <div className="rounded-md border bg-background p-3">
+                <div className="text-xs text-muted-foreground mb-2">Question</div>
+                <div className="font-slab text-xl leading-relaxed whitespace-normal break-words">
+                  {String(detailSnapshot.promptText ?? '')}
+                </div>
+              </div>
+            ) : detailSnapshot?.promptKatex ? (
+              <div className="rounded-md border bg-background p-3">
+                <div className="text-xs text-muted-foreground mb-2">Question (KaTeX)</div>
+                <div className="text-xl leading-snug">
+                  <Katex latex={String(detailSnapshot.promptKatex)} displayMode={false} />
+                </div>
+              </div>
             ) : detailSnapshot?.katexQuestion ? (
               <div className="rounded-md border bg-background p-3">
                 <div className="text-xs text-muted-foreground mb-2">Question (KaTeX)</div>
@@ -359,24 +433,53 @@ export default function Scorecard() {
               </div>
             ) : null}
 
+            {detailSnapshot?.svgDataUrl || detailSnapshot?.graphSpec ? (
+              <div className="rounded-md border bg-background p-3">
+                <div className="text-xs text-muted-foreground mb-2">Diagram</div>
+                {detailSnapshot.svgDataUrl ? (
+                  <div className="flex justify-center mb-3">
+                    <img
+                      src={String(detailSnapshot.svgDataUrl)}
+                      alt={String(detailSnapshot.svgAltText ?? 'Diagram')}
+                      className="max-w-full h-auto"
+                      loading="lazy"
+                    />
+                  </div>
+                ) : null}
+                {detailSnapshot.graphSpec ? (
+                  detailSnapshot.secondaryGraphSpec ? (
+                    <div className="w-full grid grid-cols-1 lg:grid-cols-2 gap-4">
+                      <InteractiveGraph spec={detailSnapshot.graphSpec} altText={String(detailSnapshot.svgAltText ?? 'Graph')} interactive={false} />
+                      <InteractiveGraph spec={detailSnapshot.secondaryGraphSpec} altText={String(detailSnapshot.svgAltText ?? 'Graph')} interactive={false} />
+                    </div>
+                  ) : (
+                    <div className="flex justify-center">
+                      <InteractiveGraph spec={detailSnapshot.graphSpec} altText={String(detailSnapshot.svgAltText ?? 'Graph')} interactive={false} />
+                    </div>
+                  )
+                ) : null}
+              </div>
+            ) : null}
+
             {Array.isArray(detailSnapshot?.katexExplanation) && detailSnapshot.katexExplanation.length ? (
               <div className="rounded-md border bg-background p-3">
                 <div className="text-xs text-muted-foreground mb-2">Explanation</div>
-                <div className="space-y-2">
-                  {detailSnapshot.katexExplanation.map((b: any, idx: number) => {
-                    if (!b || typeof b !== 'object') return null;
-                    if (b.kind === 'text') {
-                      return <div key={idx} className="text-sm leading-relaxed">{String(b.content ?? '')}</div>;
-                    }
-                    if (b.kind === 'math') {
-                      return (
-                        <div key={idx} className="text-lg leading-snug">
-                          <Katex latex={String(b.content ?? '')} displayMode={!!b.displayMode} />
+                {renderExplanationBlocks(detailSnapshot.katexExplanation)}
+              </div>
+            ) : detailSnapshot?.katexExplanation?.steps ? (
+              <div className="rounded-md border bg-background p-3">
+                <div className="text-xs text-muted-foreground mb-2">Explanation</div>
+                <div className="space-y-3">
+                  {Array.isArray(detailSnapshot.katexExplanation.steps)
+                    ? detailSnapshot.katexExplanation.steps.map((s: any, idx: number) => (
+                        <div key={idx} className="space-y-1">
+                          <div className="text-lg leading-snug">
+                            <Katex latex={String(s.katex ?? '')} displayMode />
+                          </div>
+                          <div className="text-sm leading-relaxed">{String(s.text ?? '')}</div>
                         </div>
-                      );
-                    }
-                    return null;
-                  })}
+                      ))
+                    : null}
                 </div>
               </div>
             ) : null}

@@ -1,4 +1,5 @@
 import type { PracticeDifficulty, PracticeGraphSpec } from '@/lib/practiceEngine';
+import { normalizeUniversalMathAnswer } from '@/lib/universalMathNormalize';
 
 type Rng = {
   next: () => number;
@@ -26,76 +27,7 @@ function stableId(prefix: string, seed: number, suffix: string) {
 }
 
 function normalizeExprForCompare(raw: string) {
-  return raw
-    .trim()
-    .toLowerCase()
-    .replace(/\\dfrac/g, '\\frac')
-    .replace(/\\tfrac/g, '\\frac')
-    .replace(/\s+/g, '')
-    .replace(/\\mathit\{c\}/g, 'c')
-    .replace(/\\mathrm\{c\}/g, 'c')
-    .replace(/\\[ ,;!:]/g, '')
-    .replace(/\\cdot/g, '')
-    .replace(/\*/g, '')
-    .replace(/\{x\}/g, 'x')
-    // KaTeX/LaTeX can also emit compact fractions without braces: \\frac52
-    .replace(/-\\frac(\d{1,3})(\d{1,3})/g, '-$1/$2')
-    .replace(/\\frac(\d{1,3})(\d{1,3})/g, '$1/$2')
-    .replace(/-\\frac\{(\d+)\}\{(\d+)\}/g, '-$1/$2')
-    .replace(/\\frac\{(-?\d+)\}\{(\d+)\}/g, '$1/$2')
-    .replace(/\\left/g, '')
-    .replace(/\\right/g, '')
-    // Normalize scripts: MathLive may emit x^{6} while users might type x^6
-    .replace(/\^\{([^}]+)\}/g, '^$1')
-    .replace(/_\{([^}]+)\}/g, '_$1')
-    // MathLive can also output division-style forms instead of \frac{...}{...}:
-    // e.g. x^6/3, 5x^4/4, -x/7.
-    .replace(/-(\d+)x\^(\d+)\/(\d+)/g, '-$1/$3x^$2')
-    .replace(/(\d+)x\^(\d+)\/(\d+)/g, '$1/$3x^$2')
-    .replace(/-x\^(\d+)\/(\d+)/g, '-1/$2x^$1')
-    .replace(/x\^(\d+)\/(\d+)/g, '1/$2x^$1')
-    .replace(/-(\d+)x\/(\d+)/g, '-$1/$2x')
-    .replace(/(\d+)x\/(\d+)/g, '$1/$2x')
-    .replace(/-x\/(\d+)/g, '-1/$1x')
-    .replace(/x\/(\d+)/g, '1/$1x')
-    // Some MathLive forms keep extra braces inside the numerator: \frac{5{x}^4}{4}, \frac{{x}^6}{3}
-    .replace(/-\\frac\{(\d+)\{?x\}?\^(\d+)\}\{(\d+)\}/g, '-$1/$3x^$2')
-    .replace(/\\frac\{(-?\d+)\{?x\}?\^(\d+)\}\{(\d+)\}/g, '$1/$3x^$2')
-    .replace(/-\\frac\{\{?x\}?\^(\d+)\}\{(\d+)\}/g, '-1/$2x^$1')
-    .replace(/\\frac\{\{?x\}?\^(\d+)\}\{(\d+)\}/g, '1/$2x^$1')
-    .replace(/-\\frac\{(\d+)\{?x\}?\}\{(\d+)\}/g, '-$1/$2x')
-    .replace(/\\frac\{(-?\d+)\{?x\}?\}\{(\d+)\}/g, '$1/$2x')
-    .replace(/-\\frac\{\{?x\}?\}\{(\d+)\}/g, '-1/$1x')
-    .replace(/\\frac\{\{?x\}?\}\{(\d+)\}/g, '1/$1x')
-    // MathLive can emit fractions like \\frac{2x^6}{3} instead of \\frac{2}{3}x^6
-    // Sometimes the denominator braces are already stripped (e.g. \\frac{2x^6}3); accept that too.
-    .replace(/-\\frac\{(\d+)x\^(\d+)\}\{?(\d+)\}?/g, '-$1/$3x^$2')
-    .replace(/\\frac\{(-?\d+)x\^(\d+)\}\{?(\d+)\}?/g, '$1/$3x^$2')
-    .replace(/-\\frac\{(\d+)x\}\{?(\d+)\}?/g, '-$1/$2x')
-    .replace(/\\frac\{(-?\d+)x\}\{?(\d+)\}?/g, '$1/$2x')
-    .replace(/-\\frac\{(\d+)x\^(\d+)\}\{(\d+)\}/g, '-$1/$3x^$2')
-    .replace(/\\frac\{(-?\d+)x\^(\d+)\}\{(\d+)\}/g, '$1/$3x^$2')
-    .replace(/-\\frac\{(\d+)x\}\{(\d+)\}/g, '-$1/$2x')
-    .replace(/\\frac\{(-?\d+)x\}\{(\d+)\}/g, '$1/$2x')
-    // Some MathLive inputs put the minus sign inside the numerator: \\frac{-2x^7}{7}
-    .replace(/\\frac\{-(\d+)x\^(\d+)\}\{(\d+)\}/g, '-$1/$3x^$2')
-    .replace(/\\frac\{-(\d+)x\}\{(\d+)\}/g, '-$1/$2x')
-    // Also allow variable-only numerators with an internal minus: \\frac{-x^n}{d}, \\frac{-x}{d}
-    .replace(/\\frac\{-x\^(\d+)\}\{(\d+)\}/g, '-1/$2x^$1')
-    .replace(/\\frac\{-x\}\{(\d+)\}/g, '-1/$1x')
-    // Also allow \\frac{x^n}{d} and \\frac{x}{d} (MathLive can prefer putting x in the numerator)
-    .replace(/-\\frac\{x\^(\d+)\}\{(\d+)\}/g, '-1/$2x^$1')
-    .replace(/\\frac\{x\^(\d+)\}\{(\d+)\}/g, '1/$2x^$1')
-    .replace(/-\\frac\{x\}\{(\d+)\}/g, '-1/$1x')
-    .replace(/\\frac\{x\}\{(\d+)\}/g, '1/$1x')
-    // Strip common LaTeX spacing commands MathLive can emit
-    .replace(/\\[ ,;!:]/g, '')
-    .replace(/\s+/g, '')
-    .replace(/\\cdot/g, '')
-    .replace(/\*/g, '')
-    .replace(/\{(\d+)\}/g, '$1')
-    .replace(/\+c/g, '+c')
-    .replace(/\(\)/g, '');
+  return normalizeUniversalMathAnswer(raw);
 }
 
 type Term = { a: number; n: number };

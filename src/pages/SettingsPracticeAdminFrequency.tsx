@@ -288,6 +288,7 @@ export default function SettingsPracticeAdminFrequency() {
               { key: 'rational_yaxis_gradient', label: 'Gradient at y-axis crossing: y=k/(x-a)^2', defaultValue: 0 },
               { key: 'linear_minus_rational_xaxis_gradients', label: 'Gradients at x-axis crossings: y=x-p/(x+q)', defaultValue: 0 },
               { key: 'stationary_points_coords', label: 'Coordinates where gradient is 0 (stationary points)', defaultValue: 0 },
+              { key: 'tangent_or_normal_equation', label: 'Equation of tangent/normal at x=a', defaultValue: 0 },
             ],
           };
         }

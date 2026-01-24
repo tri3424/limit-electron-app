@@ -934,6 +934,7 @@ export function generatePracticeQuestion(input: {
         kind: 'calculus',
         id: q.id,
         topicId: 'differentiation',
+        variantId: q.variantId,
         difficulty: input.difficulty,
         seed: input.seed,
         katexQuestion: q.katexQuestion,

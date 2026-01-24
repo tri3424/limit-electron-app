@@ -11,6 +11,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Katex } from '@/components/Katex';
 import InteractiveGraph from '@/components/InteractiveGraph';
+import { PolynomialLongDivision } from '@/components/PolynomialLongDivision';
 import { PRACTICE_TOPICS } from '@/lib/practiceTopics';
 
 function toDateKey(ts: number): string {
@@ -154,6 +155,60 @@ export default function SettingsPracticeAdminAnalytics() {
             );
           }
           return <span key={`t-${i}`}>{String(b?.content ?? '')}</span>;
+        })}
+      </div>
+    );
+  }, []);
+
+  const renderExplanationBlocks = useCallback((blocks: any[]) => {
+    if (!Array.isArray(blocks) || !blocks.length) return null;
+    return (
+      <div className="space-y-2">
+        {blocks.map((b: any, idx: number) => {
+          if (!b || typeof b !== 'object') return null;
+          if (b.kind === 'text') {
+            return <div key={idx} className="text-sm leading-relaxed text-foreground">{String(b.content ?? '')}</div>;
+          }
+          if (b.kind === 'math') {
+            return (
+              <div key={idx} className="text-lg leading-snug">
+                <Katex latex={String(b.content ?? '')} displayMode={!!b.displayMode} />
+              </div>
+            );
+          }
+          if (b.kind === 'math_callout') {
+            return (
+              <div key={idx} className="rounded-md border bg-background p-3 space-y-2">
+                <div className="text-xs text-muted-foreground">{String(b.callout ?? '')}</div>
+                <div className="text-lg leading-snug">
+                  <Katex latex={String(b.content ?? '')} displayMode={!!b.displayMode} />
+                </div>
+              </div>
+            );
+          }
+          if (b.kind === 'graph' && b.graphSpec) {
+            return (
+              <div key={idx} className="space-y-2">
+                <div className="text-xs text-muted-foreground">{String(b.altText ?? 'Graph')}</div>
+                <div className="flex justify-center">
+                  <InteractiveGraph spec={b.graphSpec} altText={String(b.altText ?? 'Graph')} interactive={false} />
+                </div>
+              </div>
+            );
+          }
+          if (b.kind === 'long_division') {
+            return (
+              <div key={idx} className="py-2">
+                <PolynomialLongDivision
+                  divisorLatex={String(b.divisorLatex ?? '')}
+                  dividendLatex={String(b.dividendLatex ?? '')}
+                  quotientLatex={String(b.quotientLatex ?? '')}
+                  steps={Array.isArray(b.steps) ? b.steps : []}
+                />
+              </div>
+            );
+          }
+          return null;
         })}
       </div>
     );
@@ -371,7 +426,7 @@ export default function SettingsPracticeAdminAnalytics() {
                         )
                       ) : (
                         <>
-                          <div className="text-sm font-medium break-words">{String(selected.userAnswer ?? '—')}</div>
+                          <div className="text-sm font-medium break-words">{String(detailSnapshot?.userAnswer ?? selected.userAnswer ?? '—')}</div>
                           {looksLikeLatex(String(selected.userAnswer ?? '')) ? (
                             <div className="text-lg leading-snug">
                               <Katex latex={String(selected.userAnswer ?? '')} displayMode />
@@ -391,6 +446,11 @@ export default function SettingsPracticeAdminAnalytics() {
                         {renderPromptBlocks(detailSnapshot.promptBlocks)}
                       </div>
                     ) : null}
+                    {detailSnapshot.promptText ? (
+                      <div className="font-slab text-xl leading-relaxed whitespace-normal break-words">
+                        {String(detailSnapshot.promptText ?? '')}
+                      </div>
+                    ) : null}
                     {detailSnapshot.promptKatex ? (
                       <div className="text-xl leading-snug">
                         <Katex latex={detailSnapshot.promptKatex} displayMode />
@@ -402,19 +462,31 @@ export default function SettingsPracticeAdminAnalytics() {
                       </div>
                     ) : null}
 
-                    {detailSnapshot.graphSpec ? (
+                    {detailSnapshot.svgDataUrl || detailSnapshot.graphSpec ? (
                       <div className="space-y-2">
-                        <div className="text-sm font-semibold">Graph</div>
-                        {detailSnapshot.secondaryGraphSpec ? (
-                          <div className="w-full grid grid-cols-1 lg:grid-cols-2 gap-4">
-                            <InteractiveGraph spec={detailSnapshot.graphSpec} altText={String(detailSnapshot.svgAltText ?? 'Graph')} interactive={false} />
-                            <InteractiveGraph spec={detailSnapshot.secondaryGraphSpec} altText={String(detailSnapshot.svgAltText ?? 'Graph')} interactive={false} />
-                          </div>
-                        ) : (
+                        <div className="text-sm font-semibold">Diagram</div>
+                        {detailSnapshot.svgDataUrl ? (
                           <div className="flex justify-center">
-                            <InteractiveGraph spec={detailSnapshot.graphSpec} altText={String(detailSnapshot.svgAltText ?? 'Graph')} interactive={false} />
+                            <img
+                              src={String(detailSnapshot.svgDataUrl)}
+                              alt={String(detailSnapshot.svgAltText ?? 'Diagram')}
+                              className="max-w-full h-auto"
+                              loading="lazy"
+                            />
                           </div>
-                        )}
+                        ) : null}
+                        {detailSnapshot.graphSpec ? (
+                          detailSnapshot.secondaryGraphSpec ? (
+                            <div className="w-full grid grid-cols-1 lg:grid-cols-2 gap-4">
+                              <InteractiveGraph spec={detailSnapshot.graphSpec} altText={String(detailSnapshot.svgAltText ?? 'Graph')} interactive={false} />
+                              <InteractiveGraph spec={detailSnapshot.secondaryGraphSpec} altText={String(detailSnapshot.svgAltText ?? 'Graph')} interactive={false} />
+                            </div>
+                          ) : (
+                            <div className="flex justify-center">
+                              <InteractiveGraph spec={detailSnapshot.graphSpec} altText={String(detailSnapshot.svgAltText ?? 'Graph')} interactive={false} />
+                            </div>
+                          )
+                        ) : null}
                       </div>
                     ) : null}
 
@@ -430,24 +502,7 @@ export default function SettingsPracticeAdminAnalytics() {
                     {Array.isArray(detailSnapshot.katexExplanation) ? (
                       <div className="space-y-2">
                         <div className="text-sm font-semibold">Explanation</div>
-                        {detailSnapshot.katexExplanation.map((b: any, idx: number) =>
-                          b?.kind === 'text' ? (
-                            <div key={idx} className="text-sm text-foreground">{String(b.content ?? '')}</div>
-                          ) : b?.kind === 'math' ? (
-                            <div key={idx} className="text-lg leading-snug">
-                              <Katex latex={String(b.content ?? '')} displayMode={!!b.displayMode} />
-                            </div>
-                          ) : b?.kind === 'graph' && b?.graphSpec ? (
-                            <div key={idx} className="space-y-2">
-                              <div className="text-xs text-muted-foreground">{String(b.altText ?? 'Graph')}</div>
-                              <div className="flex justify-center">
-                                <InteractiveGraph spec={b.graphSpec} altText={String(b.altText ?? 'Graph')} interactive={false} />
-                              </div>
-                            </div>
-                          ) : (
-                            <div key={idx} className="text-xs text-muted-foreground">{String(b?.kind ?? '')}</div>
-                          )
-                        )}
+                        {renderExplanationBlocks(detailSnapshot.katexExplanation)}
                       </div>
                     ) : detailSnapshot.katexExplanation?.steps ? (
                       <div className="space-y-2">

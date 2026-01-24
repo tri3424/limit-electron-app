@@ -1,6 +1,7 @@
 import type { PracticeDifficulty } from '@/lib/practiceEngine';
 import type { KatexExplanationBlock } from '@/lib/practiceEngine';
 import { fractionToLatex, normalizeFraction, type Fraction } from '@/lib/fraction';
+import { normalizeUniversalMathAnswer } from '@/lib/universalMathNormalize';
 
 type Rng = {
   next: () => number;
@@ -55,30 +56,7 @@ function fmtSigned(n: number) {
 }
 
 function normalizeExprForCompare(raw: string) {
-  return raw
-    .trim()
-    .toLowerCase()
-    .replace(/\\mathit\{c\}/g, 'c')
-    .replace(/\\mathrm\{c\}/g, 'c')
-    .replace(/\{x\}/g, 'x')
-    .replace(/\{(\d+)\}/g, '$1')
-    .replace(/\\left/g, '')
-    .replace(/\\right/g, '')
-    .replace(/-\\frac\{(\d+)\}\{(\d+)\}/g, '-$1/$2')
-    .replace(/\\frac\{(-?\d+)\}\{(\d+)\}/g, '$1/$2')
-    // Normalize scripts: MathLive may emit x^{6} while users might type x^6
-    .replace(/\^\{([^}]+)\}/g, '^$1')
-    .replace(/_\{([^}]+)\}/g, '_$1')
-    .replace(/-\\frac\{x\^(\d+)\}\{(\d+)\}/g, '-1/$2x^$1')
-    .replace(/\\frac\{x\^(\d+)\}\{(\d+)\}/g, '1/$2x^$1')
-    .replace(/-\\frac\{x\}\{(\d+)\}/g, '-1/$1x')
-    .replace(/\\frac\{x\}\{(\d+)\}/g, '1/$1x')
-    // Strip common LaTeX spacing commands MathLive can emit
-    .replace(/\\[ ,;!:]/g, '')
-    .replace(/\s+/g, '')
-    .replace(/\\cdot/g, '')
-    .replace(/\*/g, '')
-    .replace(/\(\)/g, '');
+  return normalizeUniversalMathAnswer(raw);
 }
 
 function normalizeStationaryXList(raw: string) {
@@ -214,7 +192,8 @@ export type DifferentiationQuestion = {
     | 'power_linear_point_gradient'
     | 'rational_yaxis_gradient'
     | 'linear_minus_rational_xaxis_gradients'
-    | 'stationary_points_coords';
+    | 'stationary_points_coords'
+    | 'tangent_or_normal_equation';
   id: string;
   seed: number;
   difficulty: PracticeDifficulty;
@@ -257,7 +236,18 @@ export function generateDifferentiationQuestion(input: { seed: number; difficult
       ? Math.max(0, Number((w as any).stationary_points_coords))
       : 0;
 
-    const total = wStationary + wBasic + wSqrtParams + wPowerLinearPoint + wRationalYAxis + wLinearMinusRationalXIntercepts + wStationaryCoords;
+    const wTangentNormal = typeof (w as any).tangent_or_normal_equation === 'number'
+      ? Math.max(0, Number((w as any).tangent_or_normal_equation))
+      : 0;
+
+    const total = wStationary
+      + wBasic
+      + wSqrtParams
+      + wPowerLinearPoint
+      + wRationalYAxis
+      + wLinearMinusRationalXIntercepts
+      + wStationaryCoords
+      + wTangentNormal;
     const pick = total <= 0 ? 0 : rng.next() * total;
     if (pick < wStationary) return ('stationary_points' as const);
     if (pick < wStationary + wBasic) return ('basic_polynomial' as const);
@@ -265,7 +255,14 @@ export function generateDifferentiationQuestion(input: { seed: number; difficult
     if (pick < wStationary + wBasic + wSqrtParams + wPowerLinearPoint) return ('power_linear_point_gradient' as const);
     if (pick < wStationary + wBasic + wSqrtParams + wPowerLinearPoint + wRationalYAxis) return ('rational_yaxis_gradient' as const);
     if (pick < wStationary + wBasic + wSqrtParams + wPowerLinearPoint + wRationalYAxis + wLinearMinusRationalXIntercepts) return ('linear_minus_rational_xaxis_gradients' as const);
-    return ('stationary_points_coords' as const);
+    if (pick < wStationary
+      + wBasic
+      + wSqrtParams
+      + wPowerLinearPoint
+      + wRationalYAxis
+      + wLinearMinusRationalXIntercepts
+      + wStationaryCoords) return ('stationary_points_coords' as const);
+    return ('tangent_or_normal_equation' as const);
   })();
 
   if (variant === 'power_linear_point_gradient') {
@@ -496,6 +493,213 @@ export function generateDifferentiationQuestion(input: { seed: number; difficult
       expectedParts: [fmtFracInput(expectedGrad)],
       normalize: (raw: string) => normalizeExprForCompare(raw),
     };
+  }
+
+  if (variant === 'tangent_or_normal_equation') {
+    const ask = rng.next() < 0.5 ? ('tangent' as const) : ('normal' as const);
+    const xChoices = input.difficulty === 'easy' ? [1, 2, 3] : input.difficulty === 'medium' ? [1, 2, 3, 4] : [1, 2, 3, 4, 5];
+    const x0 = xChoices[rng.int(0, xChoices.length - 1)] ?? 2;
+
+    const pChoices = input.difficulty === 'easy' ? [2, 3] : input.difficulty === 'medium' ? [2, 3, 4] : [2, 3, 4, 5];
+    const p = pChoices[rng.int(0, pChoices.length - 1)] ?? 3;
+
+    const qNegChoices = input.difficulty === 'easy' ? [-1, -2] : [-1, -2, -3];
+    const qPosChoices = input.difficulty === 'easy' ? [1, 2] : input.difficulty === 'medium' ? [1, 2, 3] : [1, 2, 3, 4];
+    const useNegativePower = rng.next() < 0.65;
+    const q = useNegativePower
+      ? (qNegChoices[rng.int(0, qNegChoices.length - 1)] ?? -2)
+      : (qPosChoices[rng.int(0, qPosChoices.length - 1)] ?? 2);
+
+    const Achoices = input.difficulty === 'easy' ? [1, 2, 3] : input.difficulty === 'medium' ? [1, 2, 3, 4] : [1, 2, 3, 4, 5];
+    const A = Achoices[rng.int(0, Achoices.length - 1)] ?? 2;
+
+    const cRange = input.difficulty === 'easy' ? 12 : input.difficulty === 'medium' ? 18 : 24;
+    const C = rng.int(-cRange, cRange);
+
+    const powInt = (base: number, exp: number) => {
+      let out = 1;
+      for (let i = 0; i < exp; i++) out *= base;
+      return out;
+    };
+
+    // Choose B so that y(x0) stays integer even when q is negative.
+    const bBaseMax = input.difficulty === 'easy' ? 9 : input.difficulty === 'medium' ? 12 : 16;
+    const bBase = rng.int(1, bBaseMax);
+    const bSign = rng.next() < 0.5 ? 1 : -1;
+    const B = q < 0 ? bSign * bBase * powInt(x0, -q) : bSign * bBase;
+
+    const y0 = q < 0
+      ? A * powInt(x0, p) + bSign * bBase + C
+      : A * powInt(x0, p) + B * powInt(x0, q) + C;
+
+    const m = (() => {
+      const term1 = A * p * powInt(x0, Math.max(0, p - 1));
+      if (q < 0) {
+        // d/dx(Bx^q) = Bq x^{q-1}. With q=-k and B=bSign*bBase*x0^k,
+        // at x0 this becomes -(k*bSign*bBase)/x0 (a clean fraction).
+        const k = -q;
+        const num2 = -k * bSign * bBase;
+        return normalizeFraction({ n: term1 * x0 + num2, d: x0 });
+      }
+      const term2 = B * q * powInt(x0, Math.max(0, q - 1));
+      return normalizeFraction({ n: term1 + term2, d: 1 });
+    })();
+
+    if (!Number.isFinite(y0) || !Number.isFinite(m.n) || !Number.isFinite(m.d) || Math.abs(y0) > 4000 || Math.abs(m.n) > 8000 || !m.n) {
+      return generateDifferentiationQuestion({ ...input, seed: input.seed + 1 });
+    }
+
+    const cTFrac = subFrac({ n: y0, d: 1 }, mulFrac(m, { n: x0, d: 1 }));
+
+    const normM = normalizeFraction({ n: -m.d, d: m.n });
+    const Astd = normM.d;
+    const Bstd = -normM.n;
+    const Cstd = Astd * y0 - Bstd * x0;
+
+    const termLatex = (coeff: number, pow: number, isFirst: boolean) => {
+      if (coeff === 0) return '';
+      const abs = Math.abs(coeff);
+      const sign = isFirst ? (coeff < 0 ? '-' : '') : (coeff < 0 ? ' - ' : ' + ');
+      const coeffLatex = abs === 1 ? '' : String(abs);
+      if (pow === 0) return `${sign}${abs}`;
+      if (pow === 1) return `${sign}${coeffLatex}x`;
+      return `${sign}${coeffLatex}x^{${pow}}`;
+    };
+
+    const funcLatex = (() => {
+      const parts = [
+        termLatex(A, p, true),
+        termLatex(B, q, false),
+        C === 0 ? '' : C > 0 ? ` + ${C}` : ` - ${Math.abs(C)}`,
+      ].filter(Boolean);
+      return parts.join('').trim();
+    })();
+
+    const derivLatex = (() => {
+      const dA = A * p;
+      const dp = p - 1;
+      const dB = B * q;
+      const dq = q - 1;
+      const parts = [
+        termLatex(dA, dp, true),
+        termLatex(dB, dq, false),
+      ].filter(Boolean);
+      return String.raw`\frac{dy}{dx} = ${parts.join('').trim()}`;
+    })();
+
+    const tangentSlopeInterceptLatex = String.raw`y = ${fractionToLatex(m)}x ${cTFrac.n === 0 ? '' : cTFrac.n > 0 ? `+ ${fractionToLatex(cTFrac)}` : `- ${fractionToLatex({ n: Math.abs(cTFrac.n), d: cTFrac.d })}`}`;
+    const tangentSingleFractionLatex = (() => {
+      if (cTFrac.n === 0) {
+        return String.raw`y = \frac{${m.n}x}{${m.d}}`;
+      }
+      const denom = m.d * cTFrac.d;
+      const numX = m.n * cTFrac.d;
+      const numC = cTFrac.n * m.d;
+      const absNumC = Math.abs(numC);
+      return String.raw`y = \frac{${numX}x ${numC >= 0 ? '+' : '-'} ${absNumC}}{${denom}}`;
+    })();
+
+    const normalStandardLatex = String.raw`${Astd}y ${Bstd >= 0 ? '+' : '-'} ${Math.abs(Bstd)}x = ${Cstd}`;
+    const normalIntercept = subFrac({ n: y0, d: 1 }, mulFrac(normM, { n: x0, d: 1 }));
+    const normalSlopeInterceptLatex = String.raw`y = ${fractionToLatex(normM)}x ${normalIntercept.n === 0 ? '' : normalIntercept.n > 0 ? `+ ${fractionToLatex(normalIntercept)}` : `- ${fractionToLatex({ n: Math.abs(normalIntercept.n), d: normalIntercept.d })}`}`;
+
+    const normalFromStandardLatex = String.raw`y = \frac{${Cstd} ${Bstd >= 0 ? '+' : '-'} ${Math.abs(Bstd)}x}{${Astd}}`;
+
+    const expectedFinalLatex = ask === 'tangent' ? tangentSlopeInterceptLatex : normalSlopeInterceptLatex;
+    const expectedCandidatesLatex = ask === 'tangent'
+      ? [tangentSlopeInterceptLatex, tangentSingleFractionLatex]
+      : [normalSlopeInterceptLatex, normalFromStandardLatex];
+
+    const expandedCandidatesLatex = expectedCandidatesLatex;
+
+    const yAtX0Latex = String.raw`y(${x0}) = ${A}(${x0})^{${p}} ${B >= 0 ? '+' : '-'} ${Math.abs(B)}(${x0})^{${q}} ${fmtSigned(C)} = ${y0}`;
+
+    const addFrac = (a: Fraction, b: Fraction): Fraction => normalizeFraction({ n: a.n * b.d + b.n * a.d, d: a.d * b.d });
+    const powFrac = (base: number, exp: number): Fraction => {
+      if (exp === 0) return { n: 1, d: 1 };
+      if (exp > 0) return { n: powInt(base, exp), d: 1 };
+      return { n: 1, d: powInt(base, -exp) };
+    };
+
+    const dA = A * p;
+    const dp = p - 1;
+    const dB = B * q;
+    const dq = q - 1;
+    const term1At = mulFrac({ n: dA, d: 1 }, powFrac(x0, dp));
+    const term2At = mulFrac({ n: dB, d: 1 }, powFrac(x0, dq));
+    const mAt = addFrac(term1At, term2At);
+
+    const mAtX0Latex = String.raw`m_{\text{tangent}} = \left.\frac{dy}{dx}\right|_{x=${x0}} = ${dA}(${x0})^{${dp}} ${dB >= 0 ? '+' : '-'} ${Math.abs(dB)}(${x0})^{${dq}} = ${fractionToLatex(mAt)}`;
+    const normalSlopeLatex = String.raw`m_{\text{normal}} = -\frac{1}{m_{\text{tangent}}} = ${fractionToLatex(normM)}`;
+
+    const explanation: KatexExplanationBlock[] = [
+      { kind: 'text', content: 'Step 1: Find the y-coordinate of the point' },
+      { kind: 'text', content: String.raw`We are given x = ${x0}. Substitute this into the equation of the curve to find y.` },
+      { kind: 'math', content: String.raw`y = ${funcLatex}` },
+      { kind: 'math', content: yAtX0Latex },
+      { kind: 'text', content: String.raw`So the point is (${x0}, ${y0}).` },
+      { kind: 'text', content: '' },
+      { kind: 'text', content: 'Step 2: Find the slope of the tangent line by differentiation' },
+      { kind: 'text', content: 'The slope of the tangent line is given by the derivative:' },
+      { kind: 'math', content: String.raw`\frac{dy}{dx}` },
+      { kind: 'math', content: String.raw`y = ${funcLatex}` },
+      { kind: 'math', content: derivLatex },
+      { kind: 'text', content: '' },
+      { kind: 'text', content: `Step 3: Calculate the slope of the tangent line at x = ${x0}` },
+      { kind: 'math', content: mAtX0Latex },
+      { kind: 'text', content: '' },
+    ];
+
+    if (ask === 'tangent') {
+      explanation.push(
+        { kind: 'text', content: 'Step 4: Find the equation of the tangent line' },
+        { kind: 'text', content: 'Use the point-slope form y - y₁ = m(x - x₁).' },
+        { kind: 'math', content: tangentSlopeInterceptLatex },
+      );
+    }
+
+    if (ask === 'normal') {
+      explanation.push(
+        { kind: 'text', content: 'Step 4: Calculate the slope of the normal line' },
+        { kind: 'text', content: 'The normal line is perpendicular to the tangent, so its slope is the negative reciprocal.' },
+        { kind: 'math', content: normalSlopeLatex },
+        { kind: 'text', content: '' },
+        { kind: 'text', content: 'Step 5: Find the equation of the normal line' },
+        { kind: 'text', content: 'Use the point-slope form y - y₁ = m(x - x₁).' },
+        { kind: 'math', content: normalStandardLatex },
+        { kind: 'math', content: normalSlopeInterceptLatex },
+      );
+    }
+
+    const promptBlocks = ask === 'tangent'
+      ? [
+          { kind: 'text' as const, content: 'Find the equation of the tangent to the curve ' },
+          { kind: 'math' as const, content: String.raw`y = ${funcLatex}` },
+          { kind: 'text' as const, content: ` at the point where x = ${x0}.` },
+        ]
+      : [
+          { kind: 'text' as const, content: 'Find the equation of the normal to the curve ' },
+          { kind: 'math' as const, content: String.raw`y = ${funcLatex}` },
+          { kind: 'text' as const, content: ` at the point where x = ${x0}.` },
+        ];
+
+    return {
+      kind: 'calculus',
+      topicId: 'differentiation',
+      variantId: 'tangent_or_normal_equation',
+      id: stableId('diff_tangent_normal', input.seed, `${ask}-${A}-${p}-${B}-${q}-${C}-${x0}`),
+      seed: input.seed,
+      difficulty: input.difficulty,
+      katexQuestion: ask === 'tangent'
+        ? String.raw`\text{Find the equation of the tangent to the curve } y = ${funcLatex} \text{ at the point where } x = ${x0}.`
+        : String.raw`\text{Find the equation of the normal to the curve } y = ${funcLatex} \text{ at the point where } x = ${x0}.`,
+      promptBlocks,
+      katexExplanation: explanation,
+      expectedNormalized: expandedCandidatesLatex.map((s) => normalizeExprForCompare(s)),
+      expectedLatex: expectedFinalLatex,
+      normalize: (raw: string) => normalizeExprForCompare(raw),
+      generatorParams: { kind: ask },
+    } as any;
   }
 
   if (variant === 'rational_yaxis_gradient') {

@@ -22,6 +22,7 @@ import { Fraction, fractionToDisplay, fractionToLatex, fractionsEqual, normalize
 import { db } from '@/lib/db';
 import { PracticeDifficulty } from '@/lib/practiceGenerators/quadraticFactorization';
 import { generatePracticeQuestion, PracticeQuestion, GraphPracticeQuestion } from '@/lib/practiceEngine';
+import { normalizeUniversalMathAnswer } from '@/lib/universalMathNormalize';
 import { useAuth } from '@/contexts/AuthContext';
 import { toast } from 'sonner';
 import { HOME_ROUTE } from '@/constants/routes';
@@ -176,6 +177,7 @@ const PRACTICE_VARIANTS: Partial<Record<PracticeTopicId, string[]>> = {
     'rational_yaxis_gradient',
     'linear_minus_rational_xaxis_gradients',
     'stationary_points_coords',
+    'tangent_or_normal_equation',
   ],
   integration: ['indefinite', 'definite'],
 };
@@ -390,12 +392,21 @@ export default function Practice() {
     const id = activePracticeEventIdRef.current;
     if (!id) return;
     try {
-      await db.practiceEvents.update(id, {
-        submittedAt: payload.submittedAt,
-        nextAt: payload.nextAt,
-        userAnswer: payload.userAnswer,
-        isCorrect: payload.isCorrect,
-      } as any);
+      const existing = await db.practiceEvents.get(id);
+      const alreadySubmitted = !!existing?.submittedAt;
+      await db.practiceEvents.update(
+        id,
+        (alreadySubmitted
+          ? {
+              nextAt: payload.nextAt,
+            }
+          : {
+              submittedAt: payload.submittedAt,
+              nextAt: payload.nextAt,
+              userAnswer: payload.userAnswer,
+              isCorrect: payload.isCorrect,
+            }) as any
+      );
     } catch (e) {
       console.error(e);
     }
@@ -1718,6 +1729,7 @@ export default function Practice() {
         difficulty: q.difficulty,
         seed: q.seed,
         promptText: q.promptText,
+        promptBlocks: Array.isArray(q.promptBlocks) ? q.promptBlocks : undefined,
         promptKatex: q.promptKatex,
         katexQuestion: q.katexQuestion,
         katexOptions: q.katexOptions,
@@ -1726,6 +1738,7 @@ export default function Practice() {
         generatorParams: q.generatorParams,
         graphSpec: q.graphSpec,
         secondaryGraphSpec: q.secondaryGraphSpec,
+        svgDataUrl: (q as any).svgDataUrl,
         svgAltText: q.svgAltText,
         correctAnswerKatex,
       };
@@ -3005,7 +3018,13 @@ export default function Practice() {
 
         const normalized = normalizeExpr(String(answer1 ?? ''));
         const expected = (cq.expectedNormalized ?? []).map((s: string) => normalizeExpr(String(s ?? '')));
-        return expected.includes(normalized);
+        if (expected.includes(normalized)) return true;
+
+        // Universal math normalization fallback: accept equivalent algebraic formatting
+        // (e.g. -3x^4/4 == -(3/4)x^4, \frac{2x^3}{3} == \frac{2}{3}x^3).
+        const uniUser = normalizeUniversalMathAnswer(String(answer1 ?? ''));
+        const uniExpected = (cq.expectedNormalized ?? []).map((s: string) => normalizeUniversalMathAnswer(String(s ?? '')));
+        return uniExpected.includes(uniUser);
       }
       case 'word_problem': {
         const wp = q as any;
@@ -4746,59 +4765,66 @@ export default function Practice() {
                   </div>
                 )
               ) : (question as any).kind === 'graph' ? null : (
-                <div className="max-w-sm mx-auto space-y-1">
+                <div
+                  className={`${(question as any).expectedFactors?.length === 3 ? 'max-w-5xl' : (question as any).expectedFactors?.length === 2 ? 'max-w-4xl' : 'max-w-sm'} mx-auto space-y-1`}
+                >
                   {(question as PracticeQuestion).kind === 'factorisation' ? (
-                    <div className={`grid gap-3 ${(question as any).expectedFactors?.length === 3 ? 'grid-cols-3' : 'grid-cols-2'}`}>
-                      <div className="space-y-1">
-                        <Label className="text-xs text-muted-foreground">Factor 1</Label>
-                        <div className="flex items-center justify-center gap-2">
-                          <div className="text-2xl select-none">(</div>
-                          <div className="flex-1">
-                            <MathLiveInput
-                              value={answer1}
-                              onChange={setAnswer1}
-                              placeholder=""
-                              disabled={submitted}
-                              className={'text-3xl font-normal text-center'}
-                            />
-                          </div>
-                          <div className="text-2xl select-none">)</div>
-                        </div>
-                      </div>
-                      <div className="space-y-1">
-                        <Label className="text-xs text-muted-foreground">Factor 2</Label>
-                        <div className="flex items-center justify-center gap-2">
-                          <div className="text-2xl select-none">(</div>
-                          <div className="flex-1">
-                            <MathLiveInput
-                              value={answer2}
-                              onChange={setAnswer2}
-                              placeholder=""
-                              disabled={submitted}
-                              className={'text-3xl font-normal text-center'}
-                            />
-                          </div>
-                          <div className="text-2xl select-none">)</div>
-                        </div>
-                      </div>
-                      {(question as any).expectedFactors?.length === 3 ? (
+                    <div className={(question as any).expectedFactors?.length === 3 || (question as any).expectedFactors?.length === 2 ? 'w-full overflow-x-auto' : ''}>
+                      <div
+                        className={`grid gap-x-12 gap-y-3 ${(question as any).expectedFactors?.length === 3 ? 'grid-cols-3 min-w-[720px]' : (question as any).expectedFactors?.length === 2 ? 'grid-cols-2 min-w-[520px]' : 'grid-cols-2'}`}
+                        style={{ gridAutoColumns: (question as any).expectedFactors?.length === 2 ? 'minmax(240px, 1fr)' : 'minmax(200px, 1fr)' }}
+                      >
                         <div className="space-y-1">
-                          <Label className="text-xs text-muted-foreground">Factor 3</Label>
+                          <Label className="text-xs text-muted-foreground">Factor 1</Label>
                           <div className="flex items-center justify-center gap-2">
-                            <div className="text-2xl select-none">(</div>
-                            <div className="flex-1">
+                            <div className="text-2xl select-none px-1 min-w-[0.9em] text-center">(</div>
+                            <div className="flex-1 min-w-[220px]">
                               <MathLiveInput
-                                value={answer3}
-                                onChange={setAnswer3}
+                                value={answer1}
+                                onChange={setAnswer1}
                                 placeholder=""
                                 disabled={submitted}
-                                className={'text-3xl font-normal text-center'}
+                                className={'text-2xl font-normal text-center'}
                               />
                             </div>
-                            <div className="text-2xl select-none">)</div>
+                            <div className="text-2xl select-none px-1 min-w-[0.9em] text-center">)</div>
                           </div>
                         </div>
-                      ) : null}
+                        <div className="space-y-1">
+                          <Label className="text-xs text-muted-foreground">Factor 2</Label>
+                          <div className="flex items-center justify-center gap-2">
+                            <div className="text-2xl select-none px-1 min-w-[0.9em] text-center">(</div>
+                            <div className="flex-1 min-w-[220px]">
+                              <MathLiveInput
+                                value={answer2}
+                                onChange={setAnswer2}
+                                placeholder=""
+                                disabled={submitted}
+                                className={'text-2xl font-normal text-center'}
+                              />
+                            </div>
+                            <div className="text-2xl select-none px-1 min-w-[0.9em] text-center">)</div>
+                          </div>
+                        </div>
+                        {(question as any).expectedFactors?.length === 3 ? (
+                          <div className="space-y-1">
+                            <Label className="text-xs text-muted-foreground">Factor 3</Label>
+                            <div className="flex items-center justify-center gap-2">
+                              <div className="text-2xl select-none px-1 min-w-[0.9em] text-center">(</div>
+                              <div className="flex-1 min-w-[200px]">
+                                <MathLiveInput
+                                  value={answer3}
+                                  onChange={setAnswer3}
+                                  placeholder=""
+                                  disabled={submitted}
+                                  className={'text-2xl font-normal text-center'}
+                                />
+                              </div>
+                              <div className="text-2xl select-none px-1 min-w-[0.9em] text-center">)</div>
+                            </div>
+                          </div>
+                        ) : null}
+                      </div>
                     </div>
                   ) : (question as PracticeQuestion).kind === 'calculus' && (question as any).topicId === 'integration' && /\\int_\{/.test(String((question as any).katexQuestion ?? '')) ? (
                     <Input
@@ -4806,10 +4832,7 @@ export default function Practice() {
                       inputMode="decimal"
                       onChange={(e) => setAnswer1(sanitizeRationalInput(e.target.value))}
                       disabled={submitted}
-                      spellCheck={false}
-                      autoCorrect="off"
-                      autoCapitalize="off"
-                      className="h-12 text-2xl font-normal text-center py-1 overflow-hidden text-ellipsis whitespace-nowrap"
+                      className="h-12 text-2xl font-normal text-center py-1"
                     />
                   ) : (question as PracticeQuestion).kind === 'calculus' ? (
                     (() => {
@@ -4862,15 +4885,6 @@ export default function Practice() {
                             disabled={submitted}
                             className={'text-2xl font-normal text-left tk-expr-input'}
                           />
-                          {cq.topicId === 'integration' ? (
-                            <div className="text-xs text-muted-foreground">
-                              <span>Format: use fractions as a/b (e.g. </span>
-                              <span className="inline-block align-baseline mx-1">
-                                <Katex latex={String.raw`\frac{a}{b}x^n+\frac{c}{d}x^m+\cdots+C`} displayMode={false} />
-                              </span>
-                              <span>). Keep x outside the fraction. Include + C.</span>
-                            </div>
-                          ) : null}
                         </div>
                       );
                     })()
@@ -5138,8 +5152,19 @@ export default function Practice() {
                   setSubmitted(true);
                   setIsCorrect(ok);
                   const specs = getAnswerFieldSpecs(question as PracticeQuestion);
+                  const maxInputs = (() => {
+                    if (specs.length > 0) return specs.length;
+                    if ((question as any)?.kind === 'graph') {
+                      const gq = question as any;
+                      if (Array.isArray(gq?.inputFields) && gq.inputFields.length > 0) return gq.inputFields.length;
+                      // clock_reading and other small graph inputs still use answer1..3
+                      return 3;
+                    }
+                    return 3;
+                  })();
+
                   const allInputs = [answer1, answer2, answer3, ...extraAnswers]
-                    .slice(0, specs.length > 0 ? specs.length : 3)
+                    .slice(0, maxInputs)
                     .map((x) => String(x ?? ''));
                   void recordSubmitEvent({
                     isCorrect: ok,
@@ -5153,7 +5178,15 @@ export default function Practice() {
                       const parts = allInputs.filter((x) => String(x ?? '').trim().length > 0);
                       return parts.length ? parts.join(' | ') : 'N/A';
                     })(),
-                    userAnswerParts: allInputs,
+                    userAnswerParts: (() => {
+                      // Only store parts when they are meaningful; otherwise the admin modals will show "—".
+                      const trimmed = allInputs.map((x) => String(x ?? '').trim());
+                      const hasAny = trimmed.some((x) => x.length > 0);
+                      if (!hasAny) return undefined;
+                      // For graph MCQ options, userAnswer is the selected option latex; parts would be empty.
+                      if ((question as any)?.kind === 'graph' && Array.isArray((question as any)?.katexOptions)) return undefined;
+                      return allInputs;
+                    })(),
                   });
                   if ((question as any).kind === 'quadratic') {
                     const qAny: any = question as any;
