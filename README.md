@@ -1,12 +1,24 @@
 # MathInk
 
 <p align="center">
-  <a href="#">
-    <img
-      src="https://readme-typing-svg.demolab.com?font=Roboto+Slab&size=34&pause=1200&center=true&vCenter=true&width=900&height=70&lines=MathInk;Practice+Smarter.+Test+Better.+Learn+Faster."
-      alt="MathInk animated title"
-    />
-  </a>
+  <img src="https://capsule-render.vercel.app/api?type=waving&color=0:111827,50:4f46e5,100:06b6d4&height=190&section=header&text=MathInk&fontSize=56&fontColor=ffffff&fontAlignY=36&animation=twinkling" alt="MathInk banner" />
+</p>
+
+<p align="center">
+  <img src="https://readme-typing-svg.demolab.com?font=Roboto+Slab&size=26&pause=900&center=true&vCenter=true&width=900&height=50&lines=Practice+Smarter.;Test+Better.;Learn+Faster.;Build+your+question+bank+once.+Use+it+forever." alt="MathInk animated tagline" />
+</p>
+
+<p align="center">
+  <a href="#download"><img src="https://img.shields.io/badge/Download-Releases-4f46e5?style=for-the-badge" alt="Download" /></a>
+  <a href="#screenshots"><img src="https://img.shields.io/badge/See-Screenshots-06b6d4?style=for-the-badge" alt="Screenshots" /></a>
+  <a href="#what-you-can-do-at-a-glance"><img src="https://img.shields.io/badge/Explore-Features-111827?style=for-the-badge" alt="Features" /></a>
+</p>
+
+<p align="center">
+  <img src="https://img.shields.io/badge/Desktop-Experience-111827?style=flat-square" alt="Desktop" />
+  <img src="https://img.shields.io/badge/Practice-Daily-4f46e5?style=flat-square" alt="Practice" />
+  <img src="https://img.shields.io/badge/Exam-Mode-06b6d4?style=flat-square" alt="Exam" />
+  <img src="https://img.shields.io/badge/Progress-Tracking-22c55e?style=flat-square" alt="Progress" />
 </p>
 
 <p align="center">
@@ -30,6 +42,34 @@ Studying works best when you can do three things consistently:
 MathInk brings all of this into a single, distraction-free desktop experience.
 
 ---
+
+## The experience (quick preview)
+
+<table>
+  <tr>
+    <td width="33%" valign="top">
+      <h3>Question Bank</h3>
+      <p>
+        Build a clean library you can reuse forever — organized, searchable, and easy to maintain.
+      </p>
+      <p><strong>Best for:</strong> creating a long-term study system.</p>
+    </td>
+    <td width="33%" valign="top">
+      <h3>Practice Mode</h3>
+      <p>
+        Learn with clarity. Practice topic-wise, revise mixed topics, and use explanations to fix concepts.
+      </p>
+      <p><strong>Best for:</strong> daily improvement.</p>
+    </td>
+    <td width="33%" valign="top">
+      <h3>Exam Mode</h3>
+      <p>
+        Simulate real tests with time pressure, exam flow, and post-exam review to sharpen performance.
+      </p>
+      <p><strong>Best for:</strong> mock tests and performance tracking.</p>
+    </td>
+  </tr>
+</table>
 
 ## What you can do (at a glance)
 
