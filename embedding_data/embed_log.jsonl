@@ -1,0 +1,29 @@
+{"ts":1769344448644,"event":"prepare_start","requestedModelId":"sentence-transformers/all-mpnet-base-v2","tags":20}
+{"ts":1769344894806,"event":"prepare_start","requestedModelId":"sentence-transformers/all-mpnet-base-v2","tags":20}
+{"ts":1769344895644,"event":"prepare_model_loaded","modelId":"sentence-transformers/all-mpnet-base-v2","quantized":true,"detectedLicense":null}
+{"ts":1769344896055,"event":"prepare_done","modelId":"sentence-transformers/all-mpnet-base-v2","dims":768,"tags":20}
+{"ts":1769346332189,"event":"prepare_start","requestedModelId":"sentence-transformers/multi-qa-mpnet-base-cos-v1","tags":20}
+{"ts":1769346388539,"event":"prepare_model_loaded","modelId":"sentence-transformers/multi-qa-mpnet-base-cos-v1","quantized":true,"detectedLicense":null}
+{"ts":1769346388814,"event":"prepare_done","modelId":"sentence-transformers/multi-qa-mpnet-base-cos-v1","dims":768,"tags":20}
+{"ts":1769346961333,"event":"prepare_start","requestedModelId":"sentence-transformers/multi-qa-mpnet-base-cos-v1","tags":20}
+{"ts":1769346961334,"event":"prepare_model_loaded","modelId":"sentence-transformers/multi-qa-mpnet-base-cos-v1","quantized":true,"detectedLicense":null}
+{"ts":1769346961653,"event":"prepare_done","modelId":"sentence-transformers/multi-qa-mpnet-base-cos-v1","dims":768,"tags":20}
+{"ts":1769346981003,"event":"suggest_empty_input"}
+{"ts":1769346982718,"event":"suggest_empty_input"}
+{"ts":1769346983521,"event":"suggest_empty_input"}
+{"ts":1769346983691,"event":"suggest_empty_input"}
+{"ts":1769346984069,"event":"suggest_empty_input"}
+{"ts":1769346984253,"event":"suggest_empty_input"}
+{"ts":1769346984446,"event":"suggest_empty_input"}
+{"ts":1769346999810,"event":"feedback","action":"accept","tagName":"Chemistry"}
+{"ts":1769346999810,"event":"feedback","action":"accept","tagName":"Organic Chemistry"}
+{"ts":1769346999810,"event":"feedback","action":"accept","tagName":"Physical Chemistry"}
+{"ts":1769346999810,"event":"feedback","action":"accept","tagName":"Word Problems"}
+{"ts":1769347002783,"event":"feedback","action":"accept","tagName":"Organic Chemistry"}
+{"ts":1769347008676,"event":"feedback","action":"accept","tagName":"Physical Chemistry"}
+{"ts":1769347301902,"event":"feedback","action":"accept","tagName":"Chemistry"}
+{"ts":1769347301903,"event":"feedback","action":"accept","tagName":"Organic Chemistry"}
+{"ts":1769347301903,"event":"feedback","action":"accept","tagName":"Physical Chemistry"}
+{"ts":1769347442958,"event":"feedback","action":"accept","tagName":"Chemistry"}
+{"ts":1769347442958,"event":"feedback","action":"accept","tagName":"Organic Chemistry"}
+{"ts":1769347442958,"event":"feedback","action":"accept","tagName":"Physical Chemistry"}

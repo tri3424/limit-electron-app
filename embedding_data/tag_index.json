@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "modelId": "sentence-transformers/multi-qa-mpnet-base-cos-v1",
+  "quantized": true,
+  "dims": 768,
+  "tags": [
+    "Science",
+    "NEET",
+    "AS",
+    "Word Meanings",
+    "Physical Chemistry",
+    "Introduction to organic chemistry",
+    "Organic Chemistry",
+    "Mechanics",
+    "IGCSE",
+    "Level 1",
+    "Reading",
+    "Molecular Geometry",
+    "Physics",
+    "Biology",
+    "EVS",
+    "Mathematics",
+    "Word Problems",
+    "Bengali",
+    "Basic",
+    "Chemistry"
+  ],
+  "createdAt": 1769346961651
+}

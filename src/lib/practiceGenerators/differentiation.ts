@@ -1198,6 +1198,20 @@ export function generateDifferentiationQuestion(input: { seed: number; difficult
     // Sort for nicer display: highest power first.
     terms.sort((a, b) => b.pow - a.pow);
 
+		const posPows = terms.filter((t) => t.pow > 0).map((t) => t.pow).sort((a, b) => b - a);
+		if (posPows.length >= 3) {
+			let consecutive = true;
+			for (let i = 1; i < posPows.length; i++) {
+				if (posPows[i - 1] - posPows[i] !== 1) {
+					consecutive = false;
+					break;
+				}
+			}
+			if (consecutive) {
+				return generateDifferentiationQuestion({ ...input, seed: input.seed + 1 });
+			}
+		}
+
     const termValueAtX0 = (t: PolyTerm): number => {
       if (t.pow === 0) return t.coeff;
       if (t.pow > 0) return t.coeff * powInt(x0, t.pow);
@@ -2186,11 +2200,35 @@ export function generateDifferentiationQuestion(input: { seed: number; difficult
   const termCount = input.difficulty === 'easy' ? 2 : input.difficulty === 'medium' ? 3 : 3;
 
   const rawTerms: Term[] = [];
-  for (let i = 0; i < termCount; i++) {
-    const n = rng.int(0, maxPow);
-    const a = rng.int(-7, 7) || 1;
-    rawTerms.push({ a, n });
-  }
+	const used = new Set<number>();
+	let guard = 0;
+	while (rawTerms.length < termCount && guard++ < 200) {
+		const n = rng.int(0, maxPow);
+		if (used.has(n)) continue;
+		used.add(n);
+		const a = rng.int(-7, 7) || 1;
+		rawTerms.push({ a, n });
+	}
+	if (rawTerms.length < termCount) {
+		return generateDifferentiationQuestion({ ...input, seed: input.seed + 1 });
+	}
+
+	// Avoid the common consecutive triple pattern (e.g. 5,4,3) that feels repetitive.
+	if (rawTerms.length >= 3) {
+		const pows = rawTerms.map((t) => t.n).filter((n) => n > 0).sort((a, b) => b - a);
+		if (pows.length >= 3) {
+			let consecutive = true;
+			for (let i = 1; i < pows.length; i++) {
+				if (pows[i - 1] - pows[i] !== 1) {
+					consecutive = false;
+					break;
+				}
+			}
+			if (consecutive) {
+				return generateDifferentiationQuestion({ ...input, seed: input.seed + 1 });
+			}
+		}
+	}
 
   // ensure at least one non-constant term
   if (rawTerms.every((t) => t.n === 0)) rawTerms[0] = { ...rawTerms[0], n: 2 };

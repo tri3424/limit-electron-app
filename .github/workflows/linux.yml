@@ -29,6 +29,15 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Cache embedding models
+        uses: actions/cache@v4
+        with:
+          path: embedding_data/models
+          key: ${{ runner.os }}-embed-models-v1
+
+      - name: Download embedding models
+        run: node scripts/download-embedding-models.mjs
+
       - name: Set build version
         id: build_version
         run: |

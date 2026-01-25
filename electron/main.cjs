@@ -4,6 +4,25 @@ const { app, BrowserWindow, Menu, ipcMain, dialog, session, shell, nativeImage }
 const path = require('path');
 const fs = require('fs');
 const { pathToFileURL } = require('url');
+const crypto = require('crypto');
+
+let embedExtractorCache = {
+	modelId: null,
+	quantized: null,
+	extractor: null,
+};
+
+const EMBED_MODEL_PREFERRED = 'sentence-transformers/multi-qa-mpnet-base-cos-v1';
+const EMBED_MODEL_FALLBACK = 'Xenova/all-MiniLM-L6-v2';
+
+function getEmbedBaseDir() {
+	// Store inside the project during development, and inside resources when packaged
+	if (app.isPackaged) {
+		return path.join(process.resourcesPath, 'embedding');
+	}
+	// app.getAppPath() points to the project root in dev (or the asar in prod).
+	return path.join(app.getAppPath(), 'embedding_data');
+}
 
 // Improve wheel/trackpad feel across the app (Chromium)
 app.commandLine.appendSwitch('enable-smooth-scrolling');
@@ -12,6 +31,39 @@ app.commandLine.appendSwitch('smooth-scrolling');
 // Single instance lock
 if (!app.requestSingleInstanceLock()) {
   app.quit();
+}
+
+function sendEmbedProgress(progress) {
+	try {
+		if (mainWindow && !mainWindow.isDestroyed()) {
+			mainWindow.webContents.send('embed:prepareProgress', progress);
+		}
+	} catch {
+		// ignore
+	}
+}
+
+function dirBytes(root) {
+	try {
+		if (!root || !fs.existsSync(root)) return 0;
+		const st = fs.statSync(root);
+		if (st.isFile()) return st.size;
+		if (!st.isDirectory()) return 0;
+		let total = 0;
+		for (const name of fs.readdirSync(root)) {
+			const p = path.join(root, name);
+			try {
+				const s = fs.statSync(p);
+				if (s.isDirectory()) total += dirBytes(p);
+				else if (s.isFile()) total += s.size;
+			} catch {
+				// ignore
+			}
+		}
+		return total;
+	} catch {
+		return 0;
+	}
 }
 
 function canWriteToDir(dirPath) {
@@ -28,6 +80,302 @@ function canWriteToDir(dirPath) {
 
 let mainWindow;
 const isDev = !app.isPackaged;
+
+function safeJsonLine(obj) {
+	try {
+		return JSON.stringify(obj);
+	} catch {
+		return JSON.stringify({ event: 'log_serialization_failed', ts: Date.now() });
+	}
+}
+
+function getEmbedPaths() {
+	const cacheDir = getEmbedBaseDir();
+	const modelCacheDir = path.join(cacheDir, 'models');
+	const tagIndexMetaPath = path.join(cacheDir, 'tag_index.json');
+	const tagIndexBinPath = path.join(cacheDir, 'tag_vectors.f32');
+	const feedbackPath = path.join(cacheDir, 'feedback.jsonl');
+	const logPath = path.join(cacheDir, 'embed_log.jsonl');
+	const manifestPath = path.join(cacheDir, 'embed_manifest.json');
+	return { cacheDir, modelCacheDir, tagIndexMetaPath, tagIndexBinPath, feedbackPath, logPath, manifestPath };
+}
+
+function getDefaultModelCandidates() {
+	// transformers.js may support different namespaces depending on runtime/build.
+	// We try multi-qa-mpnet first, then fall back to MiniLM if not compatible/available.
+	return [
+		EMBED_MODEL_PREFERRED,
+		'Xenova/multi-qa-mpnet-base-cos-v1',
+		EMBED_MODEL_FALLBACK,
+	];
+}
+
+function sha256File(p) {
+	const h = crypto.createHash('sha256');
+	const buf = fs.readFileSync(p);
+	h.update(buf);
+	return h.digest('hex');
+}
+
+function bestEffortDetectLicense(modelDir) {
+	try {
+		if (!modelDir || !fs.existsSync(modelDir)) return null;
+		const candidates = ['README.md', 'readme.md', 'LICENSE', 'LICENSE.txt', 'license', 'license.txt'];
+		for (const name of candidates) {
+			const p = path.join(modelDir, name);
+			if (!fs.existsSync(p)) continue;
+			const s = fs.readFileSync(p, 'utf8');
+			const m = s.match(/license\s*[:=]\s*([A-Za-z0-9_.-]+)/i);
+			if (m && m[1]) return String(m[1]).trim();
+			if (/apache\s*2\.0/i.test(s)) return 'Apache-2.0';
+			if (/mit\b/i.test(s)) return 'MIT';
+			if (/cc-by/i.test(s)) return 'CC-BY';
+		}
+	} catch {
+		// ignore
+	}
+	return null;
+}
+
+function writeEmbedManifest(info) {
+	const { cacheDir, tagIndexMetaPath, tagIndexBinPath, manifestPath } = getEmbedPaths();
+	try {
+		ensureDir(cacheDir);
+		const obj = {
+			schemaVersion: 1,
+			createdAt: Date.now(),
+			...info,
+			cache: {
+				tag_index_json: fs.existsSync(tagIndexMetaPath) ? { size: fs.statSync(tagIndexMetaPath).size, sha256: sha256File(tagIndexMetaPath) } : null,
+				tag_vectors_f32: fs.existsSync(tagIndexBinPath) ? { size: fs.statSync(tagIndexBinPath).size, sha256: sha256File(tagIndexBinPath) } : null,
+			},
+		};
+		fs.writeFileSync(manifestPath, JSON.stringify(obj, null, 2), { encoding: 'utf8', mode: 0o600 });
+	} catch {
+		// ignore
+	}
+}
+
+function ensureDir(dirPath) {
+	fs.mkdirSync(dirPath, { recursive: true });
+}
+
+function appendLogLine(lineObj) {
+	const { cacheDir, logPath } = getEmbedPaths();
+	try {
+		ensureDir(cacheDir);
+		const line = safeJsonLine({ ts: Date.now(), ...lineObj }) + '\n';
+		fs.appendFileSync(logPath, line, { encoding: 'utf8', mode: 0o600 });
+	} catch {
+		// ignore
+	}
+}
+
+function normalizeVector(vec) {
+	let sum = 0;
+	for (let i = 0; i < vec.length; i++) {
+		const v = Number(vec[i] || 0);
+		sum += v * v;
+	}
+	const norm = Math.sqrt(sum) || 1;
+	for (let i = 0; i < vec.length; i++) vec[i] = Number(vec[i] || 0) / norm;
+	return vec;
+}
+
+function coerceEmbeddingVector(out) {
+	// transformers.js sometimes returns:
+	// - number[]
+	// - number[][]
+	// - Tensor-like { data: Float32Array, dims/shape }
+	// - TypedArray
+	if (!out) return null;
+	if (Array.isArray(out)) {
+		let v = out;
+		// Unwrap nested arrays until we hit a non-array leaf.
+		while (Array.isArray(v) && v.length > 0 && Array.isArray(v[0])) v = v[0];
+		if (!Array.isArray(v) || v.length === 0) return null;
+		return v.map((x) => Number(x || 0));
+	}
+	if (out && typeof out === 'object') {
+		const data = out.data;
+		if (data && typeof data.length === 'number') {
+			return Array.from(data, (x) => Number(x || 0));
+		}
+	}
+	if (typeof out.length === 'number') {
+		try {
+			return Array.from(out, (x) => Number(x || 0));
+		} catch {
+			return null;
+		}
+	}
+	return null;
+}
+
+function sanitizeTags(tags) {
+	const out = [];
+	const seen = new Set();
+	for (const raw of Array.isArray(tags) ? tags : []) {
+		const t = String(raw || '').trim();
+		if (!t) continue;
+		const key = t.toLowerCase();
+		if (seen.has(key)) continue;
+		seen.add(key);
+		out.push(t);
+	}
+	return out;
+}
+
+function cosineSimilarity(a, b) {
+	const n = Math.min(a.length, b.length);
+	let s = 0;
+	for (let i = 0; i < n; i++) s += Number(a[i] || 0) * Number(b[i] || 0);
+	return s;
+}
+
+function extractPlainText(html) {
+	// Minimal, deterministic stripping without executing code.
+	return String(html || '')
+		.replace(/<style[\s\S]*?<\/style>/gi, ' ')
+		.replace(/<script[\s\S]*?<\/script>/gi, ' ')
+		.replace(/<[^>]+>/g, ' ')
+		.replace(/\s+/g, ' ')
+		.trim();
+}
+
+function computeInputHash(text) {
+	return crypto.createHash('sha256').update(String(text || ''), 'utf8').digest('hex');
+}
+
+function tokenizeForMatch(s) {
+	return String(s || '')
+		.toLowerCase()
+		.replace(/[^a-z0-9+.#\-\s]/g, ' ')
+		.split(/\s+/)
+		.filter(Boolean);
+}
+
+function lexicalScore(text, tag) {
+	const t = String(text || '').toLowerCase();
+	const name = String(tag || '').toLowerCase().trim();
+	if (!t || !name) return 0;
+	if (t.includes(name)) return 1;
+	const a = tokenizeForMatch(t);
+	const b = tokenizeForMatch(name);
+	if (!a.length || !b.length) return 0;
+	const setA = new Set(a);
+	let hit = 0;
+	for (const tok of b) if (setA.has(tok)) hit++;
+	return hit / b.length;
+}
+
+function readFeedbackBias(feedbackPath) {
+	const biasByTag = new Map();
+	try {
+		if (!feedbackPath || !fs.existsSync(feedbackPath)) return biasByTag;
+		const raw = fs.readFileSync(feedbackPath, 'utf8');
+		const lines = raw.split(/\r?\n/);
+		for (const line of lines) {
+			const l = String(line || '').trim();
+			if (!l) continue;
+			let obj;
+			try {
+				obj = JSON.parse(l);
+			} catch {
+				continue;
+			}
+			const tagName = obj && obj.tagName ? String(obj.tagName).trim() : '';
+			if (!tagName) continue;
+			const action = obj && obj.action ? String(obj.action) : '';
+			if (!action) continue;
+			const key = tagName.toLowerCase();
+			const cur = biasByTag.get(key) || { pos: 0, neg: 0 };
+			if (action === 'accept' || action === 'add') cur.pos += 1;
+			if (action === 'reject' || action === 'remove') cur.neg += 1;
+			biasByTag.set(key, cur);
+		}
+	} catch {
+		return biasByTag;
+	}
+	return biasByTag;
+}
+
+function loadTagIndex() {
+	const { tagIndexMetaPath, tagIndexBinPath } = getEmbedPaths();
+	if (!fs.existsSync(tagIndexMetaPath) || !fs.existsSync(tagIndexBinPath)) return null;
+	const meta = JSON.parse(fs.readFileSync(tagIndexMetaPath, 'utf8'));
+	if (!meta || !Array.isArray(meta.tags) || !Number.isFinite(meta.dims)) return null;
+	const dims = Math.floor(meta.dims);
+	const buf = fs.readFileSync(tagIndexBinPath);
+	const floats = new Float32Array(buf.buffer, buf.byteOffset, Math.floor(buf.byteLength / 4));
+	return { meta, dims, floats };
+}
+
+async function getTransformers() {
+	try {
+		return await import('@huggingface/transformers');
+	} catch {
+		throw new Error('Missing @huggingface/transformers');
+	}
+}
+
+async function getEmbeddingExtractor(params) {
+	const modelId = String(params?.modelId || '').trim();
+	const modelCacheDir = String(params?.modelCacheDir || '').trim();
+	const allowDownload = params?.allowDownload === true;
+	const quantized = params?.quantized === true;
+	if (!modelId) throw new Error('Missing modelId');
+	if (!modelCacheDir) throw new Error('Missing model cache directory');
+
+	if (embedExtractorCache.extractor && embedExtractorCache.modelId === modelId && embedExtractorCache.quantized === quantized) {
+		return embedExtractorCache.extractor;
+	}
+
+	const transformers = await getTransformers();
+	transformers.env.allowRemoteModels = allowDownload;
+	transformers.env.allowLocalModels = true;
+	transformers.env.useBrowserCache = false;
+	transformers.env.useFS = true;
+	transformers.env.cacheDir = modelCacheDir;
+
+	const extractor = await transformers.pipeline('feature-extraction', modelId, {
+		local_files_only: !allowDownload,
+		quantized,
+	});
+	embedExtractorCache = { modelId, quantized, extractor };
+	return extractor;
+}
+
+async function chooseAndLoadModel(params) {
+	const candidates = Array.isArray(params?.candidates) && params.candidates.length
+		? params.candidates
+		: getDefaultModelCandidates();
+	const modelCacheDir = params?.modelCacheDir;
+	const allowDownload = params?.allowDownload === true;
+
+	const attempts = [];
+	for (const modelId of candidates) {
+		// Prefer quantized when available.
+		for (const quantized of [true, false]) {
+			try {
+				const extractor = await getEmbeddingExtractor({ modelId, modelCacheDir, allowDownload, quantized });
+				return { modelId, quantized, extractor };
+			} catch (e) {
+				attempts.push({ modelId, quantized, error: String(e && e.message ? e.message : e) });
+			}
+		}
+	}
+	const last = attempts.length ? attempts[attempts.length - 1] : null;
+	throw new Error(last ? last.error : 'Failed to load embedding model');
+}
+
+async function embedTextLocalOnly(text, modelId, modelCacheDir) {
+	const extractor = await getEmbeddingExtractor({ modelId, modelCacheDir, allowDownload: false });
+	const out = await extractor(text, { pooling: 'mean', normalize: true });
+	const vec = coerceEmbeddingVector(out);
+	if (!vec || vec.length === 0) throw new Error('Embedding output invalid');
+	return normalizeVector(vec);
+}
 
 function getAppIconPath() {
 	const candidates = [];
@@ -247,7 +595,360 @@ app.on('ready', () => {
 		}
 	}
 
-  createWindow();
+	createWindow();
+
+	// Offline embedding / tagging IPC.
+	ipcMain.handle('embed:modelStatus', async () => {
+		const { cacheDir, modelCacheDir, tagIndexMetaPath, tagIndexBinPath } = getEmbedPaths();
+		const hasCache = fs.existsSync(tagIndexMetaPath) && fs.existsSync(tagIndexBinPath);
+		if (!hasCache) {
+			return {
+				ready: false,
+				modelDir: modelCacheDir,
+				cacheDir,
+				reason: 'Tag embedding cache missing. Run Prepare in Settings.',
+			};
+		}
+		const idx = loadTagIndex();
+		const modelId = idx && idx.meta && typeof idx.meta.modelId === 'string' ? idx.meta.modelId : EMBED_MODEL_PREFERRED;
+		try {
+			await chooseAndLoadModel({ candidates: [modelId, EMBED_MODEL_FALLBACK], modelCacheDir, allowDownload: false });
+			return { ready: true, modelDir: modelCacheDir, cacheDir };
+		} catch (e) {
+			const msg = String(e && e.message ? e.message : e);
+			appendLogLine({ event: 'model_status_not_ready', modelId, error: msg, modelCacheDir });
+			return {
+				ready: false,
+				modelDir: modelCacheDir,
+				cacheDir,
+				reason: `Embedding model not available locally (${modelId}). Run Prepare in Settings. Details: ${msg}`,
+			};
+		}
+	});
+
+	ipcMain.handle('embed:prepare', async (_event, payload) => {
+		const requestedModelId = payload && typeof payload.modelId === 'string' && payload.modelId.trim()
+			? payload.modelId.trim()
+			: EMBED_MODEL_PREFERRED;
+		const tags = sanitizeTags(payload && payload.tags);
+		const acceptLicense = payload && payload.acceptLicense === true;
+		const forceRebuildCache = payload && payload.forceRebuildCache === true;
+
+		if (!acceptLicense) {
+			return {
+				ok: false,
+				requiresConsent: true,
+				licenseText: 'Model: sentence-transformers/multi-qa-mpnet-base-cos-v1 (preferred) with fallback Xenova/all-MiniLM-L6-v2. Accept the license in Settings to download and bundle locally.',
+				reason: 'License acceptance required.',
+			};
+		}
+
+		const { cacheDir, modelCacheDir, tagIndexMetaPath, tagIndexBinPath } = getEmbedPaths();
+		ensureDir(cacheDir);
+		ensureDir(modelCacheDir);
+
+		appendLogLine({ event: 'prepare_start', requestedModelId, tags: tags.length });
+		sendEmbedProgress({ step: 'init', message: 'Preparing offline embedding model...', progress: 0 });
+
+		// Strict offline mode: never download during preparation.
+		sendEmbedProgress({ step: 'verify', message: 'Verifying local model files...', progress: 0.05 });
+		// Load from local cache only. transformers.js manages cached files.
+		let extractor;
+		let modelId = requestedModelId;
+		let quantized = false;
+		try {
+			const loaded = await chooseAndLoadModel({
+				candidates: [requestedModelId, ...getDefaultModelCandidates()],
+				modelCacheDir,
+				allowDownload: false,
+			});
+			extractor = loaded.extractor;
+			modelId = loaded.modelId;
+			quantized = loaded.quantized;
+		} catch (e) {
+			appendLogLine({ event: 'prepare_download_failed', error: String(e && e.message ? e.message : e) });
+			return { ok: false, reason: 'Model not available locally. This app is configured for zero-network operation. Bundle the model into embedding_data/models (or packaged resources) and try again.' };
+		}
+
+		// Best-effort license verification: attempt to detect cached license.
+		const detectedLicense = bestEffortDetectLicense(modelCacheDir);
+		appendLogLine({ event: 'prepare_model_loaded', modelId, quantized, detectedLicense });
+		sendEmbedProgress({ step: 'load', message: 'Model loaded locally. Building tag cache...', progress: 0.15 });
+
+		if (!tags.length) {
+			return { ok: false, reason: 'No tags provided to build cache.' };
+		}
+
+		// Build tag embedding cache.
+		if (forceRebuildCache || !fs.existsSync(tagIndexMetaPath) || !fs.existsSync(tagIndexBinPath)) {
+			sendEmbedProgress({ step: 'cache', message: 'Building tag embedding cache...', progress: 0.2 });
+			const vectors = [];
+			let dims = 0;
+			for (let i = 0; i < tags.length; i++) {
+				const t = tags[i];
+				sendEmbedProgress({ step: 'cache', message: `Embedding tag ${i + 1}/${tags.length}`, progress: 0.2 + ((i + 1) / tags.length) * 0.7 });
+				let out;
+				try {
+					out = await extractor(t, { pooling: 'mean', normalize: true });
+				} catch (e) {
+					appendLogLine({ event: 'prepare_tag_embed_failed', tag: t, error: String(e && e.message ? e.message : e) });
+					return { ok: false, reason: `Failed to compute embedding for tag: ${t}` };
+				}
+				const vec = coerceEmbeddingVector(out);
+				if (!vec || vec.length === 0) {
+					appendLogLine({ event: 'prepare_tag_embed_invalid', tag: t });
+					return { ok: false, reason: `Embedding output invalid for tag: ${t}` };
+				}
+				const arr = normalizeVector(vec);
+				dims = dims || arr.length;
+				if (arr.length !== dims) {
+					appendLogLine({ event: 'prepare_tag_dims_mismatch', tag: t, got: arr.length, dims });
+					return { ok: false, reason: `Embedding dims mismatch for tag: ${t}` };
+				}
+				vectors.push(arr);
+			}
+
+			if (!dims || vectors.length !== tags.length) {
+				appendLogLine({ event: 'prepare_cache_failed', dims, vectors: vectors.length, tags: tags.length });
+				return { ok: false, reason: 'Failed to compute tag embeddings for all tags.' };
+			}
+
+			const flat = new Float32Array(tags.length * dims);
+			for (let i = 0; i < tags.length; i++) {
+				flat.set(Float32Array.from(vectors[i]), i * dims);
+			}
+
+			fs.writeFileSync(tagIndexBinPath, Buffer.from(flat.buffer), { mode: 0o600 });
+			fs.writeFileSync(
+				tagIndexMetaPath,
+				JSON.stringify({ schemaVersion: 1, modelId, quantized, dims, tags, createdAt: Date.now() }, null, 2),
+				{ encoding: 'utf8', mode: 0o600 },
+			);
+			writeEmbedManifest({ modelId, quantized, detectedLicense, acceptedLicense: true });
+			sendEmbedProgress({ step: 'done', message: 'Prepared for offline tag suggestions.', progress: 1 });
+			appendLogLine({ event: 'prepare_done', modelId, dims, tags: tags.length });
+			return { ok: true };
+		}
+		sendEmbedProgress({ step: 'done', message: 'Offline tagging ready.', progress: 1 });
+		appendLogLine({ event: 'prepare_done', modelId });
+		return { ok: true, modelDir: modelCacheDir, cacheDir };
+	});
+
+	ipcMain.handle('embed:rebuildCache', async (_event, payload) => {
+		const modelId = payload && typeof payload.modelId === 'string' && payload.modelId.trim()
+			? payload.modelId.trim()
+			: EMBED_MODEL_PREFERRED;
+		const tags = sanitizeTags(payload && payload.tags);
+		if (!tags.length) return { ok: false, reason: 'No tags provided.' };
+		const { cacheDir, modelCacheDir, tagIndexMetaPath, tagIndexBinPath } = getEmbedPaths();
+		ensureDir(cacheDir);
+		ensureDir(modelCacheDir);
+
+		sendEmbedProgress({ step: 'cache', message: 'Rebuilding tag embedding cache...', progress: 0 });
+
+		let extractor;
+		let selectedModelId = modelId;
+		let quantized = false;
+		try {
+			const loaded = await chooseAndLoadModel({ candidates: [modelId, EMBED_MODEL_FALLBACK], modelCacheDir, allowDownload: false });
+			extractor = loaded.extractor;
+			selectedModelId = loaded.modelId;
+			quantized = loaded.quantized;
+		} catch {
+			return { ok: false, reason: 'Model not available locally. Run Prepare first.' };
+		}
+
+		const vectors = [];
+		let dims = 0;
+		for (let i = 0; i < tags.length; i++) {
+			const t = tags[i];
+			sendEmbedProgress({ step: 'cache', message: `Embedding tag ${i + 1}/${tags.length}`, progress: ((i + 1) / tags.length) });
+			let out;
+			try {
+				out = await extractor(t, { pooling: 'mean', normalize: true });
+			} catch (e) {
+				appendLogLine({ event: 'rebuild_tag_embed_failed', tag: t, error: String(e && e.message ? e.message : e) });
+				return { ok: false, reason: `Failed to compute embedding for tag: ${t}` };
+			}
+			const vec = coerceEmbeddingVector(out);
+			if (!vec || vec.length === 0) {
+				appendLogLine({ event: 'rebuild_tag_embed_invalid', tag: t });
+				return { ok: false, reason: `Embedding output invalid for tag: ${t}` };
+			}
+			const arr = normalizeVector(vec);
+			dims = dims || arr.length;
+			if (arr.length !== dims) {
+				appendLogLine({ event: 'rebuild_tag_dims_mismatch', tag: t, got: arr.length, dims });
+				return { ok: false, reason: `Embedding dims mismatch for tag: ${t}` };
+			}
+			vectors.push(arr);
+		}
+		if (!dims || vectors.length !== tags.length) {
+			return { ok: false, reason: 'Failed to compute tag embeddings for all tags.' };
+		}
+		const flat = new Float32Array(tags.length * dims);
+		for (let i = 0; i < tags.length; i++) {
+			flat.set(Float32Array.from(vectors[i]), i * dims);
+		}
+		fs.writeFileSync(tagIndexBinPath, Buffer.from(flat.buffer), { mode: 0o600 });
+		fs.writeFileSync(
+			tagIndexMetaPath,
+			JSON.stringify({ schemaVersion: 1, modelId: selectedModelId, quantized, dims, tags, createdAt: Date.now() }, null, 2),
+			{ encoding: 'utf8', mode: 0o600 },
+		);
+		writeEmbedManifest({ modelId: selectedModelId, quantized, rebuiltCache: true });
+		sendEmbedProgress({ step: 'done', message: 'Tag cache rebuilt.', progress: 1 });
+		return { ok: true };
+	});
+
+	ipcMain.handle('embed:suggestTags', async (_event, payload) => {
+		const { cacheDir, modelCacheDir } = getEmbedPaths();
+		const availableTags = payload && Array.isArray(payload.availableTags) ? payload.availableTags.map(String) : [];
+		const topK = payload && Number.isFinite(payload.topK) ? Math.max(1, Math.floor(payload.topK)) : 4;
+		// Score is cosine mapped to [0, 1].
+		const minScore = payload && Number.isFinite(payload.minScore) ? Number(payload.minScore) : 0.6;
+		const questionHtml = payload && typeof payload.questionHtml === 'string' ? payload.questionHtml : '';
+		const explanationHtml = payload && typeof payload.explanationHtml === 'string' ? payload.explanationHtml : '';
+		const optionsHtml = payload && Array.isArray(payload.optionsHtml) ? payload.optionsHtml.map(String) : [];
+		const matchingHeadingHtml = payload && typeof payload.matchingHeadingHtml === 'string' ? payload.matchingHeadingHtml : '';
+		const matchingLeftHtml = payload && Array.isArray(payload.matchingLeftHtml) ? payload.matchingLeftHtml.map(String) : [];
+		const matchingRightHtml = payload && Array.isArray(payload.matchingRightHtml) ? payload.matchingRightHtml.map(String) : [];
+
+		const segments = [];
+		const stem = extractPlainText(questionHtml);
+		if (stem) segments.push({ kind: 'stem', text: stem });
+		const expl = extractPlainText(explanationHtml);
+		if (expl) segments.push({ kind: 'explanation', text: expl });
+		for (let i = 0; i < optionsHtml.length; i++) {
+			const opt = extractPlainText(optionsHtml[i]);
+			if (opt) segments.push({ kind: 'option', text: opt });
+		}
+		const mh = extractPlainText(matchingHeadingHtml);
+		if (mh) segments.push({ kind: 'matching_heading', text: mh });
+		for (const l of matchingLeftHtml) {
+			const x = extractPlainText(l);
+			if (x) segments.push({ kind: 'matching_left', text: x });
+		}
+		for (const r of matchingRightHtml) {
+			const x = extractPlainText(r);
+			if (x) segments.push({ kind: 'matching_right', text: x });
+		}
+
+		const combined = segments.map((s) => s.text).join('\n\n').trim();
+
+		if (!combined) {
+			appendLogLine({ event: 'suggest_empty_input' });
+			return { ready: true, suggestions: [], reason: 'Empty input.' };
+		}
+
+		const idx = loadTagIndex();
+		if (!idx) {
+			appendLogLine({ event: 'suggest_missing_cache', cacheDir });
+			return {
+				ready: false,
+				suggestions: [],
+				reason: 'Tag embedding cache missing. Run one-time preparation.',
+			};
+		}
+
+		let queryVec;
+		try {
+			const modelId = idx && idx.meta && typeof idx.meta.modelId === 'string' ? idx.meta.modelId : EMBED_MODEL_PREFERRED;
+			queryVec = await embedTextLocalOnly(combined, modelId, modelCacheDir);
+		} catch (e) {
+			appendLogLine({ event: 'suggest_embed_failed', error: String(e && e.message ? e.message : e) });
+			const msg = String(e && e.message ? e.message : e);
+			return {
+				ready: false,
+				suggestions: [],
+				reason: msg && msg.toLowerCase().includes('missing @huggingface/transformers')
+					? 'Embedding engine missing dependency. Reinstall app dependencies.'
+					: `Embedding model not ready. Run one-time preparation. Details: ${msg}`,
+			};
+		}
+
+		// Embed per segment to capture topic/subtopic evidence.
+		const segmentVecs = [];
+		try {
+			const modelId = idx && idx.meta && typeof idx.meta.modelId === 'string' ? idx.meta.modelId : EMBED_MODEL_PREFERRED;
+			for (const s of segments) {
+				if (!s.text) continue;
+				const v = await embedTextLocalOnly(s.text, modelId, modelCacheDir);
+				segmentVecs.push({ kind: s.kind, vec: v });
+			}
+		} catch {
+			// If segment embeddings fail for any reason, fall back to combined query vector only.
+			segmentVecs.length = 0;
+		}
+
+		const { meta, dims, floats } = idx;
+		const tags = meta.tags.map(String);
+		const allowed = new Set(availableTags.map((t) => String(t)));
+		const scored = [];
+		for (let i = 0; i < tags.length; i++) {
+			const name = tags[i];
+			if (allowed.size && !allowed.has(name)) continue;
+			const off = i * dims;
+			const tv = floats.subarray(off, off + dims);
+			let best = -1;
+			let bestKind = 'combined';
+			if (segmentVecs.length) {
+				for (const s of segmentVecs) {
+					const cos = Number(cosineSimilarity(s.vec, tv));
+					const score01 = Math.max(0, Math.min(1, (cos + 1) / 2));
+					if (score01 > best) {
+						best = score01;
+						bestKind = s.kind;
+					}
+				}
+			} else {
+				const cos = Number(cosineSimilarity(queryVec, tv));
+				best = Math.max(0, Math.min(1, (cos + 1) / 2));
+			}
+			if (best < minScore) continue;
+			scored.push({ tagName: name, score: Number(best), evidence: bestKind });
+		}
+		scored.sort((a, b) => b.score - a.score);
+		const suggestions = scored.slice(0, topK);
+		return { ready: true, suggestions, modelId: meta.modelId, dims };
+	});
+
+	ipcMain.handle('embed:recordFeedback', async (_event, payload) => {
+		const { cacheDir, feedbackPath } = getEmbedPaths();
+		ensureDir(cacheDir);
+		const record = {
+			ts: typeof payload?.ts === 'number' ? payload.ts : Date.now(),
+			action: String(payload?.action || ''),
+			tagName: String(payload?.tagName || ''),
+			score: typeof payload?.score === 'number' ? payload.score : undefined,
+			questionId: payload?.questionId ? String(payload.questionId) : undefined,
+			inputTextHash: payload?.inputTextHash ? String(payload.inputTextHash) : undefined,
+		};
+		fs.appendFileSync(feedbackPath, safeJsonLine(record) + '\n', { encoding: 'utf8', mode: 0o600 });
+		appendLogLine({ event: 'feedback', action: record.action, tagName: record.tagName });
+		return { ok: true };
+	});
+
+	ipcMain.handle('embed:diagnostics', async () => {
+		const { cacheDir, modelCacheDir, tagIndexMetaPath, tagIndexBinPath, logPath } = getEmbedPaths();
+		const hasModel = modelCacheDir && fs.existsSync(modelCacheDir);
+		const hasCache = fs.existsSync(tagIndexMetaPath) && fs.existsSync(tagIndexBinPath);
+		const statSafe = (p) => {
+			try {
+				return fs.existsSync(p) ? fs.statSync(p).size : 0;
+			} catch {
+				return 0;
+			}
+		};
+		return {
+			ready: !!(hasModel && hasCache),
+			modelDir: hasModel ? modelCacheDir : undefined,
+			cacheDir,
+			modelBytes: hasModel ? dirBytes(modelCacheDir) : 0,
+			cacheBytes: statSafe(tagIndexMetaPath) + statSafe(tagIndexBinPath),
+			logPath: fs.existsSync(logPath) ? logPath : undefined,
+		};
+	});
 
 	ipcMain.handle('songs:saveAudioFile', async (_event, payload) => {
 		const fileName = payload && typeof payload.fileName === 'string' ? payload.fileName : '';

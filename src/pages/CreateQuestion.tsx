@@ -135,6 +135,9 @@ export default function CreateQuestion() {
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [newTag, setNewTag] = useState('');
   const [selectTagValue, setSelectTagValue] = useState<string | undefined>(undefined);
+  const [tagSuggestions, setTagSuggestions] = useState<Array<{ tagName: string; score: number }>>([]);
+  const [tagSuggestBusy, setTagSuggestBusy] = useState(false);
+  const [tagSuggestError, setTagSuggestError] = useState<string>('');
   const [difficulty, setDifficulty] = useState<'easy' | 'medium' | 'hard'>('medium');
   const [difficultyLevel, setDifficultyLevel] = useState<number>(DEFAULT_LEVEL);
 	const [screenshotFiles, setScreenshotFiles] = useState<File[]>([]);
@@ -195,6 +198,100 @@ export default function CreateQuestion() {
   }, [difficultyLevel]);
 
   const allTags = useLiveQuery(() => db.tags.toArray());
+
+  const suggestTagsFromEmbedding = async () => {
+    if (!window.embedding?.suggestTags || !window.embedding?.modelStatus) {
+      toast.error('Embedding engine not available in this runtime.');
+      return;
+    }
+
+    const questionHtml = questionText || '';
+    const explanationHtml = explanation || '';
+		const optionsHtml = questionType === 'mcq' ? (options || []).map((o) => String((o as any)?.text || '')) : [];
+		const matchingHeadingHtml = questionType === 'matching' ? (matchingHeading || '') : '';
+		const matchingLeftHtml = questionType === 'matching' ? (matchingPairs || []).map((p) => String((p as any)?.leftText || '')) : [];
+		const matchingRightHtml = questionType === 'matching' ? (matchingPairs || []).map((p) => String((p as any)?.rightText || '')) : [];
+    const pool = Array.isArray(allTags) ? allTags.map((t) => String(t.name)) : [];
+    if (pool.length === 0) {
+      toast.error('No tags exist yet. Create a few tags first.');
+      return;
+    }
+
+    setTagSuggestError('');
+    setTagSuggestBusy(true);
+    try {
+      const status = await window.embedding.modelStatus();
+      if (!status?.ready) {
+        const msg = String(status?.reason || 'One-time preparation required before offline suggestions can run.');
+        setTagSuggestError(msg);
+        toast.error(msg);
+        setTagSuggestions([]);
+        return;
+      }
+
+      const res = await window.embedding.suggestTags({
+        questionHtml,
+        explanationHtml,
+			optionsHtml,
+			matchingHeadingHtml,
+			matchingLeftHtml,
+			matchingRightHtml,
+        availableTags: pool,
+			topK: 3,
+			minScore: 0.6,
+      });
+
+      if (!res?.ready) {
+        const msg = String(res?.reason || 'Embedding engine not ready.');
+        setTagSuggestError(msg);
+        toast.error(msg);
+        setTagSuggestions([]);
+        return;
+      }
+
+      const suggestions = Array.isArray(res?.suggestions) ? res.suggestions : [];
+		const normalized = suggestions
+			.filter((s: any) => s && typeof s.tagName === 'string' && Number.isFinite(Number(s.score)))
+			.map((s: any) => ({ tagName: String(s.tagName), score: Number(s.score) }))
+			.filter((s: any) => s.score >= 0.6)
+			.slice(0, 3);
+		setTagSuggestions(normalized);
+
+		// Auto-apply top 3 tags above threshold.
+		if (normalized.length) {
+			setSelectedTags((prev) => {
+				const next = [...prev];
+				for (const s of normalized) {
+					if (!next.includes(s.tagName)) next.push(s.tagName);
+				}
+				return next;
+			});
+			for (const s of normalized) {
+				void recordTagSuggestionFeedback({ tagName: s.tagName, action: 'accept', score: s.score });
+			}
+		}
+    } catch (e: any) {
+      const msg = String(e?.message || 'Failed to suggest tags.');
+      setTagSuggestError(msg);
+      toast.error(msg);
+    } finally {
+      setTagSuggestBusy(false);
+    }
+  };
+
+  const recordTagSuggestionFeedback = async (payload: { tagName: string; action: 'accept' | 'reject' | 'remove' | 'add'; score?: number }) => {
+    if (!window.embedding?.recordFeedback) return;
+    try {
+      await window.embedding.recordFeedback({
+        questionId: isEditing ? id : undefined,
+        tagName: payload.tagName,
+        action: payload.action,
+        score: payload.score,
+      });
+    } catch {
+      // ignore
+    }
+  };
 
   // When editing, wait for existingQuestion to load and then hydrate form once
   useEffect(() => {
@@ -281,14 +378,12 @@ export default function CreateQuestion() {
   };
 
   const handleRemoveTag = (tag: string) => {
-    setSelectedTags(selectedTags.filter(t => t !== tag));
+    setSelectedTags((prev) => prev.filter(t => t !== tag));
   };
 
 
   const handleAddTagFromPool = (tagName: string) => {
-    if (!selectedTags.includes(tagName)) {
-      setSelectedTags([...selectedTags, tagName]);
-    }
+    setSelectedTags((prev) => (prev.includes(tagName) ? prev : [...prev, tagName]));
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -816,6 +911,67 @@ export default function CreateQuestion() {
 
           <Card className="p-6 space-y-4">
             <Label className="text-base font-semibold">Tags</Label>
+
+            <div className="space-y-2">
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                <div className="text-sm text-muted-foreground">
+                  Suggestions are computed offline using cosine similarity.
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => void suggestTagsFromEmbedding()}
+                  disabled={tagSuggestBusy}
+                  className="whitespace-nowrap"
+                >
+                  {tagSuggestBusy ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Sparkles className="h-4 w-4 mr-2" />}
+                  Suggest tags
+                </Button>
+              </div>
+
+              {tagSuggestError ? (
+                <div className="rounded-md border bg-muted/20 p-3 text-sm text-muted-foreground">
+                  {tagSuggestError}
+                </div>
+              ) : null}
+
+              {tagSuggestions.length > 0 ? (
+                <div className="flex flex-wrap gap-2">
+                  {tagSuggestions.map((s) => {
+                    const already = selectedTags.includes(s.tagName);
+                    const pct = Math.max(0, Math.min(1, s.score));
+                    const label = `${Math.round(pct * 100)}%`;
+                    return (
+                      <Badge
+                        key={s.tagName}
+                        variant={already ? 'default' : 'secondary'}
+                        className="gap-2 cursor-pointer transition-all hover:ring-1 hover:ring-primary/50"
+                        onClick={() => {
+                          if (!already) {
+                            handleAddTagFromPool(s.tagName);
+                            void recordTagSuggestionFeedback({ tagName: s.tagName, action: 'accept', score: s.score });
+                          }
+                        }}
+                      >
+                        <span>{s.tagName}</span>
+                        <span className="text-[11px] text-muted-foreground">{label}</span>
+                        {!already ? (
+                          <X
+                            className="h-3 w-3 cursor-pointer hover:bg-destructive/20 rounded"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setTagSuggestions((prev) => prev.filter((x) => x.tagName !== s.tagName));
+                              void recordTagSuggestionFeedback({ tagName: s.tagName, action: 'reject', score: s.score });
+                            }}
+                          />
+                        ) : null}
+                      </Badge>
+                    );
+                  })}
+                </div>
+              ) : null}
+            </div>
 
             {/* Manual tag selection from pool */}
             {allTags && allTags.length > 0 && (

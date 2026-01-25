@@ -28,6 +28,67 @@ declare global {
 			finishExportJson?: (payload: { exportId: string }) => Promise<{ ok: true; filePath?: string }>;
 			abortExportJson?: (payload: { exportId: string }) => Promise<{ ok: true }>;
 		};
+		embedding?: {
+			modelStatus?: () => Promise<{
+				ready: boolean;
+				modelDir?: string;
+				cacheDir?: string;
+				reason?: string;
+			}>;
+			prepare?: (payload: {
+				modelId?: string;
+				tags: string[];
+				forceDownload?: boolean;
+				forceRebuildCache?: boolean;
+				acceptLicense?: boolean;
+			}) => Promise<{
+				ok: boolean;
+				requiresConsent?: boolean;
+				licenseText?: string;
+				reason?: string;
+				modelDir?: string;
+				cacheDir?: string;
+			}>;
+			rebuildCache?: (payload: { tags: string[]; modelId?: string }) => Promise<{ ok: boolean; reason?: string }>;
+			suggestTags?: (payload: {
+				questionHtml: string;
+				explanationHtml?: string;
+				optionsHtml?: string[];
+				matchingHeadingHtml?: string;
+				matchingLeftHtml?: string[];
+				matchingRightHtml?: string[];
+				availableTags: string[];
+				topK?: number;
+				minScore?: number;
+			}) => Promise<{
+				ready: boolean;
+				reason?: string;
+				modelId?: string;
+				dims?: number;
+				suggestions: Array<{ tagName: string; score: number; evidence?: string }>;
+			}>;
+			recordFeedback?: (payload: {
+				questionId?: string;
+				inputTextHash?: string;
+				tagName: string;
+				action: 'accept' | 'reject' | 'remove' | 'add';
+				score?: number;
+				ts?: number;
+			}) => Promise<{ ok: true }>;
+			diagnostics?: () => Promise<{
+				ready: boolean;
+				modelDir?: string;
+				cacheDir?: string;
+				modelBytes?: number;
+				cacheBytes?: number;
+				logPath?: string;
+			}>;
+			onPrepareProgress?: (handler: (data: {
+				step: string;
+				message?: string;
+				progress?: number;
+			}) => void) => () => void;
+		};
 	}
 
 	namespace JSX {

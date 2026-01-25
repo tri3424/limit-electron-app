@@ -27,6 +27,7 @@ import {
 	Copy,
 	Eye,
 	EyeOff,
+	Sparkles,
 	Save,
 	Settings as SettingsIcon,
 } from 'lucide-react';
@@ -75,6 +76,7 @@ export default function Settings() {
   const navigate = useNavigate();
   const settings = useLiveQuery(() => db.settings.get('1'), [], null as any);
   const users = useLiveQuery(() => db.users.toArray());
+	const tags = useLiveQuery(() => db.tags.toArray());
   const lyricsSourceCount = useLiveQuery(() => db.lyricsSource.count(), [], 0);
   const errorReports = useLiveQuery(
     () => db.errorReports.orderBy('createdAt').reverse().toArray(),
@@ -104,6 +106,17 @@ export default function Settings() {
   const [lyricsSourceManageOpen, setLyricsSourceManageOpen] = useState(false);
   const [lyricsSourceManageSearch, setLyricsSourceManageSearch] = useState('');
   const [lyricsSourceWriterEdits, setLyricsSourceWriterEdits] = useState<Record<string, string>>({});
+
+	const [embedStatus, setEmbedStatus] = useState<{ ready: boolean; modelDir?: string; cacheDir?: string; reason?: string } | null>(null);
+	const [embedDiag, setEmbedDiag] = useState<{ modelBytes?: number; cacheBytes?: number; logPath?: string } | null>(null);
+	const [embedBusy, setEmbedBusy] = useState(false);
+	const [embedAcceptLicense, setEmbedAcceptLicense] = useState(false);
+	const [embedProgress, setEmbedProgress] = useState<{ step: string; message?: string; progress?: number } | null>(null);
+	const [embedError, setEmbedError] = useState('');
+
+	const tagNames = useMemo(() => {
+		return Array.isArray(tags) ? tags.map((t) => String((t as any)?.name ?? '')).filter(Boolean) : [];
+	}, [tags]);
 
   const lyricsSourceEntries = useLiveQuery(async () => {
     try {
@@ -245,6 +258,120 @@ export default function Settings() {
       setLocalSettings(settings);
     }
   }, [settings]);
+
+	useEffect(() => {
+		if (!window.embedding?.modelStatus) return;
+		let unsub: (() => void) | undefined;
+		if (window.embedding?.onPrepareProgress) {
+			unsub = window.embedding.onPrepareProgress((p) => {
+				if (!p || typeof p !== 'object') return;
+				setEmbedProgress({
+					step: String((p as any).step || ''),
+					message: (p as any).message ? String((p as any).message) : undefined,
+					progress: typeof (p as any).progress === 'number' ? Number((p as any).progress) : undefined,
+				});
+			});
+		}
+		void (async () => {
+			try {
+				const s = await window.embedding!.modelStatus!();
+				setEmbedStatus(s);
+			} catch {
+				// ignore
+			}
+		})();
+		return () => {
+			if (unsub) unsub();
+		};
+	}, []);
+
+	const refreshEmbedDiagnostics = async () => {
+		if (!window.embedding?.diagnostics) return;
+		try {
+			const d = await window.embedding.diagnostics();
+			setEmbedDiag({ modelBytes: d?.modelBytes, cacheBytes: d?.cacheBytes, logPath: d?.logPath });
+		} catch {
+			// ignore
+		}
+	};
+
+	const refreshEmbedStatus = async () => {
+		if (!window.embedding?.modelStatus) return;
+		try {
+			const s = await window.embedding.modelStatus();
+			setEmbedStatus(s);
+		} catch {
+			// ignore
+		}
+	};
+
+	const runEmbedPrepare = async () => {
+		if (!window.embedding?.prepare) {
+			toast.error('Embedding engine not available in this runtime.');
+			return;
+		}
+		if (!tagNames.length) {
+			toast.error('No tags exist yet. Create tags first, then run preparation.');
+			return;
+		}
+		setEmbedError('');
+		setEmbedBusy(true);
+		setEmbedProgress({ step: 'init', message: 'Starting...', progress: 0 });
+		try {
+			const res = await window.embedding.prepare({
+				tags: tagNames,
+				acceptLicense: embedAcceptLicense,
+				forceRebuildCache: true,
+			});
+			if (!res?.ok) {
+				const msg = String(res?.reason || 'Preparation failed.');
+				setEmbedError(msg);
+				toast.error(msg);
+				return;
+			}
+			toast.success('Offline tag suggestions prepared');
+			await refreshEmbedStatus();
+			await refreshEmbedDiagnostics();
+		} catch (e: any) {
+			const msg = String(e?.message || 'Preparation failed.');
+			setEmbedError(msg);
+			toast.error(msg);
+		} finally {
+			setEmbedBusy(false);
+		}
+	};
+
+	const runEmbedRebuild = async () => {
+		if (!window.embedding?.rebuildCache) {
+			toast.error('Embedding engine not available in this runtime.');
+			return;
+		}
+		if (!tagNames.length) {
+			toast.error('No tags exist yet. Create tags first, then rebuild cache.');
+			return;
+		}
+		setEmbedError('');
+		setEmbedBusy(true);
+		setEmbedProgress({ step: 'cache', message: 'Rebuilding...', progress: 0 });
+		try {
+			const res = await window.embedding.rebuildCache({ tags: tagNames });
+			if (!res?.ok) {
+				const msg = String(res?.reason || 'Rebuild failed.');
+				setEmbedError(msg);
+				toast.error(msg);
+				return;
+			}
+			toast.success('Tag cache rebuilt');
+			await refreshEmbedStatus();
+			await refreshEmbedDiagnostics();
+		} catch (e: any) {
+			const msg = String(e?.message || 'Rebuild failed.');
+			setEmbedError(msg);
+			toast.error(msg);
+		} finally {
+			setEmbedBusy(false);
+		}
+	};
 
   useEffect(() => {
     const fromSettings = settings?.questionPrompts;
@@ -1177,6 +1304,94 @@ export default function Settings() {
             </Card>
           </div>
         </div>
+
+				<Card className="p-6 space-y-4">
+					<div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
+						<div className="min-w-0">
+							<div className="flex items-center gap-2">
+								<Sparkles className="h-5 w-5 text-primary" />
+								<h2 className="text-xl font-semibold text-foreground">Offline Tag Suggestions</h2>
+							</div>
+							<p className="text-sm text-muted-foreground mt-1">
+								One-time preparation downloads a MiniLM model and builds tag embeddings for offline cosine similarity.
+							</p>
+						</div>
+						<div className="shrink-0 flex items-center gap-2">
+							<Badge variant={embedStatus?.ready ? 'default' : 'secondary'} className="whitespace-nowrap">
+								{embedStatus?.ready ? 'Ready' : 'Needs prep'}
+							</Badge>
+							<Button
+								variant="outline"
+								size="sm"
+								disabled={embedBusy}
+								onClick={() => void refreshEmbedStatus()}
+							>
+								<RefreshCw className={"h-4 w-4 mr-2 " + (embedBusy ? 'animate-spin' : '')} />
+								Refresh
+							</Button>
+						</div>
+					</div>
+
+					<div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
+						<div className="rounded-md border bg-muted/20 p-3">
+							<div className="text-xs text-muted-foreground">Tags</div>
+							<div className="font-medium">{tagNames.length}</div>
+						</div>
+						<div className="rounded-md border bg-muted/20 p-3 lg:col-span-2">
+							<div className="text-xs text-muted-foreground">Paths</div>
+							<div className="mt-1 text-xs text-foreground break-all">
+								<div>Model: {embedStatus?.modelDir || '—'}</div>
+								<div>Cache: {embedStatus?.cacheDir || '—'}</div>
+							</div>
+						</div>
+					</div>
+
+					<div className="space-y-2">
+						<label className="flex items-start gap-2 text-sm text-muted-foreground">
+							<Checkbox checked={embedAcceptLicense} onCheckedChange={(v) => setEmbedAcceptLicense(v === true)} />
+							<span>
+								I accept the Apache-2.0 license for <span className="font-medium text-foreground">Xenova/all-MiniLM-L6-v2</span>.
+							</span>
+						</label>
+						<div className="flex flex-wrap gap-2">
+							<Button disabled={embedBusy} onClick={() => void runEmbedPrepare()}>
+								Prepare (download + cache)
+							</Button>
+							<Button variant="outline" disabled={embedBusy} onClick={() => void runEmbedRebuild()}>
+								Rebuild cache
+							</Button>
+							<Button variant="outline" disabled={embedBusy} onClick={() => void refreshEmbedDiagnostics()}>
+								Diagnostics
+							</Button>
+						</div>
+					</div>
+
+					{embedProgress ? (
+						<div className="space-y-2">
+							<div className="text-sm text-muted-foreground">{embedProgress.message || embedProgress.step}</div>
+							<div className="h-2 w-full rounded-full bg-muted overflow-hidden">
+								<div
+									className="h-2 bg-primary"
+									style={{ width: `${Math.round(Math.max(0, Math.min(1, embedProgress.progress ?? 0)) * 100)}%` }}
+								/>
+							</div>
+						</div>
+					) : null}
+
+					{embedError || embedStatus?.reason ? (
+						<div className="rounded-md border bg-muted/20 p-3 text-sm text-muted-foreground">
+							{embedError || embedStatus?.reason}
+						</div>
+					) : null}
+
+					{embedDiag ? (
+						<div className="rounded-md border bg-muted/20 p-3 text-xs text-muted-foreground space-y-1">
+							<div>Model size: {typeof embedDiag.modelBytes === 'number' ? `${embedDiag.modelBytes} bytes` : '—'}</div>
+							<div>Cache size: {typeof embedDiag.cacheBytes === 'number' ? `${embedDiag.cacheBytes} bytes` : '—'}</div>
+							<div>Log: {embedDiag.logPath || '—'}</div>
+						</div>
+					) : null}
+				</Card>
 
         {/* User Management */}
         <Card className="p-6 space-y-6">

@@ -147,6 +147,10 @@
       {
         "from": "build/icon.ico",
         "to": "icon.ico"
+      },
+      {
+        "from": "embedding_data",
+        "to": "embedding"
       }
     ],
     "win": {

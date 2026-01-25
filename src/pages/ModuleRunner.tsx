@@ -2122,10 +2122,10 @@ function ExamSession({
 											// During exam, do not reveal correctness via colors. Keep submitted state neutral.
 											const borderClass = showFeedback
 												? selected
-													? 'border-muted-foreground/30 bg-muted/20'
+													? 'border-muted-foreground/30 bg-muted/20 ring-1 ring-muted-foreground/20'
 													: 'border-border'
 												: selected
-													? 'border-primary bg-primary/5'
+													? 'border-primary bg-primary/5 ring-2 ring-primary/20'
 													: 'border-border hover:bg-white';
 											return (
 												<button

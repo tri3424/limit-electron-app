@@ -638,7 +638,13 @@ export default function ModuleEditor() {
 						{displayedQuestions?.map(q => {
 							const selected = questionIds.includes(q.id);
 							return (
-								<label key={q.id} className="flex items-start gap-3 p-3 cursor-pointer hover:bg-muted/50">
+								<label
+									key={q.id}
+									className={
+										"flex items-start gap-3 p-3 cursor-pointer transition-colors hover:bg-muted/50 " +
+										(selected ? 'bg-primary/5 ring-1 ring-primary/20' : '')
+									}
+								>
 									<Checkbox checked={selected} onCheckedChange={(v: CheckedState) => {
 										setQuestionIds(prev => v === true ? [...prev, q.id] : prev.filter(id => id !== q.id));
 									}} />

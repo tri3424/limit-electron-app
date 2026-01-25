@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "createdAt": 1769346961652,
+  "modelId": "sentence-transformers/multi-qa-mpnet-base-cos-v1",
+  "quantized": true,
+  "detectedLicense": null,
+  "acceptedLicense": true,
+  "cache": {
+    "tag_index_json": {
+      "size": 533,
+      "sha256": "2d22647eb1e0d9e880b756db6726c48d0d46f17b77d2da94c5697363733f2231"
+    },
+    "tag_vectors_f32": {
+      "size": 61440,
+      "sha256": "cc2a81cfd49d0269dda5fe6d1c64a7529997b4966517efb5f93eb2d9e90de901"
+    }
+  }
+}

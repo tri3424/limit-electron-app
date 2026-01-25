@@ -93,9 +93,13 @@ const PRACTICE_VARIANTS: Partial<Record<PracticeTopicId, string[]>> = {
     'team_no_restriction',
     'team_group_not_separated',
     'digits_even_unique',
+		'digits_even_between_thousands_no_repeat',
     'arrange_together',
     'arrange_not_together',
     'committee_men_women',
+		'evaluate_npr_notation',
+		'evaluate_ncr_notation',
+		'letters_choose_combinations',
   ],
   polynomials: ['factor_theorem'],
   graph_straight_line: [
@@ -248,6 +252,24 @@ const VARIANT_META: Partial<Record<PracticeTopicId, Record<string, PracticeVaria
       description: 'Find the coordinates of the point where two tangents meet.',
     },
   },
+	permutation_combination: {
+		digits_even_between_thousands_no_repeat: {
+			title: 'Even numbers in a range (no repeat)',
+			description: 'Count even 4-digit numbers in a thousands range formed from given digits without repetition.',
+		},
+		evaluate_npr_notation: {
+			title: 'Evaluate nPr notation',
+			description: 'Evaluate expressions written like ^n\\mathrm{P}_r (permutations).',
+		},
+		evaluate_ncr_notation: {
+			title: 'Evaluate nCr notation',
+			description: 'Evaluate expressions written like ^n\\mathrm{C}_r (combinations).',
+		},
+		letters_choose_combinations: {
+			title: 'Choose letters (combinations)',
+			description: 'Count how many ways to choose r letters from a given set (order does not matter).',
+		},
+	},
   integration: {
     indefinite: {
       title: 'Indefinite integrals',
@@ -295,6 +317,37 @@ function humanizeVariantId(raw: string): string {
 
   const titleCase = (s: string) => s.replace(/\b\w/g, (c) => c.toUpperCase());
   return titleCase(tokens.map(mapToken).join(' ').replace(/\s+/g, ' ').trim());
+}
+
+function getVarietySignature(q: any): string {
+	try {
+		if (!q || typeof q !== 'object') return '';
+		const topicId = String((q as any).topicId ?? '');
+		const variantId = String((q as any).variantId ?? '');
+		const katex = String((q as any).katexQuestion ?? '');
+		if (!katex) return '';
+
+		// Differentiation: avoid regenerating the same exponent/power pattern (common issue: only coefficients change).
+		// We intentionally ignore coefficients and focus on the set of powers present in the rendered expression.
+		if (topicId === 'differentiation') {
+			const pows = new Set<number>();
+			const re1 = /x\^\{(-?\d+)\}/g;
+			for (const m of katex.matchAll(re1)) {
+				const n = Number(m[1]);
+				if (Number.isFinite(n)) pows.add(n);
+			}
+			const re2 = /x\^(\d+)/g;
+			for (const m of katex.matchAll(re2)) {
+				const n = Number(m[1]);
+				if (Number.isFinite(n)) pows.add(n);
+			}
+			const list = Array.from(pows).sort((a, b) => b - a);
+			return list.length ? `diff:${variantId}:pows:${list.join(',')}` : '';
+		}
+	} catch {
+		return '';
+	}
+	return '';
 }
 
 function describeVariantId(topicId: PracticeTopicId | null, variantId: string): string {
@@ -1638,6 +1691,13 @@ export default function Practice() {
           return '';
         }
       })();
+      const currentVarietySig = (() => {
+        try {
+          return question ? getVarietySignature(question as any) : '';
+        } catch {
+          return '';
+        }
+      })();
       const seedBase = typeof opts?.seedBase === 'number' ? opts.seedBase : seedValue;
       const maxAttempts = hasTextFilter ? 12000 : 1200;
       for (let attempt = 0; attempt < maxAttempts; attempt++) {
@@ -1673,6 +1733,10 @@ export default function Practice() {
         }
 
         if (accept && !accept(q)) continue;
+        if (opts?.strict && currentVarietySig) {
+          const nextSig = getVarietySignature(q as any);
+          if (nextSig && nextSig === currentVarietySig) continue;
+        }
         if (hasTextFilter) {
           const hay = getQuestionSearchText(q).toLowerCase();
           const needles = onlyQuestionTextQuery
@@ -4414,10 +4478,21 @@ export default function Practice() {
                     && !isDegreeOnlyLatex(wpLatex)
                     && (/\^|_|\\frac\{|\\(?:dfrac|tfrac)\{|\\sqrt\b|\\pi\b|\\ln\b|\\log\b|\\cdot\b|\\int\b/.test(wpLatex));
 
+                  const wpShouldRenderInline = (() => {
+                    const t = wpLatex;
+                    if (!t) return false;
+                    // Keep short “Evaluate …” prompts inline (textbook style), e.g. Evaluate {}^{11}{\mathrm{C}_{1}}.
+                    // Avoid inline mode if there are explicit line breaks or long display-style content.
+                    if (/\\\\/.test(t)) return false;
+                    if (/\\begin\{|\\left\[|\\left\(|\\displaystyle/.test(t)) return false;
+                    if (/\\text\{\s*Evaluate\b/.test(t) && t.length <= 120) return true;
+                    return false;
+                  })();
+
                   if (isWordProblem && wpShouldRenderAsKatex) {
                     return (
                       <div className={`w-full min-w-0 max-w-full select-none font-slab text-xl md:text-2xl leading-snug text-left whitespace-normal break-words`}>
-                        <Katex latex={wpLatex} displayMode />
+                        <Katex latex={wpLatex} displayMode={!wpShouldRenderInline} />
                       </div>
                     );
                   }

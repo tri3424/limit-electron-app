@@ -27,6 +27,10 @@ dist-ssr
 # Offline AI models (too large for git; downloaded in CI)
 native/offline-ai/models/*.gguf
 
+# Embedding models/cache (too large for git; downloaded in CI)
+embedding_data/models/
+embedding_data/models/**/onnx/*.onnx
+
 [A-Za-z]:*
 **/[A-Za-z]:*
 node_modules.tgz

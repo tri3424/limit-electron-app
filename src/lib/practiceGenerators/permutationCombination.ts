@@ -55,6 +55,88 @@ function nPrBig(n: number, r: number): bigint {
   return out;
 }
 
+function sanitizePermCombNotationLatex(src: string): string {
+	if (!src) return src;
+	let s = String(src);
+
+	// Normalize \mathrmP / \mathrmC -> \mathrm{P} / \mathrm{C} if it appears.
+	s = s.replace(/\\mathrm\s*P/g, String.raw`\mathrm{P}`);
+	s = s.replace(/\\mathrm\s*C/g, String.raw`\mathrm{C}`);
+
+	// Normalize common nPr/nCr patterns into grouped, upright notation.
+	// Target form:
+	//   {}^{\mathrm{n}}\,\mathrm{P}_{r}
+	//   {}^{\mathrm{n}}\,\mathrm{C}_{r}
+	// Handle:
+	//   {}^nP_r, {}^{n}P_{r}, {}^{n}\mathrm{P}_{r}, ^{n}P_{r}, etc.
+	const normalize = (kind: 'P' | 'C', n: string, r: string) => {
+		const nn = String(n ?? '').trim();
+		const rr = String(r ?? '').trim();
+		if (!nn || !rr) return '';
+		// Put the full n inside \mathrm{...} to prevent KaTeX from splitting multi-digit superscripts.
+		// Use a small positive space so the symbol doesn't crowd the superscript.
+		return String.raw`{}^{\mathrm{${nn}}}\,\mathrm{${kind}}_{${rr}}`;
+	};
+
+	const fix = (kind: 'P' | 'C') => {
+		// 0) {}^n\mathrm{P}_{r} (no braces around exponent)
+		s = s.replace(
+			new RegExp(String.raw`\{\}\^([0-9]+)\\mathrm\{${kind}\}_\{([^}]+)\}`, 'g'),
+			(_m, n, r) => normalize(kind, n, r)
+		);
+		// 0b) {}^n\mathrm{P}_r (no braces around exponent/subscript)
+		s = s.replace(
+			new RegExp(String.raw`\{\}\^([0-9]+)\\mathrm\{${kind}\}_([0-9]+)`, 'g'),
+			(_m, n, r) => normalize(kind, n, r)
+		);
+		// 0c) {}^nP_{r} (no braces around exponent, no \mathrm)
+		s = s.replace(
+			new RegExp(String.raw`\{\}\^([0-9]+)${kind}_\{([^}]+)\}`, 'g'),
+			(_m, n, r) => normalize(kind, n, r)
+		);
+		// 0d) {}^nP_r (no braces around exponent/subscript, no \mathrm)
+		s = s.replace(
+			new RegExp(String.raw`\{\}\^([0-9]+)${kind}_([0-9]+)`, 'g'),
+			(_m, n, r) => normalize(kind, n, r)
+		);
+		// 1) {}^{n}\mathrm{P}_{r}
+		s = s.replace(
+			new RegExp(String.raw`\{\}\^\{([^}]+)\}\\mathrm\{${kind}\}_\{([^}]+)\}`, 'g'),
+			(_m, n, r) => normalize(kind, n, r)
+		);
+		// 2) {}^{n}P_{r}
+		s = s.replace(
+			new RegExp(String.raw`\{\}\^\{([^}]+)\}${kind}_\{([^}]+)\}`, 'g'),
+			(_m, n, r) => normalize(kind, n, r)
+		);
+		// 3) {}^nP_r
+		s = s.replace(
+			new RegExp(String.raw`\{\}\^([0-9]+)${kind}_([0-9]+)`, 'g'),
+			(_m, n, r) => normalize(kind, n, r)
+		);
+		// 4) ^{n}P_{r} (missing leading {})
+		s = s.replace(
+			new RegExp(String.raw`\^\{([^}]+)\}${kind}_\{([^}]+)\}`, 'g'),
+			(_m, n, r) => normalize(kind, n, r)
+		);
+		// 5) ^nP_r (no braces)
+		s = s.replace(
+			new RegExp(String.raw`\^([0-9]+)${kind}_([0-9]+)`, 'g'),
+			(_m, n, r) => normalize(kind, n, r)
+		);
+		// 5b) ^nP_{r} (no braces around exponent)
+		s = s.replace(
+			new RegExp(String.raw`\^([0-9]+)${kind}_\{([^}]+)\}`, 'g'),
+			(_m, n, r) => normalize(kind, n, r)
+		);
+	};
+
+	fix('P');
+	fix('C');
+
+	return s;
+}
+
 function pickDistinctDigits(rng: Rng, pool: number[], count: number): number[] {
   const src = pool.slice();
   const out: number[] = [];
@@ -77,9 +159,13 @@ export type PermutationCombinationVariantId =
   | 'team_no_restriction'
   | 'team_group_not_separated'
   | 'digits_even_unique'
+  | 'digits_even_between_thousands_no_repeat'
   | 'arrange_together'
   | 'arrange_not_together'
-  | 'committee_men_women';
+  | 'committee_men_women'
+  | 'evaluate_npr_notation'
+  | 'evaluate_ncr_notation'
+  | 'letters_choose_combinations';
 
 export type PermutationCombinationQuestion = {
   kind: 'permutation_combination';
@@ -102,9 +188,13 @@ function pickVariant(
     'team_no_restriction',
     'team_group_not_separated',
     'digits_even_unique',
+    'digits_even_between_thousands_no_repeat',
     'arrange_together',
     'arrange_not_together',
     'committee_men_women',
+    'evaluate_npr_notation',
+    'evaluate_ncr_notation',
+    'letters_choose_combinations',
   ];
 
   const pool = all.filter((v) => v !== avoid);
@@ -134,6 +224,14 @@ export function generatePermutationCombinationQuestion(input: {
     katexExplanation: KatexExplanationBlock[];
     expectedNumber: number;
   }): PermutationCombinationQuestion => {
+    const fixedQuestion = sanitizePermCombNotationLatex(payload.katexQuestion);
+    const fixedExplanation = (payload.katexExplanation || []).map((b) => {
+      if (!b || typeof b !== 'object') return b;
+      if ((b as any).kind === 'math' && typeof (b as any).content === 'string') {
+        return { ...(b as any), content: sanitizePermCombNotationLatex(String((b as any).content)) };
+      }
+      return b;
+    }) as KatexExplanationBlock[];
     return {
       kind: 'permutation_combination',
       topicId: 'permutation_combination',
@@ -141,8 +239,8 @@ export function generatePermutationCombinationQuestion(input: {
       seed: input.seed,
       difficulty: input.difficulty,
       variantId,
-      katexQuestion: payload.katexQuestion,
-      katexExplanation: payload.katexExplanation,
+      katexQuestion: fixedQuestion,
+      katexExplanation: fixedExplanation,
       expectedNumber: payload.expectedNumber,
     };
   };
@@ -174,7 +272,7 @@ export function generatePermutationCombinationQuestion(input: {
       { kind: 'text', content: 'If order mattered, there would be nPr = n!/(n-r)! ways.' },
       { kind: 'text', content: 'But each team of r people can be arranged in r! orders, which all represent the same team.' },
       { kind: 'text', content: 'So we divide by r! to remove that overcounting.' },
-      { kind: 'math', content: String.raw`\binom{n}{r}=\frac{{}^nP_r}{r!}=\frac{\frac{n!}{(n-r)!}}{r!}=\frac{n!}{r!(n-r)!}`, displayMode: true },
+      { kind: 'math', content: String.raw`\binom{n}{r}=\frac{{}^{n}\mathrm{P}_{r}}{r!}=\frac{\frac{n!}{(n-r)!}}{r!}=\frac{n!}{r!(n-r)!}`, displayMode: true },
 
       { kind: 'text', content: 'Step 5: Substitute values.' },
       { kind: 'math', content: String.raw`\binom{${N}}{${r}}=\frac{${N}!}{${r}!\,(${N - r})!}`, displayMode: true },
@@ -279,12 +377,12 @@ export function generatePermutationCombinationQuestion(input: {
       { kind: 'text', content: 'Step 2: Count by the last digit.' },
       { kind: 'text', content: `There are ${m} available digits: {${digitsList}}.` },
       { kind: 'text', content: 'Reminder:' },
-      { kind: 'math', content: String.raw`{}^nP_r = n(n-1)(n-2)\cdots (n-r+1)`, displayMode: true },
+      { kind: 'math', content: String.raw`{}^{n}\mathrm{P}_{r} = n(n-1)(n-2)\cdots (n-r+1)`, displayMode: true },
 
       { kind: 'text', content: 'Case A: last digit is 0.' },
       { kind: 'text', content: `Then the first digit can be any of the remaining non-zero digits: ${m - 1} choices.` },
       { kind: 'text', content: `After fixing first and last, there are ${m - 2} digits left for the remaining ${len - 2} middle positions.` },
-      { kind: 'math', content: String.raw`\text{Case A} = (${m - 1})\times {}^{${m - 2}}P_{${len - 2}} = ${caseLast0.toString()}`, displayMode: true },
+      { kind: 'math', content: String.raw`\text{Case A} = (${m - 1})\times {}^{${m - 2}}\mathrm{P}_{${len - 2}} = ${caseLast0.toString()}`, displayMode: true },
 
       { kind: 'text', content: 'Case B: last digit is an even non-zero digit.' },
       { kind: 'text', content: `There are ${evenNonZeroCount} choices for the last digit.` },
@@ -292,7 +390,7 @@ export function generatePermutationCombinationQuestion(input: {
         ? `Then the first digit can be any digit except 0 and the chosen last digit: ${Math.max(0, m - 2)} choices.`
         : `Then the first digit can be any digit except the chosen last digit: ${Math.max(0, m - 1)} choices.` },
       { kind: 'text', content: `After fixing first and last, there are ${m - 2} digits left for the remaining ${len - 2} middle positions.` },
-      { kind: 'math', content: String.raw`\text{Case B} = (${evenNonZeroCount})\times (${hasZero ? (m - 2) : (m - 1)})\times {}^{${m - 2}}P_{${len - 2}} = ${caseLastEvenNonZero.toString()}`, displayMode: true },
+      { kind: 'math', content: String.raw`\text{Case B} = (${evenNonZeroCount})\times (${hasZero ? (m - 2) : (m - 1)})\times {}^{${m - 2}}\mathrm{P}_{${len - 2}} = ${caseLastEvenNonZero.toString()}`, displayMode: true },
 
       { kind: 'text', content: 'Step 3: Add the cases (they do not overlap).' },
       { kind: 'math', content: String.raw`${caseLast0.toString()}+${caseLastEvenNonZero.toString()}=${ans.toString()}`, displayMode: true },
@@ -358,6 +456,207 @@ export function generatePermutationCombinationQuestion(input: {
 
     return mk({ idSuffix: `apart-${n}`, katexQuestion: q, katexExplanation: expl, expectedNumber: toSafeNumber(ans) });
   }
+
+	if (variantId === 'evaluate_npr_notation') {
+		const n = rng.int(
+			input.difficulty === 'easy' ? 6 : input.difficulty === 'medium' ? 10 : 14,
+			input.difficulty === 'easy' ? 18 : input.difficulty === 'medium' ? 25 : 35
+		);
+		const rMax = Math.min(input.difficulty === 'easy' ? 7 : input.difficulty === 'medium' ? 10 : 15, n - 1);
+		const rMin = Math.min(1, rMax);
+		const r = rng.int(rMin, rMax);
+		const ans = nPrBig(n, r);
+
+		const expr = String.raw`{}^{\mathrm{${n}}}\,\mathrm{P}_{${r}}`;
+		const q = String.raw`\text{Evaluate } ${expr}.`;
+		const expl: KatexExplanationBlock[] = [
+			{ kind: 'text', content: 'Goal: evaluate a permutation expression exactly.' },
+			{ kind: 'text', content: 'A permutation counts the number of ordered arrangements.' },
+			{ kind: 'text', content: 'That means selecting r objects from n objects where the order matters (AB is different from BA).' },
+			{ kind: 'text', content: 'Step 1: Identify what is being asked.' },
+			{ kind: 'math', content: expr, displayMode: true },
+			{ kind: 'text', content: 'Read this as: “the number of permutations of r objects chosen from n objects”.' },
+			{ kind: 'text', content: 'Step 2: Recall the key formula for permutations.' },
+			{ kind: 'text', content: 'The standard factorial form is:' },
+			{ kind: 'math', content: String.raw`{}^{\mathrm{n}}\,\mathrm{P}_{r}=\frac{n!}{(n-r)!}`, displayMode: true },
+			{ kind: 'text', content: 'Why this makes sense (intuition):' },
+			{ kind: 'text', content: 'For the first position you have n choices, then n−1 choices, and so on, until you fill r positions.' },
+			{ kind: 'math', content: String.raw`{}^{\mathrm{n}}\,\mathrm{P}_{r}=n(n-1)(n-2)\cdots (n-r+1)`, displayMode: true },
+			{ kind: 'text', content: 'Step 3: Substitute the given values of n and r.' },
+			{ kind: 'math', content: String.raw`{}^{\mathrm{${n}}}\,\mathrm{P}_{${r}}=\frac{${n}!}{(${n}-${r})!}=\frac{${n}!}{${n - r}!}`, displayMode: true },
+			{ kind: 'text', content: 'Step 4: Expand factorials to cancel (this avoids huge numbers).' },
+			{ kind: 'text', content: 'Write n! as a product down to (n−r+1)! and cancel the (n−r)! in the denominator.' },
+			{ kind: 'math', content: String.raw`\frac{${n}!}{${n - r}!}=\frac{${n}(${n - 1})(${n - 2})\cdots (${n - r + 1})\,(${n - r})!}{(${n - r})!}`, displayMode: true },
+			{ kind: 'math', content: String.raw`= ${n}(${n - 1})(${n - 2})\cdots (${n - r + 1})`, displayMode: true },
+			{ kind: 'text', content: 'Step 5: Multiply the remaining r factors.' },
+			{ kind: 'math', content: String.raw`{}^{\mathrm{${n}}}\,\mathrm{P}_{${r}}=${ans.toString()}`, displayMode: true },
+			{ kind: 'text', content: 'Sanity check (quick reasonableness test):' },
+			{ kind: 'text', content: 'The answer must be an integer, and it must be less than:' },
+			{ kind: 'math', content: String.raw`n^{r}`, displayMode: false },
+			{ kind: 'text', content: 'because at most you would have n choices each time if repetition were allowed.' },
+			{ kind: 'math', content: String.raw`${ans.toString()} < ${n}^{${r}}`, displayMode: true },
+			{ kind: 'text', content: 'Common mistakes to avoid:' },
+			{ kind: 'text', content: '1) Using combinations (nCr) when order matters.' },
+			{ kind: 'text', content: '2) Forgetting that you cannot repeat an object when using nPr.' },
+			{ kind: 'text', content: '3) Cancelling factorials incorrectly (always expand just enough to cancel).' },
+			{ kind: 'text', content: 'Extra practice idea:' },
+			{ kind: 'text', content: 'Try rewriting the answer as a product of r descending integers and check each factor corresponds to a position in the arrangement.' },
+		];
+		return mk({ idSuffix: `npr-${n}-${r}`, katexQuestion: q, katexExplanation: expl, expectedNumber: toSafeNumber(ans) });
+	}
+
+	if (variantId === 'evaluate_ncr_notation') {
+		const n = rng.int(
+			input.difficulty === 'easy' ? 6 : input.difficulty === 'medium' ? 8 : 10,
+			input.difficulty === 'easy' ? 16 : input.difficulty === 'medium' ? 22 : 30
+		);
+		const rMax = Math.min(input.difficulty === 'easy' ? 7 : input.difficulty === 'medium' ? 10 : 15, n - 1);
+		const rMin = Math.min(1, rMax);
+		const r = rng.int(rMin, rMax);
+		const ans = nCrBig(n, r);
+
+		const expr = String.raw`{}^{\mathrm{${n}}}\,\mathrm{C}_{${r}}`;
+		const q = String.raw`\text{Evaluate } ${expr}.`;
+		const expl: KatexExplanationBlock[] = [
+			{ kind: 'text', content: 'Goal: evaluate a combination expression exactly.' },
+			{ kind: 'text', content: 'A combination counts selections where order does NOT matter.' },
+			{ kind: 'text', content: 'That means choosing a set of r objects from n objects: {A,B,C} is the same selection as {C,B,A}.' },
+			{ kind: 'text', content: 'Step 1: Identify the expression.' },
+			{ kind: 'math', content: expr, displayMode: true },
+			{ kind: 'text', content: 'Read this as: “the number of combinations (selections) of r objects chosen from n objects”.' },
+			{ kind: 'text', content: 'Step 2: Recall the key formulas.' },
+			{ kind: 'text', content: 'Combination notation is also written using binomial coefficients:' },
+			{ kind: 'math', content: String.raw`{}^{\mathrm{n}}\,\mathrm{C}_{r}=\binom{n}{r}`, displayMode: true },
+			{ kind: 'text', content: 'Factorial formula:' },
+			{ kind: 'math', content: String.raw`\binom{n}{r}=\frac{n!}{r!(n-r)!}`, displayMode: true },
+			{ kind: 'text', content: 'Why we divide by r! (intuition):' },
+			{ kind: 'text', content: 'If order mattered, there would be nPr ways to arrange r chosen objects.' },
+			{ kind: 'text', content: 'But each set of r chosen objects can be arranged in r! different orders, all representing the same combination.' },
+			{ kind: 'math', content: String.raw`\binom{n}{r}=\frac{{}^{\mathrm{n}}\,\mathrm{P}_{r}}{r!}`, displayMode: true },
+			{ kind: 'text', content: 'Step 3: Substitute the given values of n and r.' },
+			{ kind: 'math', content: String.raw`{}^{\mathrm{${n}}}\,\mathrm{C}_{${r}}=\binom{${n}}{${r}}=\frac{${n}!}{${r}!((${n}-${r})!)}=\frac{${n}!}{${r}!\,${n - r}!}`, displayMode: true },
+			{ kind: 'text', content: 'Step 4: Use symmetry to simplify if helpful.' },
+			{ kind: 'text', content: 'Combinations have the property:' },
+			{ kind: 'math', content: String.raw`\binom{n}{r}=\binom{n}{n-r}`, displayMode: true },
+			{ kind: 'text', content: 'This can reduce work by choosing the smaller of r and (n−r).' },
+			{ kind: 'text', content: 'Step 5: Expand factorials and cancel carefully.' },
+			{ kind: 'text', content: '2) Forgetting the factorial on r or (n−r) in the denominator.' },
+			{ kind: 'text', content: '3) Expanding huge factorials instead of cancelling first.' },
+			{ kind: 'text', content: 'Extra note:' },
+			{ kind: 'text', content: 'In exam conditions, the fastest method is usually: write the factorial formula, cancel, then multiply/divide in small steps.' },
+		];
+		return mk({ idSuffix: `ncr-${n}-${r}`, katexQuestion: q, katexExplanation: expl, expectedNumber: toSafeNumber(ans) });
+	}
+
+	if (variantId === 'letters_choose_combinations') {
+		const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('');
+		const pickDistinct = <T,>(pool: T[], count: number): T[] => {
+			const src = pool.slice();
+			const out: T[] = [];
+			const n = Math.min(count, src.length);
+			for (let i = 0; i < n; i++) {
+				const idx = rng.int(0, src.length - 1);
+				out.push(src[idx]!);
+				src.splice(idx, 1);
+			}
+			return out;
+		};
+		const N = rng.int(
+			input.difficulty === 'easy' ? 5 : input.difficulty === 'medium' ? 6 : 7,
+			input.difficulty === 'hard' ? 10 : 9
+		);
+		const r = rng.int(2, Math.min(5, Math.max(2, N - 1)));
+		const letters = pickDistinct(alphabet, N).sort();
+		const lettersList = letters.join(', ');
+		const ans = nCrBig(N, r);
+
+		const q = String.raw`\text{How many different combinations of ${r} letters can be chosen from the letters ${lettersList}?}`;
+		const expl: KatexExplanationBlock[] = [
+			{ kind: 'text', content: 'Step 1: Decide whether order matters.' },
+			{ kind: 'text', content: 'The question asks for combinations of letters. A selection like {P,Q,R} is the same as {R,Q,P}.' },
+			{ kind: 'text', content: 'So order does NOT matter: this is a combinations problem.' },
+			{ kind: 'text', content: 'Step 2: Identify n and r.' },
+			{ kind: 'math', content: String.raw`n=${N},\quad r=${r}`, displayMode: true },
+			{ kind: 'text', content: 'Step 3: Use the combination formula.' },
+			{ kind: 'math', content: String.raw`\binom{n}{r}=\frac{n!}{r!(n-r)!}`, displayMode: true },
+			{ kind: 'text', content: 'Step 4: Substitute values and evaluate.' },
+			{ kind: 'math', content: String.raw`\binom{${N}}{${r}}=\frac{${N}!}{${r}!\,(${N}-${r})!}=\frac{${N}!}{${r}!\,${N - r}!}=${ans.toString()}`, displayMode: true },
+		];
+		return mk({ idSuffix: `letters-${N}-${r}`, katexQuestion: q, katexExplanation: expl, expectedNumber: toSafeNumber(ans) });
+	}
+
+	if (variantId === 'digits_even_between_thousands_no_repeat') {
+		const pickDistinct = <T,>(pool: T[], count: number): T[] => {
+			const src = pool.slice();
+			const out: T[] = [];
+			const n = Math.min(count, src.length);
+			for (let i = 0; i < n; i++) {
+				const idx = rng.int(0, src.length - 1);
+				out.push(src[idx]!);
+				src.splice(idx, 1);
+			}
+			return out;
+		};
+
+		const thousandsDigit = rng.int(1, 8);
+		const lower = thousandsDigit * 1000;
+		const upper = (thousandsDigit + 1) * 1000;
+		const poolSize = rng.int(6, input.difficulty === 'easy' ? 6 : 8);
+
+		const digitPool = (() => {
+			const digits = pickDistinct([0, 1, 2, 3, 4, 5, 6, 7, 8, 9], poolSize);
+			if (!digits.includes(thousandsDigit)) {
+				digits[rng.int(0, digits.length - 1)] = thousandsDigit;
+			}
+			const evens = digits.filter((d) => d % 2 === 0 && d !== thousandsDigit);
+			if (evens.length === 0) {
+				const candidates = [0, 2, 4, 6, 8].filter((d) => d !== thousandsDigit);
+				digits[rng.int(0, digits.length - 1)] = candidates[rng.int(0, candidates.length - 1)]!;
+			}
+			// Ensure uniqueness after forced replacements.
+			const uniq = Array.from(new Set(digits));
+			while (uniq.length < poolSize) {
+				const d = rng.int(0, 9);
+				if (uniq.includes(d)) continue;
+				uniq.push(d);
+			}
+			return uniq.slice(0, poolSize).sort((a, b) => a - b);
+		})();
+
+		const remaining = digitPool.filter((d) => d !== thousandsDigit);
+		const evenLastDigits = remaining.filter((d) => d % 2 === 0);
+		const e = evenLastDigits.length;
+		const m = digitPool.length;
+		const waysMiddle = (m - 2) * (m - 3);
+		const ans = e * waysMiddle;
+
+		const digitsList = digitPool.join(', ');
+		const q = String.raw`\text{Find how many even numbers between ${lower} and ${upper} can be formed using the digits ${digitsList} if no digit can be repeated.}`;
+
+		const expl: KatexExplanationBlock[] = [
+			{ kind: 'text', content: 'Method 1' },
+			{ kind: 'text', content: `The first digit must be a ${thousandsDigit} and the last digit must be even.` },
+			{ kind: 'math', content: String.raw`\boxed{${thousandsDigit}}\ \boxed{\,*\,}\ \boxed{\,*\,}\ \boxed{\,\text{even}\,}`, displayMode: true },
+			{ kind: 'text', content: `There are ${e} choices for the last digit (from ${evenLastDigits.join(', ') || 'the even digits'}).` },
+			{ kind: 'text', content: `After choosing the first and last digits, there are ${m - 2} digits left to fill the two middle places without repetition.` },
+			{ kind: 'math', content: String.raw`\text{Ways to fill the 2 middle places} = {}^{${m - 2}}\mathrm{P}_{2} = (${m - 2})(${m - 3}) = ${waysMiddle}`, displayMode: true },
+			{ kind: 'math', content: String.raw`\text{Total even numbers} = (${e})\times {}^{${m - 2}}\mathrm{P}_{2} = ${e}\times ${waysMiddle} = ${ans}`, displayMode: true },
+			{ kind: 'text', content: `There are ${ans} different even numbers that satisfy the conditions.` },
+			{ kind: 'text', content: '' },
+			{ kind: 'text', content: 'Method 2' },
+			{ kind: 'text', content: 'Count the choices for each position and multiply.' },
+			{ kind: 'math', content: String.raw`\boxed{${thousandsDigit}}\ \boxed{\,\*\,}\ \boxed{\,\*\,}\ \boxed{\,\text{even}\,}`, displayMode: true },
+			{ kind: 'math', content: String.raw`1\text{ choice} \times (${m - 2})\text{ choices} \times (${m - 3})\text{ choices} \times (${e})\text{ choices}`, displayMode: true },
+			{ kind: 'math', content: String.raw`= 1\times (${m - 2})\times (${m - 3})\times (${e}) = ${ans}`, displayMode: true },
+		];
+
+		return mk({
+			idSuffix: `even-between-${lower}-${upper}-${m}-${e}`,
+			katexQuestion: q,
+			katexExplanation: expl,
+			expectedNumber: ans,
+		});
+	}
 
   // committee_men_women
   {
