@@ -425,7 +425,7 @@ const Home = () => {
             <Button
               variant="outline"
               onClick={() => navigate('/stories-admin')}
-              className="border-green-300 text-green-800 hover:bg-green-50 mr-2"
+              className="rounded-full border-green-300/80 text-green-800 bg-background hover:bg-green-50/60 hover:border-green-400/80 hover:text-green-900 shadow-sm hover:shadow-md transition-all duration-200 hover:-translate-y-0.5 active:translate-y-0 mr-2"
             >
               Stories
             </Button>
@@ -434,7 +434,7 @@ const Home = () => {
             <Button
               variant="outline"
               onClick={() => navigate('/practice')}
-              className="border-green-300 text-green-800 hover:bg-green-50 mr-2"
+              className="rounded-full border-green-300/80 text-green-800 bg-background hover:bg-green-50/60 hover:border-green-400/80 hover:text-green-900 shadow-sm hover:shadow-md transition-all duration-200 hover:-translate-y-0.5 active:translate-y-0 mr-2"
             >
               Practice
             </Button>
@@ -442,7 +442,7 @@ const Home = () => {
           <Button
             variant="outline"
             onClick={() => navigate('/songs')}
-            className="border-green-300 text-green-800 hover:bg-green-50"
+            className="rounded-full border-green-300/80 text-green-800 bg-background hover:bg-green-50/60 hover:border-green-400/80 hover:text-green-900 shadow-sm hover:shadow-md transition-all duration-200 hover:-translate-y-0.5 active:translate-y-0"
           >
             Songs
           </Button>
@@ -459,7 +459,7 @@ const Home = () => {
           <Button
             variant="outline"
             onClick={() => navigate('/stories-admin')}
-            className="border-green-300 text-green-800 hover:bg-green-50 mr-2"
+            className="rounded-full border-green-300/80 text-green-800 bg-background hover:bg-green-50/60 hover:border-green-400/80 hover:text-green-900 shadow-sm hover:shadow-md transition-all duration-200 hover:-translate-y-0.5 active:translate-y-0 mr-2"
           >
             Stories
           </Button>
@@ -468,7 +468,7 @@ const Home = () => {
           <Button
             variant="outline"
             onClick={() => navigate('/practice')}
-            className="border-green-300 text-green-800 hover:bg-green-50 mr-2"
+            className="rounded-full border-green-300/80 text-green-800 bg-background hover:bg-green-50/60 hover:border-green-400/80 hover:text-green-900 shadow-sm hover:shadow-md transition-all duration-200 hover:-translate-y-0.5 active:translate-y-0 mr-2"
           >
             Practice
           </Button>
@@ -476,7 +476,7 @@ const Home = () => {
         <Button
           variant="outline"
           onClick={() => navigate('/songs')}
-          className="border-green-300 text-green-800 hover:bg-green-50"
+          className="rounded-full border-green-300/80 text-green-800 bg-background hover:bg-green-50/60 hover:border-green-400/80 hover:text-green-900 shadow-sm hover:shadow-md transition-all duration-200 hover:-translate-y-0.5 active:translate-y-0"
         >
           Songs
         </Button>

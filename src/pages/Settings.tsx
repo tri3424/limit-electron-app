@@ -23,6 +23,10 @@ import {
 	Activity,
 	Package,
 	ScrollText,
+	RefreshCw,
+	Copy,
+	Eye,
+	Save,
 	Settings as SettingsIcon,
 } from 'lucide-react';
 import { db, AppSettings, ErrorReport, initializeSettings, LyricsSourceEntry, User } from '@/lib/db';
@@ -2048,6 +2052,9 @@ export default function Settings() {
 }
 
 function DatabaseInfo() {
+  const [statsNonce, setStatsNonce] = useState(0);
+  const [statsRefreshing, setStatsRefreshing] = useState(false);
+
   const questionStats = useLiveQuery(async () => {
     const qs = await db.questions.toArray();
     let total = qs.length;
@@ -2094,35 +2101,55 @@ function DatabaseInfo() {
     }
 
     return { total, mcq, text, fillBlanks, matching, wordCount };
-  }, []);
-  const moduleCount = useLiveQuery(() => db.modules.count());
-  const attemptCount = useLiveQuery(() => db.attempts.count());
-  const tagCount = useLiveQuery(() => db.tags.count());
+  }, [statsNonce]);
+  const moduleCount = useLiveQuery(() => db.modules.count(), [statsNonce]);
+  const attemptCount = useLiveQuery(() => db.attempts.count(), [statsNonce]);
+  const tagCount = useLiveQuery(() => db.tags.count(), [statsNonce]);
 
   return (
-    <Card className="p-6 space-y-4">
-      <div className="flex items-center gap-2">
-        <Database className="h-5 w-5 text-primary" />
-        <h2 className="text-xl font-semibold text-foreground">Database Statistics</h2>
+    <Card className="p-6 space-y-4 rounded-2xl border border-border/70 shadow-sm">
+      <div className="flex items-start justify-between gap-4">
+        <div className="flex items-center gap-2">
+          <Database className="h-5 w-5 text-primary" />
+          <div>
+            <h2 className="text-xl font-semibold tracking-tight text-foreground">Database Statistics</h2>
+            <p className="text-sm text-muted-foreground mt-1">A quick overview of what’s stored locally on this device.</p>
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="icon"
+            aria-label="Refresh stats"
+            onClick={() => {
+              setStatsNonce((n) => n + 1);
+              setStatsRefreshing(true);
+              window.setTimeout(() => setStatsRefreshing(false), 650);
+            }}
+            className={statsRefreshing ? 'scale-[1.03]' : ''}
+          >
+            <RefreshCw className={"h-4 w-4 " + (statsRefreshing ? 'animate-spin' : '')} />
+          </Button>
+        </div>
       </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <div className="space-y-1">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <Card className="p-4 rounded-xl border border-border/70 shadow-sm">
           <p className="text-sm text-muted-foreground">Questions</p>
-          <p className="text-2xl font-bold text-foreground">{questionStats?.total ?? 0}</p>
-        </div>
-        <div className="space-y-1">
+          <p className="mt-1 text-2xl font-bold text-foreground tabular-nums">{questionStats?.total ?? 0}</p>
+        </Card>
+        <Card className="p-4 rounded-xl border border-border/70 shadow-sm">
           <p className="text-sm text-muted-foreground">Modules</p>
-          <p className="text-2xl font-bold text-foreground">{moduleCount || 0}</p>
-        </div>
-        <div className="space-y-1">
+          <p className="mt-1 text-2xl font-bold text-foreground tabular-nums">{moduleCount || 0}</p>
+        </Card>
+        <Card className="p-4 rounded-xl border border-border/70 shadow-sm">
           <p className="text-sm text-muted-foreground">Attempts</p>
-          <p className="text-2xl font-bold text-foreground">{attemptCount || 0}</p>
-        </div>
-        <div className="space-y-1">
+          <p className="mt-1 text-2xl font-bold text-foreground tabular-nums">{attemptCount || 0}</p>
+        </Card>
+        <Card className="p-4 rounded-xl border border-border/70 shadow-sm">
           <p className="text-sm text-muted-foreground">Tags</p>
-          <p className="text-2xl font-bold text-foreground">{tagCount || 0}</p>
-        </div>
+          <p className="mt-1 text-2xl font-bold text-foreground tabular-nums">{tagCount || 0}</p>
+        </Card>
       </div>
 
       {questionStats && (
@@ -2147,7 +2174,7 @@ function DatabaseInfo() {
       )}
 
       {questionStats && (
-        <div className="mt-3 flex items-center gap-2 p-3 bg-muted rounded-lg">
+        <div className="mt-3 flex items-center gap-2 p-3 bg-muted/60 rounded-xl border border-border/70">
           <FileText className="h-4 w-4 text-muted-foreground" />
           <p className="text-sm text-muted-foreground">
             Approximate total words in all questions, options, explanations and matching pairs:{' '}
@@ -2158,7 +2185,7 @@ function DatabaseInfo() {
         </div>
       )}
 
-      <div className="flex items-center gap-2 p-3 bg-muted rounded-lg">
+      <div className="flex items-center gap-2 p-3 bg-muted/60 rounded-xl border border-border/70">
         <FileText className="h-4 w-4 text-muted-foreground" />
         <p className="text-sm text-muted-foreground">
           All data is stored locally on your device using IndexedDB
@@ -2196,6 +2223,8 @@ function DatabaseExplorer() {
   const [isBulkDeleting, setIsBulkDeleting] = useState(false);
   const [showBulkDeleteDialog, setShowBulkDeleteDialog] = useState(false);
   const [showJsonPreview, setShowJsonPreview] = useState(false);
+  const [refreshNonce, setRefreshNonce] = useState(0);
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
   const safeJsonStringify = (value: any, space?: number) => {
     return JSON.stringify(
@@ -2234,7 +2263,45 @@ function DatabaseExplorer() {
         return false;
       }
     });
-  }, [activeTable, search, recordLimit]) as any[] | undefined;
+  }, [activeTable, search, recordLimit, refreshNonce]) as any[] | undefined;
+
+  const handleCopySelected = async () => {
+    if (!selectedRecord) {
+      toast.error('No record selected');
+      return;
+    }
+    try {
+      const text = safeJsonStringify(selectedRecord, 2);
+      await navigator.clipboard.writeText(text);
+      toast.success('Copied JSON');
+    } catch (e) {
+      console.error(e);
+      toast.error('Failed to copy');
+    }
+  };
+
+  const handleDownloadSelected = () => {
+    if (!selectedRecord) {
+      toast.error('No record selected');
+      return;
+    }
+    try {
+      const text = safeJsonStringify(selectedRecord, 2);
+      const blob = new Blob([text], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      const id = String(selectedRecord.id ?? selectedRecord.key ?? selectedRecord.primaryKey ?? 'record');
+      a.href = url;
+      a.download = `${String(activeTable)}-${id}.json`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      console.error(e);
+      toast.error('Failed to download');
+    }
+  };
 
   const deleteSongCascade = useCallback(async (songId: string) => {
     const song = await db.songs.get(songId);
@@ -2682,9 +2749,11 @@ function DatabaseExplorer() {
     }
   };
 
+  const visibleCount = records?.length ?? 0;
+
   return (
-    <Card className="p-6 space-y-4 border border-border/70 shadow-sm">
-      <div className="flex items-center justify-between">
+    <Card className="p-6 space-y-4 rounded-2xl border border-border/70 shadow-sm">
+      <div className="flex items-start justify-between gap-4">
         <div className="space-y-1">
           <div className="flex items-center gap-2">
             <Database className="h-5 w-5 text-primary" />
@@ -2698,7 +2767,14 @@ function DatabaseExplorer() {
           <span className="rounded-full bg-muted px-3 py-1">
             {tableLabel} table
           </span>
+          <span className="rounded-full bg-muted px-3 py-1">
+            Visible: <span className="font-semibold text-foreground">{visibleCount}</span>
+          </span>
         </div>
+      </div>
+
+      <div className="rounded-xl border border-amber-200/70 bg-amber-50/50 px-3 py-2 text-xs text-amber-900">
+        Changes here apply immediately. Prefer reading data first; edit only if you know exactly what you’re changing.
       </div>
 
       <Tabs value={activeTable} onValueChange={(v) => setActiveTable(v as ExplorerTableKey)}>
@@ -2828,58 +2904,87 @@ function DatabaseExplorer() {
         <TabsContent value={activeTable} className="mt-0 space-y-4">
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
             <div className="space-y-2 lg:col-span-2">
-              <div className="flex items-center justify-between gap-2">
-                <div className="space-y-0.5">
-                  <p className="text-sm font-medium">{tableLabel}</p>
-                  <p className="text-xs text-muted-foreground">
-                    Search across all fields. Click a row to view/edit JSON.
-                  </p>
-                </div>
-                {activeTable === 'questions' && questionTypeSummary && (
-                  <div className="hidden sm:flex flex-col items-end text-[11px] text-muted-foreground">
-                    <span>
-                      MCQ: <span className="font-semibold text-foreground">{questionTypeSummary.mcq}</span>{' '}
-                      · Text:{' '}
-                      <span className="font-semibold text-foreground">{questionTypeSummary.text}</span>{' '}
-                      · Fill:{' '}
-                      <span className="font-semibold text-foreground">{questionTypeSummary.fillBlanks}</span>{' '}
-                      · Matching:{' '}
-                      <span className="font-semibold text-foreground">{questionTypeSummary.matching}</span>
-                    </span>
-                    <span>
-                      Words in visible questions:{' '}
-                      <span className="font-semibold text-foreground">
-                        {questionTypeSummary.wordCount.toLocaleString()}
-                      </span>
-                    </span>
+              <div className="space-y-3">
+                <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
+                  <div className="space-y-0.5">
+                    <p className="text-sm font-medium">{tableLabel}</p>
+                    <p className="text-xs text-muted-foreground">
+                      Search across all fields. Click a row to view/edit JSON.
+                    </p>
                   </div>
-                )}
-                <div className="flex items-center gap-2">
-                  <Select value={String(recordLimit)} onValueChange={(v) => setRecordLimit(Number(v))}>
-                    <SelectTrigger className="h-9 w-[108px] text-xs">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="50">50 rows</SelectItem>
-                      <SelectItem value="200">200 rows</SelectItem>
-                      <SelectItem value="500">500 rows</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  <Input
-                    placeholder="Search JSON..."
-                    value={search}
-                    onChange={(e) => setSearch(e.target.value)}
-                    className="max-w-xs"
-                  />
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="whitespace-nowrap"
-                    disabled={!records || records.length === 0 || isBulkDeleting}
-                    onClick={() => setShowBulkDeleteDialog(true)}
-                  >
-                    Delete visible
-                  </Button>
+
+                  {activeTable === 'questions' && questionTypeSummary ? (
+                    <div className="hidden sm:flex flex-wrap justify-end gap-2 text-[11px] text-muted-foreground">
+                      <span className="rounded-full bg-muted px-2.5 py-1">
+                        MCQ: <span className="font-semibold text-foreground">{questionTypeSummary.mcq}</span>
+                      </span>
+                      <span className="rounded-full bg-muted px-2.5 py-1">
+                        Text: <span className="font-semibold text-foreground">{questionTypeSummary.text}</span>
+                      </span>
+                      <span className="rounded-full bg-muted px-2.5 py-1">
+                        Fill: <span className="font-semibold text-foreground">{questionTypeSummary.fillBlanks}</span>
+                      </span>
+                      <span className="rounded-full bg-muted px-2.5 py-1">
+                        Matching: <span className="font-semibold text-foreground">{questionTypeSummary.matching}</span>
+                      </span>
+                      <span className="rounded-full bg-muted px-2.5 py-1">
+                        Words: <span className="font-semibold text-foreground">{questionTypeSummary.wordCount.toLocaleString()}</span>
+                      </span>
+                    </div>
+                  ) : null}
+                </div>
+
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Button
+                      variant="outline"
+                      size="icon"
+                      aria-label="Refresh"
+                      onClick={() => {
+                        setRefreshNonce((n) => n + 1);
+                        setIsRefreshing(true);
+                        window.setTimeout(() => setIsRefreshing(false), 650);
+                      }}
+                      className="h-9 w-9 rounded-full border border-border/70 bg-background shadow-sm hover:bg-accent"
+                    >
+                      <RefreshCw className={"h-4 w-4 " + (isRefreshing ? 'animate-spin' : '')} />
+                    </Button>
+
+                    <Select value={String(recordLimit)} onValueChange={(v) => setRecordLimit(Number(v))}>
+                      <SelectTrigger className="h-9 w-[108px] text-xs">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="50">50 rows</SelectItem>
+                        <SelectItem value="200">200 rows</SelectItem>
+                        <SelectItem value="500">500 rows</SelectItem>
+                      </SelectContent>
+                    </Select>
+
+                    <Input
+                      placeholder="Search JSON..."
+                      value={search}
+                      onChange={(e) => setSearch(e.target.value)}
+                      className="sm:max-w-xs"
+                    />
+                    {search.trim() ? (
+                      <Button variant="outline" size="sm" onClick={() => setSearch('')}>
+                        Clear
+                      </Button>
+                    ) : null}
+                  </div>
+
+                  <div className="flex items-center justify-end gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="whitespace-nowrap"
+                      disabled={!records || records.length === 0 || isBulkDeleting}
+                      onClick={() => setShowBulkDeleteDialog(true)}
+                    >
+                      Delete visible
+                    </Button>
+                  </div>
                 </div>
               </div>
 
@@ -2941,30 +3046,78 @@ function DatabaseExplorer() {
                 onChange={(e) => setEditedJson(e.target.value)}
                 placeholder="Select a record on the left to view/edit its raw JSON."
               />
-              <div className="flex justify-end gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  disabled={!selectedRecord}
-                  onClick={() => setShowJsonPreview(true)}
-                >
-                  Preview JSON
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  disabled={!selectedRecord || isSaving}
-                  onClick={handleDelete}
-                >
-                  Delete
-                </Button>
-                <Button
-                  size="sm"
-                  disabled={!selectedRecord || isSaving}
-                  onClick={handleSave}
-                >
-                  Save
-                </Button>
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex flex-wrap items-center gap-2">
+                  {selectedRecord ? (
+                    <>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button variant="outline" size="icon" onClick={handleCopySelected} aria-label="Copy JSON" className="h-9 w-9 rounded-full">
+                            <Copy className="h-4 w-4" />
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent>Copy JSON</TooltipContent>
+                      </Tooltip>
+
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button variant="outline" size="icon" onClick={handleDownloadSelected} aria-label="Download JSON" className="h-9 w-9 rounded-full">
+                            <Download className="h-4 w-4" />
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent>Download JSON</TooltipContent>
+                      </Tooltip>
+
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button
+                            variant="outline"
+                            size="icon"
+                            onClick={() => setShowJsonPreview(true)}
+                            aria-label="Preview JSON"
+                            className="h-9 w-9 rounded-full"
+                          >
+                            <Eye className="h-4 w-4" />
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent>Preview JSON</TooltipContent>
+                      </Tooltip>
+                    </>
+                  ) : null}
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2 justify-end">
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        variant="outline"
+                        size="icon"
+                        disabled={!selectedRecord || isSaving}
+                        onClick={handleDelete}
+                        aria-label="Delete record"
+                        className="h-9 w-9 rounded-full"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>Delete</TooltipContent>
+                  </Tooltip>
+
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        size="icon"
+                        disabled={!selectedRecord || isSaving}
+                        onClick={handleSave}
+                        aria-label="Save record"
+                        className="h-9 w-9 rounded-full"
+                      >
+                        <Save className="h-4 w-4" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>Save</TooltipContent>
+                  </Tooltip>
+                </div>
               </div>
             </div>
           </div>

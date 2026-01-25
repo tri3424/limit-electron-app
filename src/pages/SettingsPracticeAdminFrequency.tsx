@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { useNavigate } from 'react-router-dom';
-import { Sliders, ArrowLeft } from 'lucide-react';
+import { Sliders, MoveLeft, RefreshCw } from 'lucide-react';
 import { db, AppSettings, initializeSettings, User } from '@/lib/db';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -349,6 +349,40 @@ export default function SettingsPracticeAdminFrequency() {
     []
   );
 
+  const prettyVariantLabel = (raw: string) => {
+    const s0 = String(raw ?? '').trim();
+    if (!s0) return s0;
+    return s0
+      .replace(/\s*\(MCQ\)\s*/gi, '')
+      .replace(/\s*\(multi-solution\)\s*/gi, '')
+      .replace(/\s*\(4 s\.f\.\)\s*/gi, ' (4 s.f.)')
+      .replace(/->/g, '→')
+      .replace(/\s+/g, ' ')
+      .replace(/^\w/, (c) => c.toUpperCase());
+  };
+
+  const variantDescription = (topicId: string, variantKey: string, label: string) => {
+    const l = String(label ?? '').toLowerCase();
+    const k = String(variantKey ?? '').toLowerCase();
+    if (/(\bmcq\b|multiple choice)/.test(l) || /mcq/.test(k)) return 'Multiple-choice question.';
+    if (/unit circle/.test(l)) return 'Identify angles/coordinates on the unit circle.';
+    if (/quadrant/.test(l) && /(sin|cos|tan|ratio)/.test(l)) return 'Choose correct trig ratio using quadrant sign rules.';
+    if (/solve/.test(l)) return 'Solve for the unknown(s) in an equation.';
+    if (/evaluate/.test(l)) return 'Compute the required value.';
+    if (/convert/.test(l) || /logarithmic/.test(l) || /exponential/.test(l)) return 'Convert between equivalent mathematical forms.';
+    if (/simplify/.test(l)) return 'Simplify the expression to an equivalent form.';
+    if (/intersection/.test(l)) return 'Find where two graphs/lines meet.';
+    if (/gradient/.test(l) || /slope/.test(l)) return 'Work with gradients/slopes from a graph or equation.';
+    if (/y-?intercept/.test(l)) return 'Find the y-intercept from a graph or equation.';
+    if (/fraction/.test(l) && (/add|subtract/.test(l) || /add\/subtract/.test(l))) return 'Add or subtract fractions correctly.';
+    if (/simplify a fraction/.test(l)) return 'Reduce a fraction to its simplest form.';
+    if (/fraction of a number/.test(l)) return 'Find a fraction of a given quantity.';
+    if (/mixed/.test(l) && /improper/.test(l)) return 'Convert between mixed and improper fractions.';
+    if (/default/.test(l)) return 'General questions for this topic.';
+    if (topicId === 'graph_straight_line' && /graph/.test(l) && /equation/.test(l)) return 'Read a straight-line graph and choose the correct equation.';
+    return 'Adjust how often this question type appears.';
+  };
+
   if (!localSettings) {
     return (
       <div className="flex items-center justify-center h-full">
@@ -407,35 +441,78 @@ export default function SettingsPracticeAdminFrequency() {
     ? topicVariants
     : topicVariants.filter((t) => t.label.toLowerCase().includes(q) || t.topicId.toLowerCase().includes(q));
 
+  const applyDefaultsForSelectedUser = async () => {
+    const next = { ...pf };
+    const nextUser = { ...(next[freqUserKey] ?? {}) };
+
+    const nextTvw: Record<string, Record<string, number>> = {};
+    for (const t of topicVariants) {
+      const byVariant: Record<string, number> = {};
+      for (const v of t.variants ?? []) {
+        byVariant[v.key] = Number(v.defaultValue ?? 0);
+      }
+      nextTvw[t.topicId] = byVariant;
+    }
+
+    nextUser.topicVariantWeights = nextTvw;
+    nextUser.topicVariantAnswerKinds = {};
+    next[freqUserKey] = nextUser;
+    await updatePracticeFrequencies(next);
+    setFreqDraftWeights({});
+    setFreqDraftMixedWeights({});
+    toast.success('Defaults applied');
+  };
+
+  const resetOverridesForSelectedUser = async () => {
+    const next = { ...pf };
+    delete next[freqUserKey];
+    await updatePracticeFrequencies(next);
+    setFreqDraftWeights({});
+    setFreqDraftMixedWeights({});
+    toast.success('Overrides reset');
+  };
+
   return (
-    <div className="max-w-6xl mx-auto space-y-6">
-      <div className="flex items-start justify-between gap-4">
+    <div className="max-w-6xl mx-auto space-y-8 px-4 md:px-6 py-8">
+      <div className="flex items-start justify-between gap-6">
         <div className="min-w-0">
           <div className="flex items-center gap-3">
             <Button variant="outline" size="sm" onClick={() => navigate('/settings/practice-admin')}>
-              <ArrowLeft className="h-4 w-4 mr-2" />
+              <MoveLeft className="h-4 w-4 mr-2" />
               Back
             </Button>
-            <h1 className="text-3xl font-bold text-foreground">Frequency Controls</h1>
+            <h1 className="text-3xl font-bold tracking-tight text-foreground">Frequency Controls</h1>
           </div>
-          <p className="text-muted-foreground mt-2">
+          <p className="text-muted-foreground mt-2 leading-relaxed">
             Control how frequently variants appear for a specific user.
           </p>
         </div>
       </div>
 
-      <Card className="p-6 space-y-4">
-        <div className="flex items-start gap-3">
-          <Sliders className="h-5 w-5 text-primary mt-0.5" />
-          <div className="min-w-0">
-            <div className="text-lg font-semibold">Configuration</div>
-            <div className="text-sm text-muted-foreground mt-1">
-              These settings apply to the selected user key.
+      <Card className="p-6 rounded-2xl shadow-sm border border-border/70 space-y-4">
+        <div className="flex items-start justify-between gap-4">
+          <div className="flex items-start gap-3 min-w-0">
+            <div className="mt-0.5 rounded-xl border bg-muted/20 p-2.5">
+              <Sliders className="h-5 w-5 text-primary" />
             </div>
+            <div className="min-w-0">
+              <div className="text-lg font-semibold tracking-tight text-foreground">Configuration</div>
+              <div className="text-sm text-muted-foreground mt-1 leading-relaxed">
+                These settings apply to the selected user.
+              </div>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <Button type="button" variant="outline" size="sm" onClick={() => void applyDefaultsForSelectedUser()}>
+              Apply defaults
+            </Button>
+            <Button type="button" variant="outline" size="icon" aria-label="Reset overrides" onClick={() => void resetOverridesForSelectedUser()}>
+              <RefreshCw className="h-4 w-4" />
+            </Button>
           </div>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
           <div className="space-y-1">
             <Label>User</Label>
             <Select value={freqUserKey} onValueChange={(v) => setFreqUserKey(v)}>
@@ -452,11 +529,11 @@ export default function SettingsPracticeAdminFrequency() {
               </SelectContent>
             </Select>
           </div>
-        </div>
 
-        <div className="space-y-1">
-          <Label>Search topics</Label>
-          <Input value={freqTopicSearch} onChange={(e) => setFreqTopicSearch(e.target.value)} placeholder="Search…" />
+          <div className="space-y-1 md:col-span-2">
+            <Label>Search topics</Label>
+            <Input value={freqTopicSearch} onChange={(e) => setFreqTopicSearch(e.target.value)} placeholder="Search…" />
+          </div>
         </div>
 
         <Accordion type="single" collapsible>
@@ -472,10 +549,15 @@ export default function SettingsPracticeAdminFrequency() {
                       ? Number((freqDraftWeights as any)[draftKey])
                       : persisted;
                     const answerKind = String((tvak as any)?.[t.topicId]?.[v.key] ?? '');
+                    const displayLabel = prettyVariantLabel(v.label);
+                    const desc = variantDescription(t.topicId, v.key, v.label);
                     return (
-                      <div key={v.key} className="space-y-2">
+                      <div key={v.key} className="space-y-2 rounded-xl border border-border/70 bg-muted/10 p-3">
                         <div className="flex items-center justify-between gap-3">
-                          <div className="text-sm text-muted-foreground truncate">{v.label}</div>
+                          <div className="min-w-0">
+                            <div className="text-sm font-medium text-foreground truncate">{displayLabel}</div>
+                            <div className="text-xs text-muted-foreground mt-0.5 leading-relaxed truncate">{desc}</div>
+                          </div>
                           <div className="text-sm text-muted-foreground tabular-nums">{Math.round(current)}</div>
                         </div>
                         <Slider
@@ -546,7 +628,7 @@ export default function SettingsPracticeAdminFrequency() {
                             const persisted = Number((mmwAll?.[m.id]?.[idx] ?? 0));
                             const current = typeof freqDraftMixedWeights[k] === 'number' ? freqDraftMixedWeights[k]! : persisted;
                             return (
-                              <div key={idx} className="space-y-2">
+                              <div key={idx} className="space-y-2 rounded-xl border border-border/70 bg-muted/10 p-3">
                                 <div className="flex items-center justify-between gap-3">
                                   <div className="text-xs text-muted-foreground truncate">
                                     {idx}. {it.topicId} ({it.difficulty})

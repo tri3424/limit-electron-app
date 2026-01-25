@@ -15,7 +15,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Katex } from '@/components/Katex';
 import { PolynomialLongDivision } from '@/components/PolynomialLongDivision';
 import { PromptBlocksFlow } from '@/components/PromptBlocksFlow';
-import { ArrowLeft, Bug, CircleHelp } from 'lucide-react';
+import { BarChart3, Bug, CalendarDays, CircleHelp, Clock3, FileUp, Filter, Layers, MoveLeft, Plus, Search, Shield, Sliders, User } from 'lucide-react';
 import MathLiveInput from '@/components/MathLiveInput';
 import InteractiveGraph from '@/components/InteractiveGraph';
 import { PRACTICE_TOPICS, PracticeTopicId } from '@/lib/practiceTopics';
@@ -37,6 +37,11 @@ type PracticeVariantMultiOverride = {
   topicId: PracticeTopicId;
   variantIds: string[];
 } | null;
+
+type PracticeVariantMeta = {
+  title: string;
+  description: string;
+};
 
 const PRACTICE_VARIANTS: Partial<Record<PracticeTopicId, string[]>> = {
   quadratics: ['factorisation', 'complete_square_pqr', 'complete_square_abc', 'solve_complete_square_surd'],
@@ -188,6 +193,143 @@ const PRACTICE_VARIANTS: Partial<Record<PracticeTopicId, string[]>> = {
   integration: ['indefinite', 'definite'],
 };
 
+const VARIANT_META: Partial<Record<PracticeTopicId, Record<string, PracticeVariantMeta>>> = {
+  differentiation: {
+    basic_polynomial: {
+      title: 'Differentiate a polynomial',
+      description: 'Find dy/dx for a polynomial function.',
+    },
+    stationary_points: {
+      title: 'Find stationary points',
+      description: 'Use dy/dx = 0 to find turning points (max/min).',
+    },
+    sqrt_params_point_gradient: {
+      title: 'Gradient at a point (square root)',
+      description: 'Differentiate a square-root function and find the gradient at a given point.',
+    },
+    power_linear_point_gradient: {
+      title: 'Gradient at a point (power of linear)',
+      description: 'Differentiate a function like (ax+b)^n and find the gradient at a point.',
+    },
+    rational_yaxis_gradient: {
+      title: 'Gradient at the y-intercept',
+      description: 'Find the gradient where the curve crosses the y-axis (x = 0).',
+    },
+    linear_minus_rational_xaxis_gradients: {
+      title: 'Gradients at x-intercepts',
+      description: 'Find gradients where the curve crosses the x-axis (solve y = 0).',
+    },
+    stationary_points_coords: {
+      title: 'Stationary point coordinates',
+      description: 'Find the full coordinates (x, y) of stationary points.',
+    },
+    tangent_or_normal_equation: {
+      title: 'Tangent or normal equation',
+      description: 'Decide whether you need the tangent or the normal, then form its equation.',
+    },
+    tangent_equation_at_point: {
+      title: 'Equation of a tangent',
+      description: 'Find the equation of the tangent to a curve at a given point.',
+    },
+    normal_equation_at_point: {
+      title: 'Equation of a normal',
+      description: 'Find the equation of the normal to a curve at a given point.',
+    },
+    normal_y_intercept_coords: {
+      title: 'Normal: y-intercept',
+      description: 'Find where the normal line crosses the y-axis.',
+    },
+    normal_x_intercept_coords: {
+      title: 'Normal: x-intercept',
+      description: 'Find where the normal line crosses the x-axis.',
+    },
+    tangents_intersection_coords: {
+      title: 'Intersection of two tangents',
+      description: 'Find the coordinates of the point where two tangents meet.',
+    },
+  },
+  integration: {
+    indefinite: {
+      title: 'Indefinite integrals',
+      description: 'Find the antiderivative (include +C).',
+    },
+    definite: {
+      title: 'Definite integrals',
+      description: 'Evaluate an integral between two limits.',
+    },
+  },
+};
+
+function humanizeVariantId(raw: string): string {
+  const tokens = String(raw ?? '')
+    .trim()
+    .split('_')
+    .map((t) => t.trim())
+    .filter(Boolean);
+  if (!tokens.length) return 'Question type';
+
+  const mapToken = (t: string) => {
+    const lower = t.toLowerCase();
+    if (lower === 'mcq') return 'Multiple-choice';
+    if (lower === 'coords') return 'coordinates';
+    if (lower === 'coord') return 'coordinate';
+    if (lower === 'xaxis') return 'x-axis';
+    if (lower === 'yaxis') return 'y-axis';
+    if (lower === 'hm') return 'hours & minutes';
+    if (lower === 'ampm') return 'AM/PM';
+    if (lower === 'ln') return 'ln';
+    if (lower === 'log10') return 'log₁₀';
+    if (lower === 'gcf') return 'greatest common factor';
+    if (lower === 'pqr') return 'p, q, r';
+    if (lower === 'abc') return 'a, b, c';
+    if (lower === 'u') return 'u';
+    if (lower === 'ax') return 'ax';
+    if (lower === 'rhs') return 'right-hand side';
+    if (lower === 'vars') return 'variables';
+    if (lower === 'frac') return 'fraction';
+    if (lower === 'surd') return 'surd';
+    if (lower === 'inv' || lower === 'inverse') return 'inverse';
+    if (lower === 'trig') return 'trigonometric';
+    return lower;
+  };
+
+  const titleCase = (s: string) => s.replace(/\b\w/g, (c) => c.toUpperCase());
+  return titleCase(tokens.map(mapToken).join(' ').replace(/\s+/g, ' ').trim());
+}
+
+function describeVariantId(topicId: PracticeTopicId | null, variantId: string): string {
+  const meta = topicId ? VARIANT_META?.[topicId]?.[variantId] : undefined;
+  if (meta?.description) return meta.description;
+
+  const id = String(variantId ?? '');
+  const t = id.toLowerCase();
+  const pretty = humanizeVariantId(id);
+
+  if (t.startsWith('solve_')) return `Solve a problem focused on: ${pretty}.`;
+  if (t.startsWith('evaluate_')) return `Evaluate: ${pretty}.`;
+  if (t.startsWith('simplify_')) return `Simplify: ${pretty}.`;
+  if (t.startsWith('read_')) return `Read or interpret: ${pretty}.`;
+  if (t.includes('graph')) return `Answer questions based on a graph: ${pretty}.`;
+  if (t.includes('intersection')) return `Find an intersection: ${pretty}.`;
+  if (t.includes('gradient')) return `Find a gradient (slope): ${pretty}.`;
+  if (t.includes('equation')) return `Form an equation: ${pretty}.`;
+  if (t.includes('area')) return `Work with area: ${pretty}.`;
+  if (t.includes('perimeter')) return `Work with perimeter: ${pretty}.`;
+  if (t.includes('length')) return `Work with length: ${pretty}.`;
+  if (t.includes('midpoint')) return `Find or use a midpoint: ${pretty}.`;
+  if (t.includes('identity')) return `Use an identity: ${pretty}.`;
+  if (t.includes('inequality')) return `Solve an inequality: ${pretty}.`;
+  if (t.includes('convert')) return `Convert between forms: ${pretty}.`;
+
+  const topicTitle = topicId ? (PRACTICE_TOPICS.find((x) => x.id === topicId)?.title ?? null) : null;
+  return topicTitle ? `Practice ${topicTitle.toLowerCase()} questions: ${pretty}.` : `Practice questions: ${pretty}.`;
+}
+
+function titleForVariantId(topicId: PracticeTopicId | null, variantId: string): string {
+  const meta = topicId ? VARIANT_META?.[topicId]?.[variantId] : undefined;
+  return meta?.title || humanizeVariantId(variantId);
+}
+
 function buildForcedVariantWeights(topicId: PracticeTopicId, variantId: string): Record<string, number> | null {
   const variants = PRACTICE_VARIANTS[topicId];
   if (!variants || variants.length === 0) return null;
@@ -207,6 +349,82 @@ function buildMultiVariantWeights(topicId: PracticeTopicId, variantIds: string[]
   const out: Record<string, number> = {};
   for (const v of variants) out[v] = valid.includes(v) ? 1 : 0;
   return out;
+}
+
+function serializeGraphSpecForSnapshot(raw: any): any {
+  const spec = raw && typeof raw === 'object' ? raw : null;
+  if (!spec) return raw;
+  const plot = Array.isArray((spec as any).plot) ? (spec as any).plot : [];
+  const windowObj = (spec as any).window && typeof (spec as any).window === 'object' ? (spec as any).window : null;
+  const xMin = Number(windowObj?.xMin);
+  const xMax = Number(windowObj?.xMax);
+  const yMin = Number(windowObj?.yMin);
+  const yMax = Number(windowObj?.yMax);
+  const hasWindow = Number.isFinite(xMin) && Number.isFinite(xMax) && Number.isFinite(yMin) && Number.isFinite(yMax) && xMax > xMin;
+
+  const outPlot: any[] = [];
+
+  const sampleFnToPolyline = (p: any) => {
+    const fn = p?.fn;
+    if (typeof fn !== 'function') return null;
+    if (!hasWindow) return null;
+    const n = 900;
+    const pts: Array<{ x: number; y: number }> = [];
+
+    // Allow large yClip by default so quadratic/cubic graphs are still sampled.
+    const yClip = Number.isFinite(p?.yClip) ? Number(p.yClip) : Math.max(200, Math.max(Math.abs(yMin), Math.abs(yMax)) * 200);
+    for (let i = 0; i <= n; i++) {
+      const x = xMin + (i / n) * (xMax - xMin);
+      let y: number;
+      try {
+        y = fn(x);
+      } catch {
+        // Break curve at discontinuity.
+        pts.push({ x: NaN, y: NaN });
+        continue;
+      }
+      if (!Number.isFinite(y) || Math.abs(y) > yClip) {
+        pts.push({ x: NaN, y: NaN });
+        continue;
+      }
+      pts.push({ x, y });
+    }
+
+    // Split on NaN markers.
+    const segs: Array<Array<{ x: number; y: number }>> = [];
+    let seg: Array<{ x: number; y: number }> = [];
+    for (const pt of pts) {
+      if (!Number.isFinite(pt.x) || !Number.isFinite(pt.y)) {
+        if (seg.length >= 2) segs.push(seg);
+        seg = [];
+        continue;
+      }
+      seg.push(pt);
+    }
+    if (seg.length >= 2) segs.push(seg);
+
+    return segs.map((s: any) => ({
+      kind: 'polyline',
+      points: s,
+      stroke: String(p?.stroke ?? '#111827'),
+      strokeWidth: Number.isFinite(p?.strokeWidth) ? Number(p.strokeWidth) : 2,
+    }));
+  };
+
+  for (const p of plot) {
+    if (p && typeof p === 'object' && p.kind === 'function') {
+      const polylines = sampleFnToPolyline(p);
+      if (Array.isArray(polylines) && polylines.length) {
+        outPlot.push(...polylines);
+        continue;
+      }
+      // If we can't serialize, drop it (it would be lost in JSON anyway).
+      continue;
+    }
+    outPlot.push(p);
+  }
+
+  return { ...spec, plot: outPlot };
 }
 
 function normalizeCommandToken(s: string): string {
@@ -1734,7 +1952,7 @@ export default function Practice() {
       if (!Array.isArray(blocks)) return blocks;
       return blocks.map((b) => {
         if (!b || typeof b !== 'object') return b;
-        if (b.kind === 'graph') return { kind: 'graph', altText: b.altText, graphSpec: b.graphSpec };
+        if (b.kind === 'graph') return { kind: 'graph', altText: b.altText, graphSpec: serializeGraphSpecForSnapshot(b.graphSpec) };
         if (b.kind === 'long_division') {
           return {
             kind: 'long_division',
@@ -1820,8 +2038,8 @@ export default function Practice() {
         correctIndex: q.correctIndex,
         katexExplanation: q.katexExplanation,
         generatorParams: q.generatorParams,
-        graphSpec: q.graphSpec,
-        secondaryGraphSpec: q.secondaryGraphSpec,
+        graphSpec: serializeGraphSpecForSnapshot(q.graphSpec),
+        secondaryGraphSpec: serializeGraphSpecForSnapshot(q.secondaryGraphSpec),
         svgDataUrl: (q as any).svgDataUrl,
         svgAltText: q.svgAltText,
         correctAnswerKatex,
@@ -3659,11 +3877,11 @@ export default function Practice() {
         </div>
       ) : step === 'session' && !question ? (
         <div className="w-full max-w-none mx-auto space-y-3 px-3 md:px-6">
-          <Card className="px-4 py-3">
-            <div className="flex items-center justify-between gap-3 min-h-12">
+          <Card className="p-4 md:p-5 rounded-2xl shadow-sm border-border/70">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
               <div className="flex items-center gap-3 min-w-0">
                 <Button
-                  variant="outline"
+                  variant="ghost"
                   size="icon"
                   onClick={() => {
                     setStep('chooser');
@@ -3680,17 +3898,25 @@ export default function Practice() {
                     setOnlyQuestionTextTopicScope(null);
                     setCommandText('');
                   }}
+                  className="h-10 w-10 rounded-full"
                 >
-                  <ArrowLeft className="h-5 w-5" />
+                  <MoveLeft className="h-5 w-5" />
                 </Button>
                 <div className="min-w-0">
-                  <div className="text-lg font-semibold leading-tight text-foreground truncate">Practice</div>
+                  <div className="text-lg font-semibold tracking-tight leading-tight text-foreground truncate">Practice</div>
                   <div className="text-xs text-muted-foreground">No question available.</div>
                 </div>
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
                 {isAdmin ? (
-                  <Button type="button" variant="outline" size="sm" onClick={() => setCommandModalOpen(true)} className="bg-white">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setCommandModalOpen(true)}
+                    className="rounded-full border-border/70 bg-muted/20 hover:bg-muted/40"
+                  >
+                    <Filter className="h-4 w-4 mr-2" />
                     Search / Filters
                   </Button>
                 ) : null}
@@ -3703,7 +3929,6 @@ export default function Practice() {
                     setSessionSeed(nextSeed);
                     generateNext(nextSeed);
                   }}
-                  className="bg-white"
                 >
                   Retry
                 </Button>
@@ -3718,11 +3943,11 @@ export default function Practice() {
 
       {step === 'session' && question ? (
         <div className="w-full max-w-none mx-auto space-y-3 px-3 md:px-6">
-          <Card className="px-4 py-3">
-            <div className="flex items-center justify-between gap-3 min-h-12">
+          <Card className="p-4 md:p-5 rounded-2xl shadow-sm border-border/70">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
               <div className="flex items-center gap-3 min-w-0">
                 <Button
-                  variant="outline"
+                  variant="ghost"
                   size="icon"
                   onClick={() => {
                     setStep('chooser');
@@ -3738,22 +3963,24 @@ export default function Practice() {
                     setOnlyQuestionTextTopicScope(null);
                     setCommandText('');
                   }}
+                  className="h-10 w-10 rounded-full"
                 >
-                  <ArrowLeft className="h-5 w-5" />
+                  <MoveLeft className="h-5 w-5" />
                 </Button>
                 <div className="min-w-0 select-none">
-                  <div className="text-lg font-semibold leading-tight text-foreground truncate">{currentTitle}</div>
+                  <div className="text-lg font-semibold tracking-tight leading-tight text-foreground truncate">{currentTitle}</div>
                 </div>
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
                 {isAdmin ? (
                   <Button
                     type="button"
                     variant="outline"
                     size="sm"
                     onClick={() => setCommandModalOpen(true)}
-                    className="bg-white"
+                    className="rounded-full border-border/70 bg-muted/20 hover:bg-muted/40"
                   >
+                    <Filter className="h-4 w-4 mr-2" />
                     Search / Filters
                   </Button>
                 ) : null}
@@ -3763,17 +3990,17 @@ export default function Practice() {
                   onClick={() => {
                     void openReportDialogWithCapture();
                   }}
-                  className="bg-white"
+                  className="rounded-full border-border/70 bg-background hover:bg-muted/30"
                 >
                   <Bug className="h-4 w-4 mr-2" />
                   Report issue
                 </Button>
                 <Button
                   type="button"
-                  variant="outline"
+                  variant="ghost"
                   size="icon"
                   onClick={() => setReportHelpOpen(true)}
-                  className="bg-white rounded-full"
+                  className="h-10 w-10 rounded-full border border-border/70 bg-background shadow-sm hover:bg-muted/30"
                   aria-label="Answer input help"
                   title="Answer input help"
                 >
@@ -3795,21 +4022,40 @@ export default function Practice() {
 
           {isAdmin ? (
             <Dialog open={commandModalOpen} onOpenChange={setCommandModalOpen}>
-              <DialogContent className="max-w-2xl">
+              <DialogContent className="max-w-3xl">
                 <DialogHeader>
-                  <DialogTitle>Search / Filters</DialogTitle>
+                  <DialogTitle>Filter questions</DialogTitle>
                   <DialogDescription>
-                    Type a keyword to filter questions. Admins can also use /only and /clear. Optionally select multiple question types.
+                    Search by keyword and (optionally) focus on specific question types. This helps you practise exactly what you want.
                   </DialogDescription>
                 </DialogHeader>
 
-                <div className="space-y-4">
+                <div className="space-y-5">
                   <div className="space-y-2">
-                    <Label>Keyword / Command</Label>
+                    <div className="flex items-end justify-between gap-3">
+                      <div className="space-y-1">
+                        <Label>Search</Label>
+                        <div className="text-xs text-muted-foreground">
+                          Example: <span className="font-medium text-foreground">gradient</span> or <span className="font-medium text-foreground">area</span>
+                        </div>
+                      </div>
+                      <div className="text-xs text-muted-foreground">
+                        Topic: {
+                          currentTopicForSearchScope
+                            ? (
+                              <span className="font-medium text-foreground">
+                                {PRACTICE_TOPICS.find((t) => t.id === currentTopicForSearchScope)?.title ?? currentTopicForSearchScope}
+                              </span>
+                            )
+                            : 'Current topic'
+                        }
+                      </div>
+                    </div>
+
                     <Input
                       value={commandText}
                       onChange={(e) => setCommandText(e.target.value)}
-                      placeholder={isAdmin ? '/only <keyword> or /only <topicId>:<variantId> or /clear' : 'Type a keyword (e.g. temperature)'}
+                      placeholder={'Type a keyword (admins can also use commands like /only or /clear)'}
                       onKeyDown={(e) => {
                         if (e.key === 'Enter') {
                           e.preventDefault();
@@ -3818,75 +4064,99 @@ export default function Practice() {
                         }
                       }}
                     />
-                    <div className="text-xs text-muted-foreground">
-                      Scope: {currentTopicForSearchScope ? <span className="font-mono">{currentTopicForSearchScope}</span> : 'current topic'}
+
+                    <div className="text-xs text-muted-foreground leading-relaxed">
+                      Admin commands:
+                      <span className="ml-1 font-mono">/only</span>
+                      <span className="mx-1">•</span>
+                      <span className="font-mono">/only &lt;topicId&gt;:&lt;typeId&gt;</span>
+                      <span className="mx-1">•</span>
+                      <span className="font-mono">/clear</span>
                     </div>
                   </div>
 
                   {availableVariantsForPicker.length ? (
                     <div className="space-y-2">
                       <div className="flex items-center justify-between gap-2">
-                        <Label>Question types (optional)</Label>
-                        {selectedVariantIdsForPicker.length ? (
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            onClick={() => setVariantMultiOverride(null)}
-                          >
-                            Clear types
-                          </Button>
-                        ) : null}
+                        <div className="space-y-1">
+                          <Label>Question types (optional)</Label>
+                          <div className="text-xs text-muted-foreground">
+                            Choose one or more types to focus your practice.
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          {selectedVariantIdsForPicker.length ? (
+                            <Button type="button" variant="outline" size="sm" onClick={() => setVariantMultiOverride(null)}>
+                              Clear selection
+                            </Button>
+                          ) : null}
+                        </div>
                       </div>
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                        {availableVariantsForPicker.map((v) => {
-                          const checked = selectedVariantIdsForPicker.includes(v);
-                          return (
-                            <label key={v} className="flex items-start gap-2 rounded-md border px-3 py-2 min-w-0">
-                              <Checkbox checked={checked} onCheckedChange={() => toggleVariantForPicker(v)} className="mt-0.5" />
-                              <span className="font-mono text-sm min-w-0 whitespace-normal break-all">{v}</span>
-                            </label>
-                          );
-                        })}
+
+                      <div className="max-h-[44vh] overflow-auto pr-1">
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                          {availableVariantsForPicker.map((v) => {
+                            const checked = selectedVariantIdsForPicker.includes(v);
+                            const title = titleForVariantId(currentTopicForVariantPicker, v);
+                            const description = describeVariantId(currentTopicForVariantPicker, v);
+
+                            return (
+                              <label
+                                key={v}
+                                className={
+                                  'flex items-start gap-3 rounded-lg border px-3 py-2 min-w-0 transition-colors cursor-pointer ' +
+                                  (checked ? 'bg-muted/60 border-foreground/20' : 'hover:bg-muted/40')
+                                }
+                              >
+                                <Checkbox checked={checked} onCheckedChange={() => toggleVariantForPicker(v)} className="mt-1" />
+                                <div className="min-w-0">
+                                  <div className="text-sm font-medium text-foreground leading-snug">{title}</div>
+                                  <div className="text-xs text-muted-foreground leading-snug mt-0.5">{description}</div>
+                                </div>
+                              </label>
+                            );
+                          })}
+                        </div>
                       </div>
+
                       <div className="text-xs text-muted-foreground">
-                        Selected types are applied only within the current topic.
+                        Selected types apply within the current topic.
                       </div>
                       {isAdmin && variantOverride ? (
-                        <div>
-                          Forced variant: <span className="font-mono text-foreground">{variantOverride.topicId}:{variantOverride.variantId}</span>
+                        <div className="text-xs text-muted-foreground">
+                          Forced type: <span className="font-mono text-foreground">{variantOverride.topicId}:{variantOverride.variantId}</span>
                         </div>
                       ) : null}
                     </div>
                   ) : null}
                 </div>
 
-              <DialogFooter>
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => {
-                    setVariantOverride(null);
-                    setVariantMultiOverride(null);
-                    setOnlyQuestionTextQuery('');
-                    setOnlyQuestionTextTopicScope(null);
-                    setCommandText('');
-                    toast.success('Cleared filters');
-                  }}
-                >
-                  Clear all
-                </Button>
-                <Button
-                  type="button"
-                  onClick={() => {
-                    applyCommandFromModal();
-                    setCommandModalOpen(false);
-                  }}
-                >
-                  Apply
-                </Button>
-              </DialogFooter>
-            </DialogContent>
+                <DialogFooter>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => {
+                      setVariantOverride(null);
+                      setVariantMultiOverride(null);
+                      setOnlyQuestionTextQuery('');
+                      setOnlyQuestionTextTopicScope(null);
+                      setCommandText('');
+                      toast.success('Cleared filters');
+                    }}
+                  >
+                    Clear all
+                  </Button>
+                  <Button
+                    type="button"
+                    onClick={() => {
+                      applyCommandFromModal();
+                      setCommandModalOpen(false);
+                    }}
+                  >
+                    Apply filters
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
             </Dialog>
           ) : null}
 

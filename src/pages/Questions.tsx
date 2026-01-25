@@ -61,6 +61,21 @@ export default function Questions() {
   const tags = useLiveQuery(() => db.tags.toArray(), [], []);
   const globalGlossary = useLiveQuery(() => db.globalGlossary.toArray(), [], []);
 
+  const totalsByType = useMemo(() => {
+    const out = { mcq: 0, text: 0, fill_blanks: 0, matching: 0 };
+    for (const q of questions ?? []) {
+      const t = (q as any)?.type;
+      if (t === 'mcq') out.mcq++;
+      else if (t === 'text') out.text++;
+      else if (t === 'fill_blanks') out.fill_blanks++;
+      else if (t === 'matching') out.matching++;
+    }
+    return out;
+  }, [questions]);
+
+  const totalCount = questions.length;
+  const hasActiveFilters = searchQuery.trim().length > 0 || typeFilter !== 'all' || tagFilter !== 'all';
+
   const questionsStructurallyMatch = useCallback((a: any, b: any): boolean => {
     if (!a || !b) return false;
     if (a.type !== b.type) return false;
@@ -126,9 +141,20 @@ export default function Questions() {
     const { importedQuestions, newQuestions, duplicateQuestions, existingQuestionsSnapshot } = pendingImport;
 
     try {
-      await db.transaction('rw', db.questions, async () => {
+      await db.transaction('rw', db.questions, db.tags, async () => {
+        const now = Date.now();
+
         const existingIds = new Set<string>();
         const existingCodes = new Set<string>();
+
+        const existingTags = await db.tags.toArray();
+        const normalizeTagKey = (s: unknown) => String(s ?? '').trim().toLowerCase();
+        const tagByKey = new Map<string, any>();
+        for (const t of existingTags as any[]) {
+          const key = normalizeTagKey(t?.name);
+          if (!key) continue;
+          if (!tagByKey.has(key)) tagByKey.set(key, t);
+        }
 
         for (const q of existingQuestionsSnapshot as any[]) {
           if (q?.id) existingIds.add(String(q.id));
@@ -168,6 +194,33 @@ export default function Questions() {
             const suffix = String(q.id).slice(0, 8);
             q.code = `Q-${suffix}`;
           }
+
+          const rawTags = Array.isArray(q?.tags) ? q.tags : [];
+          const nextTags: string[] = [];
+          const seenKeys = new Set<string>();
+          const newTagRecords: any[] = [];
+
+          for (const raw of rawTags) {
+            const key = normalizeTagKey(raw);
+            if (!key || seenKeys.has(key)) continue;
+            seenKeys.add(key);
+
+            const existing = tagByKey.get(key);
+            if (existing?.name) {
+              nextTags.push(String(existing.name));
+              continue;
+            }
+
+            const name = String(raw ?? '').trim();
+            if (!name) continue;
+            const rec = { id: uuidv4(), name, createdAt: now };
+            tagByKey.set(key, rec);
+            newTagRecords.push(rec);
+            nextTags.push(name);
+          }
+
+          if (newTagRecords.length) await db.tags.bulkPut(newTagRecords);
+          q.tags = nextTags;
         }
 
         if (questionsToImport.length > 0) {
@@ -222,8 +275,19 @@ export default function Questions() {
         setPendingImport(nextPending);
 
         if (duplicateQuestions.length === 0) {
-          await db.transaction('rw', db.questions, async () => {
+          await db.transaction('rw', db.questions, db.tags, async () => {
+            const now = Date.now();
             const existingIds = new Set<string>((existingQuestions as any[]).map((q) => String(q?.id ?? '')).filter(Boolean));
+
+            const existingTags = await db.tags.toArray();
+            const normalizeTagKey = (s: unknown) => String(s ?? '').trim().toLowerCase();
+            const tagByKey = new Map<string, any>();
+            for (const t of existingTags as any[]) {
+              const key = normalizeTagKey(t?.name);
+              if (!key) continue;
+              if (!tagByKey.has(key)) tagByKey.set(key, t);
+            }
+
             const toPut = importedQuestions.map((q) => ({ ...q }));
             for (const q of toPut) {
               if (!q?.id || existingIds.has(String(q.id))) {
@@ -236,6 +300,33 @@ export default function Questions() {
                 const suffix = String(q.id).slice(0, 8);
                 q.code = `Q-${suffix}`;
               }
+
+              const rawTags = Array.isArray(q?.tags) ? q.tags : [];
+              const nextTags: string[] = [];
+              const seenKeys = new Set<string>();
+              const newTagRecords: any[] = [];
+
+              for (const raw of rawTags) {
+                const key = normalizeTagKey(raw);
+                if (!key || seenKeys.has(key)) continue;
+                seenKeys.add(key);
+
+                const existing = tagByKey.get(key);
+                if (existing?.name) {
+                  nextTags.push(String(existing.name));
+                  continue;
+                }
+
+                const name = String(raw ?? '').trim();
+                if (!name) continue;
+                const rec = { id: uuidv4(), name, createdAt: now };
+                tagByKey.set(key, rec);
+                newTagRecords.push(rec);
+                nextTags.push(name);
+              }
+
+              if (newTagRecords.length) await db.tags.bulkPut(newTagRecords);
+              q.tags = nextTags;
             }
             await db.questions.bulkPut(toPut);
           });
@@ -529,8 +620,40 @@ export default function Questions() {
       </Dialog>
 
       {/* Filters */}
-      <Card className="p-6">
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <Card className="p-6 rounded-2xl shadow-sm">
+        <div className="flex items-start justify-between gap-4">
+          <div className="min-w-0">
+            <div className="text-lg font-semibold tracking-tight text-foreground">Find questions</div>
+            <div className="mt-1 text-sm text-muted-foreground">
+              Showing <span className="font-medium text-foreground">{filteredQuestions.length}</span> of{' '}
+              <span className="font-medium text-foreground">{totalCount}</span>
+              {selectedIds.length ? (
+                <>
+                  {' '}
+                  · Selected <span className="font-medium text-foreground">{selectedIds.length}</span>
+                </>
+              ) : null}
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            {hasActiveFilters ? (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  setSearchQuery('');
+                  setTypeFilter('all');
+                  setTagFilter('all');
+                }}
+              >
+                Clear filters
+              </Button>
+            ) : null}
+          </div>
+        </div>
+
+        <div className="mt-5 grid grid-cols-1 md:grid-cols-3 gap-4">
           <div className="relative">
             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <Input
@@ -571,38 +694,137 @@ export default function Questions() {
       </Card>
 
       {/* Stats */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <Card className="p-6">
-          <div className="flex items-center justify-between">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
+        <Card className="p-6 rounded-2xl shadow-sm">
+          <div className="flex items-start justify-between gap-4">
             <div>
               <p className="text-sm text-muted-foreground">Total Questions</p>
               <p className="text-3xl font-bold text-foreground mt-1">{questions.length}</p>
+              <div className="mt-2 text-xs text-muted-foreground">
+                {hasActiveFilters ? (
+                  <>
+                    After filters: <span className="font-medium text-foreground">{filteredQuestions.length}</span>
+                  </>
+                ) : (
+                  <>
+                    Use filters to narrow results
+                  </>
+                )}
+              </div>
             </div>
             <FileQuestion className="h-12 w-12 text-primary opacity-20" />
           </div>
         </Card>
 
-        <Card className="p-6">
-          <div className="flex items-center justify-between">
+        <Card
+          className="p-6 rounded-2xl shadow-sm cursor-pointer hover:shadow-md transition-shadow"
+          onClick={() => setTypeFilter('mcq')}
+        >
+          <div className="flex items-start justify-between gap-4">
             <div>
               <p className="text-sm text-muted-foreground">Multiple Choice</p>
               <p className="text-3xl font-bold text-foreground mt-1">
-                {questions.filter(q => q.type === 'mcq').length}
+                {totalsByType.mcq}
               </p>
+              <div className="mt-2 space-y-1">
+                <div className="text-xs text-muted-foreground">
+                  {totalCount ? <span>{Math.round((totalsByType.mcq / totalCount) * 100)}% of total</span> : '—'}
+                  <span className="text-muted-foreground"> · </span>
+                  <span>Show only</span>
+                </div>
+                <div className="h-1.5 rounded-full bg-muted overflow-hidden">
+                  <div
+                    className="h-full bg-accent"
+                    style={{ width: `${totalCount ? Math.round((totalsByType.mcq / totalCount) * 100) : 0}%` }}
+                  />
+                </div>
+              </div>
             </div>
             <FileQuestion className="h-12 w-12 text-accent opacity-20" />
           </div>
         </Card>
 
-        <Card className="p-6">
-          <div className="flex items-center justify-between">
+        <Card
+          className="p-6 rounded-2xl shadow-sm cursor-pointer hover:shadow-md transition-shadow"
+          onClick={() => setTypeFilter('text')}
+        >
+          <div className="flex items-start justify-between gap-4">
             <div>
               <p className="text-sm text-muted-foreground">Free Text</p>
               <p className="text-3xl font-bold text-foreground mt-1">
-                {questions.filter(q => q.type === 'text').length}
+                {totalsByType.text}
               </p>
+              <div className="mt-2 space-y-1">
+                <div className="text-xs text-muted-foreground">
+                  {totalCount ? <span>{Math.round((totalsByType.text / totalCount) * 100)}% of total</span> : '—'}
+                  <span className="text-muted-foreground"> · </span>
+                  <span>Show only</span>
+                </div>
+                <div className="h-1.5 rounded-full bg-muted overflow-hidden">
+                  <div
+                    className="h-full bg-success"
+                    style={{ width: `${totalCount ? Math.round((totalsByType.text / totalCount) * 100) : 0}%` }}
+                  />
+                </div>
+              </div>
             </div>
             <FileQuestion className="h-12 w-12 text-success opacity-20" />
+          </div>
+        </Card>
+
+        <Card
+          className="p-6 rounded-2xl shadow-sm cursor-pointer hover:shadow-md transition-shadow"
+          onClick={() => setTypeFilter('fill_blanks')}
+        >
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <p className="text-sm text-muted-foreground">Fill in the Blanks</p>
+              <p className="text-3xl font-bold text-foreground mt-1">
+                {totalsByType.fill_blanks}
+              </p>
+              <div className="mt-2 space-y-1">
+                <div className="text-xs text-muted-foreground">
+                  {totalCount ? <span>{Math.round((totalsByType.fill_blanks / totalCount) * 100)}% of total</span> : '—'}
+                  <span className="text-muted-foreground"> · </span>
+                  <span>Show only</span>
+                </div>
+                <div className="h-1.5 rounded-full bg-muted overflow-hidden">
+                  <div
+                    className="h-full bg-primary"
+                    style={{ width: `${totalCount ? Math.round((totalsByType.fill_blanks / totalCount) * 100) : 0}%` }}
+                  />
+                </div>
+              </div>
+            </div>
+            <FileQuestion className="h-12 w-12 text-primary opacity-20" />
+          </div>
+        </Card>
+
+        <Card
+          className="p-6 rounded-2xl shadow-sm cursor-pointer hover:shadow-md transition-shadow"
+          onClick={() => setTypeFilter('matching')}
+        >
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <p className="text-sm text-muted-foreground">Matching</p>
+              <p className="text-3xl font-bold text-foreground mt-1">
+                {totalsByType.matching}
+              </p>
+              <div className="mt-2 space-y-1">
+                <div className="text-xs text-muted-foreground">
+                  {totalCount ? <span>{Math.round((totalsByType.matching / totalCount) * 100)}% of total</span> : '—'}
+                  <span className="text-muted-foreground"> · </span>
+                  <span>Show only</span>
+                </div>
+                <div className="h-1.5 rounded-full bg-muted overflow-hidden">
+                  <div
+                    className="h-full bg-muted-foreground"
+                    style={{ width: `${totalCount ? Math.round((totalsByType.matching / totalCount) * 100) : 0}%` }}
+                  />
+                </div>
+              </div>
+            </div>
+            <FileQuestion className="h-12 w-12 text-muted-foreground opacity-20" />
           </div>
         </Card>
       </div>

@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { toast } from 'sonner';
-import { LogIn } from 'lucide-react';
+import { LogIn, MoveLeft, RefreshCw } from 'lucide-react';
 import { HOME_ROUTE } from '@/constants/routes';
 import { createAdminAccount, unlockAdminVault, updateAdminAccount } from '@/lib/adminVault';
 
@@ -351,21 +351,27 @@ export default function Login() {
 	};
 
   return (
-    <div className="relative min-h-screen w-full overflow-hidden bg-gradient-to-br from-primary/20 via-emerald-50 to-sky-50 p-4 flex items-center justify-center">
+    <div className="relative min-h-screen w-full overflow-hidden bg-[linear-gradient(180deg,rgba(255,153,51,0.22)_0%,rgba(255,255,255,0.92)_45%,rgba(19,136,8,0.20)_100%)] p-4 flex items-center justify-center">
       <div aria-hidden className="pointer-events-none absolute inset-0">
-        <div className="absolute -top-32 -left-32 h-[520px] w-[520px] rounded-full bg-primary/20 blur-3xl" />
-        <div className="absolute -bottom-40 -right-40 h-[560px] w-[560px] rounded-full bg-emerald-300/25 blur-3xl" />
-        <div className="absolute inset-0 opacity-[0.06]" style={{ backgroundImage: 'radial-gradient(currentColor 1px, transparent 1px)', backgroundSize: '18px 18px' }} />
+        <div className="absolute -top-32 -left-32 h-[520px] w-[520px] rounded-full bg-orange-400/25 blur-3xl" />
+        <div className="absolute -bottom-40 -right-40 h-[560px] w-[560px] rounded-full bg-green-400/20 blur-3xl" />
+        <div
+          className="absolute inset-0 opacity-[0.06]"
+          style={{
+            backgroundImage: 'radial-gradient(currentcolor 1px, transparent 1px)',
+            backgroundSize: '18px 18px',
+          }}
+        />
       </div>
 
 
-      <Card className="relative w-full max-w-md p-6 md:p-8 shadow-xl border-border/70 bg-white/80 backdrop-blur supports-[backdrop-filter]:bg-white/70 max-h-[92vh] overflow-hidden">
+      <Card className="relative w-full max-w-md p-6 md:p-8 rounded-2xl shadow-xl border border-border/70 bg-white/80 backdrop-blur supports-[backdrop-filter]:bg-white/70 ring-1 ring-black/5 max-h-[92vh] overflow-hidden">
 			<div className="space-y-6 overflow-y-auto pr-1">
         <div className="text-center space-y-2">
-          <div className="mx-auto w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center">
+          <div className="mx-auto w-16 h-16 rounded-2xl bg-gradient-to-br from-orange-500/15 via-primary/10 to-green-500/15 border border-border/70 flex items-center justify-center shadow-sm">
             <LogIn className="h-8 w-8 text-primary" />
           </div>
-          <h1 className="text-2xl font-bold text-foreground">Welcome</h1>
+          <h1 className="text-2xl font-bold tracking-tight text-foreground">Welcome</h1>
           <p className="text-sm text-muted-foreground">
             Sign in to continue
           </p>
@@ -407,7 +413,7 @@ export default function Login() {
 
           <Button
             type="submit"
-            className="w-full"
+            className="w-full uppercase tracking-wide"
             size="lg"
             disabled={isLoading}
           >
@@ -417,11 +423,48 @@ export default function Login() {
 
 			{showConsole ? (
 				<div className="pt-4 border-t border-border/60">
-				<div className="text-xs font-medium text-muted-foreground mb-2">Console</div>
-				<div
-					ref={consoleScrollRef}
-					className="h-32 md:h-40 rounded-md border border-border/70 bg-black/90 text-white/90 p-3 font-mono text-xs overflow-auto"
-				>
+				<div className="flex items-center justify-between gap-3 mb-2">
+					<div className="min-w-0">
+						<div className="text-xs font-medium text-muted-foreground">Console</div>
+						<div className="text-[11px] text-muted-foreground">Admin tools</div>
+					</div>
+					<div className="flex items-center gap-2 shrink-0">
+						<Button
+							type="button"
+							variant="outline"
+							size="sm"
+							onClick={() => {
+								setShowConsole(false);
+								setConsoleLines([]);
+								setConsoleInput('');
+								resetWizard();
+							}}
+							className="rounded-full"
+						>
+							<MoveLeft className="h-4 w-4 mr-2" />
+							Back
+						</Button>
+						<Button
+							type="button"
+							variant="outline"
+							size="icon"
+							aria-label="Refresh console"
+							onClick={() => {
+								setConsoleLines([]);
+								setConsoleInput('');
+								resetWizard();
+							}}
+							className="rounded-full"
+						>
+							<RefreshCw className="h-4 w-4" />
+						</Button>
+					</div>
+				</div>
+				<div className="rounded-xl border border-border/70 bg-muted/20 p-3">
+					<div
+						ref={consoleScrollRef}
+						className="h-32 md:h-40 rounded-lg border border-border/70 bg-neutral-950 text-white/90 p-3 font-mono text-xs overflow-auto shadow-inner"
+					>
 					{consoleLines.length ? (
 						consoleLines.map((l) => (
 							<div key={l.id} className="whitespace-pre-wrap leading-relaxed">
@@ -433,40 +476,41 @@ export default function Login() {
 							Type <span className="text-white">\\createusername.tempadmin</span> and press Enter to begin creating a new admin.
 						</div>
 					)}
-				</div>
-				<div className="mt-2 flex items-center gap-2">
-					<div className="shrink-0 text-xs font-mono text-muted-foreground">{consolePrompt}</div>
-					<Input
-						ref={consoleInputRef}
-						value={consoleInput}
-						onChange={(e) => {
-							if (wizardStage === 'otp_verify') {
-								setConsoleInput(e.target.value.replace(/[^0-9]/g, '').slice(0, 5));
-								return;
-							}
-							setConsoleInput(e.target.value);
-						}}
-						onKeyDown={(e) => {
-							if (e.key === 'Enter') {
-								e.preventDefault();
-								void handleConsoleEnter();
-							}
-						}}
-						onPaste={(e) => {
-							if (canDisableClipboard) e.preventDefault();
-						}}
-						onCopy={(e) => {
-							if (canDisableClipboard) e.preventDefault();
-						}}
-						onCut={(e) => {
-							if (canDisableClipboard) e.preventDefault();
-						}}
-						placeholder={wizardStage === 'idle' ? 'Type a command…' : 'Type and press Enter…'}
-						className="h-9 min-w-0"
-					/>
-					<Button type="button" variant="secondary" className="h-9 shrink-0" onClick={() => void handleConsoleEnter()}>
-						Enter
-					</Button>
+					</div>
+					<div className="mt-3 flex items-center gap-2">
+						<div className="shrink-0 text-xs font-mono text-muted-foreground">{consolePrompt}</div>
+						<Input
+							ref={consoleInputRef}
+							value={consoleInput}
+							onChange={(e) => {
+								if (wizardStage === 'otp_verify') {
+									setConsoleInput(e.target.value.replace(/[^0-9]/g, '').slice(0, 5));
+									return;
+								}
+								setConsoleInput(e.target.value);
+							}}
+							onKeyDown={(e) => {
+								if (e.key === 'Enter') {
+									e.preventDefault();
+									void handleConsoleEnter();
+								}
+							}}
+							onPaste={(e) => {
+								if (canDisableClipboard) e.preventDefault();
+							}}
+							onCopy={(e) => {
+								if (canDisableClipboard) e.preventDefault();
+							}}
+							onCut={(e) => {
+								if (canDisableClipboard) e.preventDefault();
+							}}
+							placeholder={wizardStage === 'idle' ? 'Type a command…' : 'Type and press Enter…'}
+							className="h-9 min-w-0 bg-background"
+						/>
+						<Button type="button" variant="secondary" className="h-9 shrink-0" onClick={() => void handleConsoleEnter()}>
+							Enter
+						</Button>
+					</div>
 				</div>
 			</div>
 			) : null}

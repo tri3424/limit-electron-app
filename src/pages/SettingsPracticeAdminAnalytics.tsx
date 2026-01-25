@@ -14,9 +14,67 @@ import InteractiveGraph from '@/components/InteractiveGraph';
 import { PolynomialLongDivision } from '@/components/PolynomialLongDivision';
 import { PromptBlocksFlow } from '@/components/PromptBlocksFlow';
 import { PRACTICE_TOPICS } from '@/lib/practiceTopics';
+import { CustomDatePicker } from '@/components/CustomDatePicker';
 
 function toDateKey(ts: number): string {
   return new Date(ts).toISOString().slice(0, 10);
+}
+
+function stableStringify(value: unknown): string {
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return '';
+  }
+}
+
+function renderInlineKatexText(raw: string) {
+  const s0 = String(raw ?? '');
+  if (!s0.trim()) return s0;
+
+  // Convert explicit inline delimiters \( ... \) into tokens.
+  const tokenized = s0.split(/(\\\([\s\S]*?\\\))/g).filter((p) => p.length > 0);
+
+  const parts: Array<{ kind: 'text' | 'math'; value: string }> = [];
+  for (const t of tokenized) {
+    const isInline = t.startsWith('\\(') && t.endsWith('\\)');
+    if (isInline) {
+      parts.push({ kind: 'math', value: t.slice(2, -2) });
+      continue;
+    }
+
+    // Also support common LaTeX fragments that appear in plain text.
+    const normalized = t
+      .replace(/\b(sin|cos|tan|sec|csc|cot)\s*\(/g, '\\$1(')
+      .replace(/\|([^|]+)\|/g, String.raw`\\left|$1\\right|`);
+
+    const hasLatex = /\\left\||\\right\||\\sin\b|\\cos\b|\\tan\b|\\sec\b|\\csc\b|\\cot\b|\\frac\{|\\(?:dfrac|tfrac)\{|\\sqrt\b|\\pi\b|\\ln\b|\\log\b|\\cdot\b|\\int\b|\^\{|\^\d|_\{|_\d/.test(
+      normalized,
+    );
+    if (!hasLatex) {
+      parts.push({ kind: 'text', value: t });
+      continue;
+    }
+
+    const splitParts = normalized.split(
+      /(\\left\|[\s\S]*?\\right\||\\(?:frac|dfrac|tfrac)\{[^}]+\}\{[^}]+\}|\\sqrt\{[^}]+\}|\\sqrt\[[^\]]+\]\{[^}]+\}|\\pi\b|\\ln\b|\\log(?:_\{[^}]+\}|_{[^}]+})?\b|\\sin\b|\\cos\b|\\tan\b|\\sec\b|\\csc\b|\\cot\b|\\cdot|\\int\b|-?\d*x\^\{\d+\}|x\^\{\d+\}|-?\d*x\^\d+|x\^\d+|-?\d*x_\{[^}]+\}|x_\{[^}]+\}|-?\d*x_\d+|x_\d+)/g,
+    );
+
+    for (const p of splitParts.filter((x) => x.length > 0)) {
+      const isMath = /^(\\left\|[\s\S]*?\\right\||\\(?:frac|dfrac|tfrac)\{[^}]+\}\{[^}]+\}|\\sqrt\{[^}]+\}|\\sqrt\[[^\]]+\]\{[^}]+\}|\\pi\b|\\ln\b|\\log(?:_\{[^}]+\}|_{[^}]+})?\b|\\sin\b|\\cos\b|\\tan\b|\\sec\b|\\csc\b|\\cot\b|\\cdot|\\int\b|-?\d*x\^\{\d+\}|x\^\{\d+\}|-?\d*x\^\d+|x\^\d+|-?\d*x_\{[^}]+\}|x_\{[^}]+\}|-?\d*x_\d+|x_\d+)$/.test(
+        p,
+      );
+      parts.push({ kind: isMath ? 'math' : 'text', value: isMath ? p : p });
+    }
+  }
+
+  return (
+    <span className="whitespace-normal break-words">
+      {parts.map((p, i) =>
+        p.kind === 'math' ? <Katex key={i} latex={p.value} /> : <span key={i}>{p.value}</span>
+      )}
+    </span>
+  );
 }
 
 function formatDateKey(date: string): string {
@@ -32,6 +90,35 @@ function topicTitle(topicId: string | undefined, mode: 'individual' | 'mixed'): 
   if (mode === 'mixed' && id === 'mixed') return 'Mixed Exercises';
   const hit = PRACTICE_TOPICS.find((t) => t.id === id);
   return hit?.title ?? id;
+}
+
+function humanizeVariantId(raw: string): string {
+  const tokens = String(raw ?? '')
+    .trim()
+    .split('_')
+    .map((t) => t.trim())
+    .filter(Boolean);
+  if (!tokens.length) return '—';
+
+  const mapToken = (t: string) => {
+    const lower = t.toLowerCase();
+    if (lower === 'mcq') return 'Multiple-choice';
+    if (lower === 'coords') return 'coordinates';
+    if (lower === 'coord') return 'coordinate';
+    if (lower === 'xaxis') return 'x-axis';
+    if (lower === 'yaxis') return 'y-axis';
+    if (lower === 'hm') return 'hours & minutes';
+    if (lower === 'ampm') return 'AM/PM';
+    if (lower === 'ln') return 'ln';
+    if (lower === 'log10') return 'log₁₀';
+    if (lower === 'gcf') return 'greatest common factor';
+    if (lower === 'pqr') return 'p, q, r';
+    if (lower === 'abc') return 'a, b, c';
+    return lower;
+  };
+
+  const titleCase = (s: string) => s.replace(/\b\w/g, (c) => c.toUpperCase());
+  return titleCase(tokens.map(mapToken).join(' ').replace(/\s+/g, ' ').trim());
 }
 
 function looksLikeLatex(s: string): boolean {
@@ -58,6 +145,18 @@ function fmtMs(ms: number): string {
   return `${Math.round(ms / 1000)}s`;
 }
 
+function isValidDateKey(s: string): boolean {
+  return /^\d{4}-\d{2}-\d{2}$/.test(String(s ?? '').trim());
+}
+
+function inDateKeyRange(dateKey: string, startKey: string | null, endKey: string | null): boolean {
+  const d = String(dateKey ?? '').trim();
+  if (!isValidDateKey(d)) return false;
+  if (startKey && d < startKey) return false;
+  if (endKey && d > endKey) return false;
+  return true;
+}
+
 type DayRow = {
   date: string;
   total: number;
@@ -78,25 +177,47 @@ export default function SettingsPracticeAdminAnalytics() {
   }, [users]);
 
   const [userId, setUserId] = useState<string>(() => usersWithAdmin?.[0]?.id ?? '');
-  const [dateFilter, setDateFilter] = useState<string>('all');
+  const [startDate, setStartDate] = useState<string>('');
+  const [endDate, setEndDate] = useState<string>('');
+  const [selectedDayKey, setSelectedDayKey] = useState<string>('');
 
   const events = useLiveQuery(async () => {
     if (!userId) return [];
     return db.practiceEvents.where('userId').equals(userId).toArray();
   }, [userId]) || [];
 
+  const normalizedStartDate = useMemo(() => (isValidDateKey(startDate) ? startDate : ''), [startDate]);
+  const normalizedEndDate = useMemo(() => (isValidDateKey(endDate) ? endDate : ''), [endDate]);
+  const dateRange = useMemo(() => {
+    const s = normalizedStartDate || '';
+    const e = normalizedEndDate || '';
+    if (s && e && s > e) return { start: e, end: s };
+    return { start: s, end: e };
+  }, [normalizedEndDate, normalizedStartDate]);
+
+  const filteredEvents = useMemo(() => {
+    const startKey = dateRange.start || null;
+    const endKey = dateRange.end || null;
+    if (!startKey && !endKey) return events;
+    return events.filter((ev: any) => {
+      const usedTs = typeof ev.submittedAt === 'number' ? ev.submittedAt : ev.shownAt;
+      const key = toDateKey(usedTs);
+      return inDateKeyRange(key, startKey, endKey);
+    });
+  }, [dateRange.end, dateRange.start, events]);
+
   const dayRows = useMemo(() => {
     const buckets = new Map<string, { total: number; correct: number; wrong: number; totalTimeMs: number }>();
 
-    for (const e of events) {
+    for (const e of filteredEvents) {
       const usedTs = typeof e.submittedAt === 'number' ? e.submittedAt : e.shownAt;
       const date = toDateKey(usedTs);
       const b = buckets.get(date) ?? { total: 0, correct: 0, wrong: 0, totalTimeMs: 0 };
       b.total += 1;
       if (e.isCorrect === true) b.correct += 1;
       if (e.isCorrect === false) b.wrong += 1;
-      const end = typeof e.submittedAt === 'number' ? e.submittedAt : typeof e.nextAt === 'number' ? e.nextAt : undefined;
-      if (typeof end === 'number') b.totalTimeMs += Math.max(0, end - e.shownAt);
+      const endTs = typeof e.submittedAt === 'number' ? e.submittedAt : typeof e.nextAt === 'number' ? e.nextAt : undefined;
+      if (typeof endTs === 'number') b.totalTimeMs += Math.max(0, endTs - e.shownAt);
       buckets.set(date, b);
     }
 
@@ -108,23 +229,37 @@ export default function SettingsPracticeAdminAnalytics() {
     }
     out.sort((a, b) => (a.date < b.date ? 1 : -1));
     return out;
-  }, [events]);
-
-  const availableDates = useMemo(() => {
-    const s = new Set<string>();
-    for (const r of dayRows) s.add(r.date);
-    return Array.from(s).sort((a, b) => (a < b ? 1 : -1));
-  }, [dayRows]);
+  }, [filteredEvents]);
 
   const filteredTimeline = useMemo(() => {
-    const out = [...events];
+    const day = isValidDateKey(selectedDayKey) ? selectedDayKey : '';
+    const base = day
+      ? (filteredEvents as any[]).filter((ev) => {
+          const usedTs = typeof ev.submittedAt === 'number' ? ev.submittedAt : ev.shownAt;
+          return toDateKey(usedTs) === day;
+        })
+      : filteredEvents;
+
+    const out = [...base];
     out.sort((a, b) => (b.shownAt ?? 0) - (a.shownAt ?? 0));
-    if (dateFilter === 'all') return out;
-    return out.filter((e) => {
-      const usedTs = typeof e.submittedAt === 'number' ? e.submittedAt : e.shownAt;
-      return toDateKey(usedTs) === dateFilter;
-    });
-  }, [dateFilter, events]);
+    return out;
+  }, [filteredEvents, selectedDayKey]);
+
+  const rangeSummary = useMemo(() => {
+    const total = filteredEvents.length;
+    let correct = 0;
+    let wrong = 0;
+    let totalTimeMs = 0;
+    for (const e of filteredEvents as any[]) {
+      if (e.isCorrect === true) correct += 1;
+      if (e.isCorrect === false) wrong += 1;
+      const endTs = typeof e.submittedAt === 'number' ? e.submittedAt : typeof e.nextAt === 'number' ? e.nextAt : undefined;
+      if (typeof endTs === 'number') totalTimeMs += Math.max(0, endTs - e.shownAt);
+    }
+    const accuracy = total > 0 ? Math.round((correct / total) * 100) : 0;
+    const avgTimeMs = total > 0 ? Math.round(totalTimeMs / total) : 0;
+    return { total, correct, wrong, accuracy, avgTimeMs };
+  }, [filteredEvents]);
 
   const [open, setOpen] = useState(false);
   const [selected, setSelected] = useState<any>(null);
@@ -145,21 +280,52 @@ export default function SettingsPracticeAdminAnalytics() {
     return (
       <PromptBlocksFlow
         blocks={blocks as any}
-        className="text-xl leading-relaxed"
+        className="text-xl leading-relaxed whitespace-normal break-words max-w-full"
         textClassName="font-slab"
         align="left"
       />
     );
   }, []);
 
-  const renderExplanationBlocks = useCallback((blocks: any[]) => {
+  const graphDiagramKey = useCallback((graphSpec: any) => {
+    const s = stableStringify(graphSpec);
+    return s ? `graph:${s}` : '';
+  }, []);
+
+  const svgDiagramKey = useCallback((svgDataUrl: any) => {
+    const s = String(svgDataUrl ?? '');
+    return s ? `svg:${s}` : '';
+  }, []);
+
+  const baseDiagramKeys = useMemo(() => {
+    const out: string[] = [];
+    if (detailSnapshot?.svgDataUrl) {
+      const k = svgDiagramKey(detailSnapshot.svgDataUrl);
+      if (k) out.push(k);
+    }
+    if (detailSnapshot?.graphSpec) {
+      const k = graphDiagramKey(detailSnapshot.graphSpec);
+      if (k) out.push(k);
+    }
+    if (detailSnapshot?.secondaryGraphSpec) {
+      const k = graphDiagramKey(detailSnapshot.secondaryGraphSpec);
+      if (k) out.push(k);
+    }
+    return out;
+  }, [detailSnapshot?.graphSpec, detailSnapshot?.secondaryGraphSpec, detailSnapshot?.svgDataUrl, graphDiagramKey, svgDiagramKey]);
+
+  const renderExplanationBlocks = useCallback((blocks: any[], seenDiagramKeys?: Set<string>) => {
     if (!Array.isArray(blocks) || !blocks.length) return null;
     return (
       <div className="space-y-2">
         {blocks.map((b: any, idx: number) => {
           if (!b || typeof b !== 'object') return null;
           if (b.kind === 'text') {
-            return <div key={idx} className="text-sm leading-relaxed text-foreground">{String(b.content ?? '')}</div>;
+            return (
+              <div key={idx} className="text-sm leading-relaxed text-foreground whitespace-normal break-words">
+                {renderInlineKatexText(String(b.content ?? ''))}
+              </div>
+            );
           }
           if (b.kind === 'math') {
             return (
@@ -179,6 +345,9 @@ export default function SettingsPracticeAdminAnalytics() {
             );
           }
           if (b.kind === 'graph' && b.graphSpec) {
+            const key = graphDiagramKey(b.graphSpec);
+            if (key && seenDiagramKeys && seenDiagramKeys.has(key)) return null;
+            if (key && seenDiagramKeys) seenDiagramKeys.add(key);
             return (
               <div key={idx} className="space-y-2">
                 <div className="text-xs text-muted-foreground">{String(b.altText ?? 'Graph')}</div>
@@ -204,31 +373,31 @@ export default function SettingsPracticeAdminAnalytics() {
         })}
       </div>
     );
-  }, []);
+  }, [graphDiagramKey]);
 
   return (
-    <div className="max-w-6xl mx-auto space-y-6 py-8">
-      <div className="flex items-start justify-between gap-4">
+    <div className="max-w-6xl mx-auto space-y-8 px-4 md:px-6 py-8">
+      <div className="flex items-start justify-between gap-6">
         <div className="min-w-0">
           <div className="flex items-center gap-3">
             <Button variant="outline" size="sm" onClick={() => navigate('/settings/practice-admin')}>
               <ArrowLeft className="h-4 w-4 mr-2" />
               Back
             </Button>
-            <h1 className="text-3xl font-bold text-foreground">Practice Analytics</h1>
+            <h1 className="text-3xl font-bold tracking-tight text-foreground">Practice Analytics</h1>
           </div>
-          <div className="text-muted-foreground mt-2">
-            Daily performance and question timeline (newest first).
+          <div className="text-sm text-muted-foreground mt-2 leading-relaxed">
+            Track daily performance and review question attempts.
           </div>
         </div>
       </div>
 
-      <Card className="p-5">
+      <Card className="p-6 rounded-2xl shadow-sm">
         <div className="flex items-start gap-3">
           <BarChart3 className="h-5 w-5 text-primary mt-0.5" />
           <div className="min-w-0 flex-1">
-            <div className="text-lg font-semibold">Filters</div>
-            <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-3">
+            <div className="text-lg font-semibold tracking-tight">Filters</div>
+            <div className="mt-4 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
               <div>
                 <div className="text-xs text-muted-foreground mb-1">User</div>
                 <Select value={userId || ''} onValueChange={(v) => setUserId(v)}>
@@ -245,20 +414,43 @@ export default function SettingsPracticeAdminAnalytics() {
                 </Select>
               </div>
               <div>
-                <div className="text-xs text-muted-foreground mb-1">Date</div>
-                <Select value={dateFilter} onValueChange={(v) => setDateFilter(v)}>
-                  <SelectTrigger className="h-9">
-                    <SelectValue placeholder="All" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All dates</SelectItem>
-                    {availableDates.map((d) => (
-                      <SelectItem key={d} value={d}>
-                        {d}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <div className="text-xs text-muted-foreground mb-1">Start date</div>
+                <CustomDatePicker
+                  value={dateRange.start || undefined}
+                  onChange={(v) => {
+                    setStartDate(v);
+                    setSelectedDayKey('');
+                    if (normalizedEndDate && v && v > normalizedEndDate) setEndDate(v);
+                  }}
+                  placeholder="Start"
+                />
+              </div>
+              <div>
+                <div className="text-xs text-muted-foreground mb-1">End date</div>
+                <CustomDatePicker
+                  value={dateRange.end || undefined}
+                  onChange={(v) => {
+                    setEndDate(v);
+                    setSelectedDayKey('');
+                    if (normalizedStartDate && v && v < normalizedStartDate) setStartDate(v);
+                  }}
+                  placeholder="End"
+                />
+              </div>
+              <div className="flex items-end">
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="w-full h-10"
+                  onClick={() => {
+                    setStartDate('');
+                    setEndDate('');
+                    setSelectedDayKey('');
+                  }}
+                  disabled={!dateRange.start && !dateRange.end}
+                >
+                  Clear dates
+                </Button>
               </div>
             </div>
             {selectedUser ? (
@@ -270,11 +462,47 @@ export default function SettingsPracticeAdminAnalytics() {
         </div>
       </Card>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <Card className="p-4">
-          <div className="text-sm font-semibold mb-3">Daily performance</div>
-          <ScrollArea className="h-[45vh] rounded-md">
-            <div className="rounded-md border overflow-hidden">
+      <div className="space-y-6">
+        <Card className="p-0 rounded-2xl shadow-sm border border-border/70 overflow-hidden">
+          <div className="p-5 pb-3 flex items-end justify-between gap-3">
+            <div>
+              <div className="text-sm font-semibold tracking-tight">Daily performance</div>
+              {dateRange.start || dateRange.end ? (
+                <div className="text-xs text-muted-foreground mt-1">
+                  Range: <span className="font-medium text-foreground">{dateRange.start || '…'}</span> –{' '}
+                  <span className="font-medium text-foreground">{dateRange.end || '…'}</span>
+                </div>
+              ) : (
+                <div className="text-xs text-muted-foreground mt-1">Range: All dates</div>
+              )}
+            </div>
+          </div>
+
+          <div className="px-5 pb-3 grid grid-cols-2 md:grid-cols-5 gap-2">
+            <Card className="p-3 rounded-xl shadow-sm">
+              <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Total</div>
+              <div className="text-sm font-semibold tabular-nums">{rangeSummary.total}</div>
+            </Card>
+            <Card className="p-3 rounded-xl shadow-sm">
+              <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Correct</div>
+              <div className="text-sm font-semibold tabular-nums">{rangeSummary.correct}</div>
+            </Card>
+            <Card className="p-3 rounded-xl shadow-sm">
+              <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Wrong</div>
+              <div className="text-sm font-semibold tabular-nums">{rangeSummary.wrong}</div>
+            </Card>
+            <Card className="p-3 rounded-xl shadow-sm">
+              <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Accuracy</div>
+              <div className="text-sm font-semibold tabular-nums">{rangeSummary.accuracy}%</div>
+            </Card>
+            <Card className="p-3 rounded-xl shadow-sm">
+              <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Avg time</div>
+              <div className="text-sm font-semibold tabular-nums">{fmtMs(rangeSummary.avgTimeMs)}</div>
+            </Card>
+          </div>
+
+          <ScrollArea className="h-[45vh]" viewportClassName="pb-0">
+            <div className="border-t">
               <Table>
                 <TableHeader>
                   <TableRow>
@@ -289,7 +517,18 @@ export default function SettingsPracticeAdminAnalytics() {
                 <TableBody>
                   {dayRows.length ? (
                     dayRows.map((r) => (
-                      <TableRow key={r.date}>
+                      <TableRow
+                        key={r.date}
+                        className={
+                          'cursor-pointer ' +
+                          (isValidDateKey(selectedDayKey) && selectedDayKey === r.date
+                            ? 'bg-muted/60 border-l-4 border-l-primary'
+                            : '')
+                        }
+                        onClick={() => {
+                          setSelectedDayKey((prev) => (prev === r.date ? '' : r.date));
+                        }}
+                      >
                         <TableCell className="text-sm font-medium">{formatDateKey(r.date)}</TableCell>
                         <TableCell className="text-right tabular-nums">{r.total}</TableCell>
                         <TableCell className="text-right tabular-nums">{r.correct}</TableCell>
@@ -311,10 +550,24 @@ export default function SettingsPracticeAdminAnalytics() {
           </ScrollArea>
         </Card>
 
-        <Card className="p-4">
-          <div className="text-sm font-semibold mb-3">Question timeline (newest first)</div>
-          <ScrollArea className="h-[45vh] rounded-md">
-            <div className="rounded-md border overflow-hidden">
+        <Card className="p-0 rounded-2xl shadow-sm border border-border/70 overflow-hidden">
+          <div className="p-5 pb-3 flex items-end justify-between gap-3">
+            <div>
+              <div className="text-sm font-semibold tracking-tight">Question timeline (newest first)</div>
+              {isValidDateKey(selectedDayKey) ? (
+                <div className="text-xs text-muted-foreground mt-1">
+                  Showing: <span className="font-medium text-foreground">{formatDateKey(selectedDayKey)}</span>
+                </div>
+              ) : null}
+            </div>
+            {isValidDateKey(selectedDayKey) ? (
+              <Button type="button" variant="outline" size="sm" onClick={() => setSelectedDayKey('')}>
+                Show all days
+              </Button>
+            ) : null}
+          </div>
+          <ScrollArea className="h-[45vh]" viewportClassName="pb-0">
+            <div className="border-t h-full flex flex-col [&_.overflow-auto]:flex-1 [&_.overflow-auto]:min-h-0">
               <Table>
                 <TableHeader>
                   <TableRow>
@@ -358,45 +611,60 @@ export default function SettingsPracticeAdminAnalytics() {
       </div>
 
       <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="max-w-4xl">
+        <DialogContent className="max-w-6xl">
           <DialogHeader>
             <DialogTitle>Question details</DialogTitle>
           </DialogHeader>
 
           {selected ? (
             <ScrollArea className="h-[70vh] rounded-md">
-              <div className="space-y-4 pr-2">
+              <div className="space-y-4 pr-2 overflow-x-hidden">
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                  <Card className="p-3">
-                    <div className="text-xs text-muted-foreground">Shown</div>
-                    <div className="text-sm font-medium">{fmtTime(selected.shownAt)}</div>
+                  <Card className="p-4 rounded-xl shadow-sm">
+                    <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Shown</div>
+                    <div className="mt-1 text-sm font-semibold text-foreground">{fmtTime(selected.shownAt)}</div>
                   </Card>
-                  <Card className="p-3">
-                    <div className="text-xs text-muted-foreground">Submitted</div>
-                    <div className="text-sm font-medium">{fmtTime(selected.submittedAt)}</div>
+                  <Card className="p-4 rounded-xl shadow-sm">
+                    <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Submitted</div>
+                    <div className="mt-1 text-sm font-semibold text-foreground">{fmtTime(selected.submittedAt)}</div>
                   </Card>
-                  <Card className="p-3">
-                    <div className="text-xs text-muted-foreground">Next</div>
-                    <div className="text-sm font-medium">{fmtTime(selected.nextAt)}</div>
+                  <Card className="p-4 rounded-xl shadow-sm">
+                    <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Next</div>
+                    <div className="mt-1 text-sm font-semibold text-foreground">{fmtTime(selected.nextAt)}</div>
                   </Card>
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                  <Card className="p-3">
-                    <div className="text-xs text-muted-foreground">Topic</div>
-                    <div className="text-sm font-medium">{topicTitle(selected.topicId, selected.mode)}</div>
-                    <div className="text-xs text-muted-foreground mt-1">Variant: {String(selected.variantId ?? '—')}</div>
-                  </Card>
-                  <Card className="p-3">
-                    <div className="text-xs text-muted-foreground">Result</div>
-                    <div className="text-sm font-medium">
-                      {selected.isCorrect === true ? 'Correct' : selected.isCorrect === false ? 'Wrong' : '—'}
+                  <Card className="p-4 rounded-xl shadow-sm">
+                    <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Topic</div>
+                    <div className="mt-1 text-sm font-semibold text-foreground">{topicTitle(selected.topicId, selected.mode)}</div>
+                    <div className="mt-1 text-xs text-muted-foreground">
+                      Question type: <span className="text-foreground font-medium">{humanizeVariantId(String(selected.variantId ?? ''))}</span>
                     </div>
-                    <div className="text-xs text-muted-foreground mt-1">Mode: {selected.mode}</div>
                   </Card>
-                  <Card className="p-3">
-                    <div className="text-xs text-muted-foreground">Answer</div>
-                    <div className="space-y-1">
+                  <Card className="p-4 rounded-xl shadow-sm">
+                    <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Result</div>
+                    <div className="mt-1">
+                      <span
+                        className={
+                          'inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ' +
+                          (selected.isCorrect === true
+                            ? 'bg-green-100 text-green-800'
+                            : selected.isCorrect === false
+                              ? 'bg-red-100 text-red-800'
+                              : 'bg-muted text-foreground')
+                        }
+                      >
+                        {selected.isCorrect === true ? 'Correct' : selected.isCorrect === false ? 'Wrong' : '—'}
+                      </span>
+                    </div>
+                    <div className="mt-2 text-xs text-muted-foreground">
+                      Mode: <span className="text-foreground font-medium">{selected.mode === 'mixed' ? 'Mixed' : 'Individual'}</span>
+                    </div>
+                  </Card>
+                  <Card className="p-4 rounded-xl shadow-sm">
+                    <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Answer</div>
+                    <div className="mt-1 space-y-1">
                       {detailSnapshot?.userAnswerParts ? (
                         String(detailSnapshot?.variantId ?? '') === 'sqrt_params_point_gradient' && Array.isArray(detailSnapshot.userAnswerParts) ? (
                           <div className="grid grid-cols-1 gap-1 text-sm">
@@ -431,25 +699,25 @@ export default function SettingsPracticeAdminAnalytics() {
                 </div>
 
                 {detailSnapshot ? (
-                  <Card className="p-4 space-y-3">
+                  <Card className="p-4 space-y-3 min-w-0 overflow-x-hidden">
                     <div className="text-sm font-semibold">Question</div>
                     {Array.isArray(detailSnapshot.promptBlocks) && detailSnapshot.promptBlocks.length ? (
-                      <div className="text-xl leading-snug">
+                      <div className="text-xl leading-snug min-w-0 max-w-full whitespace-normal break-words">
                         {renderPromptBlocks(detailSnapshot.promptBlocks)}
                       </div>
                     ) : null}
                     {detailSnapshot.promptText ? (
-                      <div className="font-slab text-xl leading-relaxed whitespace-normal break-words">
+                      <div className="font-slab text-xl leading-relaxed whitespace-normal break-words max-w-full">
                         {String(detailSnapshot.promptText ?? '')}
                       </div>
                     ) : null}
                     {detailSnapshot.promptKatex ? (
-                      <div className="text-xl leading-snug">
+                      <div className="text-xl leading-snug max-w-full overflow-x-hidden">
                         <Katex latex={detailSnapshot.promptKatex} displayMode />
                       </div>
                     ) : null}
                     {detailSnapshot.katexQuestion ? (
-                      <div className="text-xl leading-snug">
+                      <div className="text-xl leading-snug max-w-full overflow-x-hidden">
                         <Katex latex={detailSnapshot.katexQuestion} displayMode />
                       </div>
                     ) : null}
@@ -494,7 +762,7 @@ export default function SettingsPracticeAdminAnalytics() {
                     {Array.isArray(detailSnapshot.katexExplanation) ? (
                       <div className="space-y-2">
                         <div className="text-sm font-semibold">Explanation</div>
-                        {renderExplanationBlocks(detailSnapshot.katexExplanation)}
+                        {renderExplanationBlocks(detailSnapshot.katexExplanation, new Set(baseDiagramKeys))}
                       </div>
                     ) : detailSnapshot.katexExplanation?.steps ? (
                       <div className="space-y-2">

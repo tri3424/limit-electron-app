@@ -36,28 +36,38 @@ export default function CustomDictionary() {
   }, [entries, search]);
 
   return (
-    <div className="max-w-4xl mx-auto space-y-6">
+    <div className="max-w-6xl mx-auto space-y-8 px-4 md:px-6 py-8">
       <div className="flex items-start justify-between gap-4">
-        <div>
+        <div className="min-w-0">
           <div className="flex items-center gap-2">
             <BookText className="h-5 w-5 text-primary" />
-            <h1 className="text-2xl font-bold text-foreground">Custom Dictionary</h1>
+            <h1 className="text-2xl font-bold tracking-tight text-foreground">Custom Dictionary</h1>
           </div>
-          <p className="text-sm text-muted-foreground mt-1">
+          <p className="text-sm text-muted-foreground mt-1 leading-relaxed">
             Add Bengali or English words with meanings. Users can click on words anywhere in the app to see meanings.
           </p>
         </div>
       </div>
 
-      <Card className="p-6 space-y-4 border border-border/70 shadow-sm">
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <Card className="p-0 rounded-2xl shadow-sm border border-border/70 overflow-hidden">
+        <div className="p-6 bg-muted/10">
+          <div className="flex items-start justify-between gap-4">
+            <div className="min-w-0">
+              <div className="text-lg font-semibold tracking-tight text-foreground">Add entry</div>
+              <div className="text-sm text-muted-foreground mt-1">Create a new word and meaning.</div>
+            </div>
+          </div>
+        </div>
+
+        <div className="p-6 space-y-4">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
           <div className="space-y-2">
             <Label>Word</Label>
             <Input value={word} onChange={(e) => setWord(e.target.value)} placeholder="e.g., Photosynthesis / প্রকাশ" />
           </div>
-          <div className="space-y-2">
+          <div className="space-y-2 lg:col-span-2">
             <Label>Meaning</Label>
-            <div className="rounded-md border bg-background">
+            <div className="rounded-xl border border-border/70 bg-background overflow-hidden">
               <RichTextEditor
                 value={meaning}
                 onChange={setMeaning}
@@ -96,22 +106,45 @@ export default function CustomDictionary() {
               setMeaning('');
               toast.success('Dictionary entry added');
             }}
+            className="sm:w-auto rounded-full px-5"
           >
             Add
           </Button>
-          <Input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search saved words…"
-            className="sm:max-w-sm"
-          />
+          <div className="text-xs text-muted-foreground sm:ml-auto">
+            Saved entries: <span className="font-medium text-foreground">{(entries ?? []).length}</span>
+          </div>
+        </div>
+        </div>
+      </Card>
+
+      <Card className="p-6 rounded-2xl shadow-sm border border-border/70 space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3">
+          <div className="min-w-0">
+            <div className="text-lg font-semibold tracking-tight text-foreground">Saved entries</div>
+            <div className="text-sm text-muted-foreground mt-1">
+              Search and manage saved words.
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <Input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search saved words…"
+              className="sm:w-[320px]"
+            />
+            {search.trim() ? (
+              <Button type="button" variant="outline" size="sm" onClick={() => setSearch('')}>
+                Clear
+              </Button>
+            ) : null}
+          </div>
         </div>
 
         <Separator />
 
         <div className="space-y-2">
           {filtered.slice(0, 200).map((entry) => (
-            <div key={entry.id} className="flex items-start justify-between gap-3 rounded-md border bg-background p-3">
+            <div key={entry.id} className="flex items-start justify-between gap-4 rounded-xl border border-border/70 bg-background p-4">
               <div className="min-w-0">
                 <div className="font-semibold text-foreground break-words">{entry.word}</div>
                 <div
@@ -122,7 +155,7 @@ export default function CustomDictionary() {
               <Button
                 variant="ghost"
                 size="sm"
-                className="text-muted-foreground hover:text-destructive"
+                className="text-muted-foreground hover:text-destructive hover:bg-destructive/10"
                 onClick={async () => {
                   await db.customDictionary.delete(entry.id);
                   toast.success('Deleted');
@@ -134,7 +167,9 @@ export default function CustomDictionary() {
             </div>
           ))}
           {filtered.length === 0 ? (
-            <div className="text-sm text-muted-foreground">No custom dictionary entries.</div>
+            <div className="rounded-xl border border-dashed border-border/70 bg-muted/10 p-6 text-sm text-muted-foreground">
+              No custom dictionary entries.
+            </div>
           ) : null}
         </div>
       </Card>

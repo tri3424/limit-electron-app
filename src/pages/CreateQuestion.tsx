@@ -2,7 +2,7 @@ import { useEffect, useState, useMemo } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { v4 as uuidv4 } from 'uuid';
-import { ArrowLeft, Plus, X, Save, Sparkles, Upload, Loader2 } from 'lucide-react';
+import { MoveLeft, Plus, X, Save, Sparkles, Upload, Loader2 } from 'lucide-react';
 import { db, Question } from '@/lib/db';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -423,7 +423,7 @@ export default function CreateQuestion() {
           size="icon"
           onClick={() => navigate('/questions')}
         >
-          <ArrowLeft className="h-5 w-5" />
+          <MoveLeft className="h-5 w-5" />
         </Button>
         <div className="flex-1">
           <h1 className="text-3xl font-bold text-foreground">
