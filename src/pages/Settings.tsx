@@ -26,6 +26,7 @@ import {
 	RefreshCw,
 	Copy,
 	Eye,
+	EyeOff,
 	Save,
 	Settings as SettingsIcon,
 } from 'lucide-react';
@@ -231,6 +232,7 @@ export default function Settings() {
   const [editUsername, setEditUsername] = useState('');
   const [editPassword, setEditPassword] = useState('');
   const [deleteUserId, setDeleteUserId] = useState<string | null>(null);
+	const [revealedUserPasswords, setRevealedUserPasswords] = useState<Record<string, boolean>>({});
 
   const [questionPrompts, setQuestionPrompts] = useState<{ id: string; title: string; content: string }[]>([]);
   const [promptDialogOpen, setPromptDialogOpen] = useState(false);
@@ -1078,6 +1080,24 @@ export default function Settings() {
     }
   };
 
+	const toggleRevealUserPassword = (userId: string) => {
+		setRevealedUserPasswords((prev) => ({ ...prev, [userId]: !prev[userId] }));
+	};
+
+	const handleCopyUserPassword = async (password: string | undefined | null) => {
+		const value = String(password ?? '');
+		if (!value) {
+			toast.error('No password to copy');
+			return;
+		}
+		try {
+			await navigator.clipboard.writeText(value);
+			toast.success('Password copied');
+		} catch {
+			toast.error('Failed to copy password');
+		}
+	};
+
   return (
     <TooltipProvider>
       <div className="max-w-6xl mx-auto space-y-6">
@@ -1096,7 +1116,7 @@ export default function Settings() {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {isAdmin ? (
               <Card className="p-6">
-                <div className="flex items-start justify-between gap-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                   <div className="min-w-0">
                     <div className="flex items-center gap-2">
                       <Shield className="h-5 w-5 text-primary" />
@@ -1118,7 +1138,7 @@ export default function Settings() {
 
             {isAdmin ? (
               <Card className="p-6">
-                <div className="flex items-start justify-between gap-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                   <div className="min-w-0">
                     <div className="flex items-center gap-2">
                       <BookText className="h-5 w-5 text-primary" />
@@ -1136,7 +1156,7 @@ export default function Settings() {
             ) : null}
 
             <Card className="p-6">
-              <div className="flex items-start justify-between gap-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                 <div className="min-w-0">
                   <div className="flex items-center gap-2">
                     <Music className="h-5 w-5 text-primary" />
@@ -1146,8 +1166,8 @@ export default function Settings() {
                     Enable or disable song recognition features for students.
                   </p>
                 </div>
-                <div className="shrink-0 flex items-center gap-3">
-                  <Label className="text-sm">Song recognition</Label>
+                <div className="shrink-0 flex flex-wrap items-center justify-end gap-3">
+                  <Label className="text-sm whitespace-nowrap">Song recognition</Label>
                   <Switch
                     checked={localSettings.songRecognitionEnabled === true}
                     onCheckedChange={(v) => void handleUpdateSettings({ songRecognitionEnabled: v === true })}
@@ -1160,8 +1180,8 @@ export default function Settings() {
 
         {/* User Management */}
         <Card className="p-6 space-y-6">
-          <div className="flex items-center justify-between">
-            <div>
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+            <div className="min-w-0">
               <h2 className="text-xl font-semibold text-foreground">User Management</h2>
               <p className="text-sm text-muted-foreground mt-1">
                 Create and manage student accounts
@@ -1169,7 +1189,7 @@ export default function Settings() {
             </div>
             <Tooltip>
               <TooltipTrigger asChild>
-                <Button onClick={() => setShowUserDialog(true)}>
+                <Button onClick={() => setShowUserDialog(true)} className="whitespace-nowrap">
                   <UserPlus className="h-4 w-4 mr-2" />
                   Create User
                 </Button>
@@ -1189,12 +1209,45 @@ export default function Settings() {
                     key={user.id}
                     className="flex items-center justify-between p-3 rounded-md border bg-background"
                   >
-                    <div className="flex items-center gap-2">
-                      <Users className="h-4 w-4 text-muted-foreground" />
-                      <span className="font-medium">{user.username}</span>
-                      <Badge variant="outline" className="text-xs">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <Users className="h-4 w-4 text-muted-foreground shrink-0" />
+                      <span className="font-medium truncate">{user.username}</span>
+                      <Badge variant="outline" className="text-xs shrink-0">
                         Student
                       </Badge>
+                      <span className="hidden sm:inline-flex items-center gap-2 ml-2 text-xs text-muted-foreground">
+                        <span className="rounded-full border bg-muted/30 px-2 py-0.5 font-mono">
+                          {revealedUserPasswords[user.id] ? String(user.password ?? '') : '••••••••'}
+                        </span>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Button
+                              variant="outline"
+                              size="icon"
+                              className="h-8 w-8 rounded-full"
+                              aria-label={revealedUserPasswords[user.id] ? 'Hide password' : 'Show password'}
+                              onClick={() => toggleRevealUserPassword(user.id)}
+                            >
+                              {revealedUserPasswords[user.id] ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                            </Button>
+                          </TooltipTrigger>
+                          <TooltipContent>{revealedUserPasswords[user.id] ? 'Hide password' : 'Show password'}</TooltipContent>
+                        </Tooltip>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Button
+                              variant="outline"
+                              size="icon"
+                              className="h-8 w-8 rounded-full"
+                              aria-label="Copy password"
+                              onClick={() => void handleCopyUserPassword(user.password)}
+                            >
+                              <Copy className="h-4 w-4" />
+                            </Button>
+                          </TooltipTrigger>
+                          <TooltipContent>Copy password</TooltipContent>
+                        </Tooltip>
+                      </span>
                     </div>
                     <div className="flex items-center gap-2">
                       <Button

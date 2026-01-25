@@ -105,13 +105,22 @@ export default function ModuleCreator() {
 	// Question filters
 	const [filterType, setFilterType] = useState<'mcq' | 'text' | 'fill_blanks' | 'matching' | undefined>(undefined);
 	const [filterSearch, setFilterSearch] = useState('');
+	const [searchInput, setSearchInput] = useState('');
 	const [filterTags, setFilterTags] = useState<string[]>([]);
 	const clearQuestionFilters = () => {
 		setFilterType(undefined);
 		setFilterSearch('');
+		setSearchInput('');
 		setFilterTags([]);
 		setShowOnlySelected(false);
 	};
+
+	useEffect(() => {
+		const t = window.setTimeout(() => {
+			setFilterSearch(searchInput);
+		}, 180);
+		return () => window.clearTimeout(t);
+	}, [searchInput]);
 	const questions = useQuestions({
 		type: filterType,
 		search: filterSearch,
@@ -136,15 +145,39 @@ export default function ModuleCreator() {
 	);
 
 	const toggleSelectAll = () => {
-		if (!questions) return;
+		const list = displayedQuestions || [];
+		if (!list.length) return;
 		if (allSelected) {
-			const remaining = questionIds.filter(id => !questions.some(q => q.id === id));
+			const remaining = questionIds.filter(id => !list.some(q => q.id === id));
 			setQuestionIds(remaining);
 		} else {
-			const ids = Array.from(new Set([...questionIds, ...questions.map(q => q.id)]));
+			const ids = Array.from(new Set([...questionIds, ...list.map(q => q.id)]));
 			setQuestionIds(ids);
 		}
 	};
+
+	const selectVisible = () => {
+		const list = displayedQuestions || [];
+		if (!list.length) return;
+		setQuestionIds(prev => Array.from(new Set([...prev, ...list.map(q => q.id)])));
+	};
+
+	const unselectVisible = () => {
+		const list = displayedQuestions || [];
+		if (!list.length) return;
+		const visibleIds = new Set(list.map(q => q.id));
+		setQuestionIds(prev => prev.filter(id => !visibleIds.has(id)));
+	};
+
+	const visibleSelectedCount = useMemo(() => {
+		const list = displayedQuestions || [];
+		if (!list.length || !questionIds.length) return 0;
+		let n = 0;
+		for (const q of list) {
+			if (questionIds.includes(q.id)) n++;
+		}
+		return n;
+	}, [displayedQuestions, questionIds]);
 
 	const handleSubmit = async () => {
 		if (!title.trim()) {
@@ -242,49 +275,78 @@ export default function ModuleCreator() {
 
 		<div className="pr-2">
 			<div className="grid grid-cols-12 gap-6">
-				<Card className="p-6 col-span-12 space-y-4">
-					<div className="space-y-2">
-						<Label>Title</Label>
-						<Input value={title} onChange={e => setTitle(e.target.value)} placeholder="Module title" />
+				<Card className="p-6 col-span-12 space-y-6">
+					<div className="flex flex-col gap-1">
+						<h2 className="text-lg font-semibold text-foreground">Module details</h2>
+						<p className="text-sm text-muted-foreground">
+							Set the title, type, and tags before selecting questions.
+						</p>
 					</div>
-					<div className="space-y-2">
-						<Label>Instructions (optional)</Label>
-						<Textarea value={description} onChange={e => setDescription(e.target.value)} placeholder="Optional description" />
-					</div>
-					<div className="grid grid-cols-2 gap-4">
-						<div className="space-y-2">
-							<Label>Type</Label>
-							<Select value={type} onValueChange={(v: 'exam' | 'practice') => setType(v)}>
-								<SelectTrigger><SelectValue placeholder="Select type" /></SelectTrigger>
-								<SelectContent>
-									<SelectItem value="practice">Practice</SelectItem>
-									<SelectItem value="exam">Exam</SelectItem>
-								</SelectContent>
-							</Select>
+
+					<div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+						<div className="lg:col-span-2 space-y-4">
+							<div className="space-y-2">
+								<Label>Title</Label>
+								<Input value={title} onChange={e => setTitle(e.target.value)} placeholder="Module title" />
+								<p className="text-xs text-muted-foreground">Short and descriptive, e.g. “Fractions Practice – Week 2”.</p>
+							</div>
+							<div className="space-y-2">
+								<Label>Instructions (optional)</Label>
+								<Textarea value={description} onChange={e => setDescription(e.target.value)} placeholder="Optional description" />
+								<p className="text-xs text-muted-foreground">Shown to students at the start of the module.</p>
+							</div>
 						</div>
-						<div className="space-y-2">
+
+						<div className="space-y-4">
+							<div className="space-y-2">
+								<Label>Type</Label>
+								<Select value={type} onValueChange={(v: 'exam' | 'practice') => setType(v)}>
+									<SelectTrigger><SelectValue placeholder="Select type" /></SelectTrigger>
+									<SelectContent>
+										<SelectItem value="practice">Practice</SelectItem>
+										<SelectItem value="exam">Exam</SelectItem>
+									</SelectContent>
+								</Select>
+								<p className="text-xs text-muted-foreground">Exam enables scheduling and a required time limit.</p>
+							</div>
+
+							{type === 'exam' && (
+								<div className="space-y-2">
+									<Label>Time Limit (minutes)</Label>
+									<Input type="number" min={1} value={timeLimitMinutes} onChange={e => setTimeLimitMinutes(parseInt(e.target.value || '0', 10))} />
+									<p className="text-xs text-muted-foreground">Students must finish within this time.</p>
+								</div>
+							)}
+						</div>
+					</div>
+
+					<div className="space-y-2">
+						<div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
 							<Label>Tags</Label>
+							<span className="text-xs text-muted-foreground">Selected: {tags.length}</span>
+						</div>
+						<div className="rounded-lg border bg-muted/20 p-3">
 							<div className="flex flex-wrap gap-2">
 								{availableTags.map(t => {
 									const selected = tags.includes(t.name);
 									return (
-										<button key={t.id} type="button" onClick={() => {
-											setTags(prev => selected ? prev.filter(x => x !== t.name) : [...prev, t.name]);
-										}}>
+										<button
+											key={t.id}
+											type="button"
+											className="transition-opacity hover:opacity-90"
+											onClick={() => {
+												setTags(prev => selected ? prev.filter(x => x !== t.name) : [...prev, t.name]);
+											}}
+										>
 											<Badge variant={selected ? 'default' : 'secondary'}>{t.name}</Badge>
 										</button>
 									);
 								})}
 							</div>
+							<p className="mt-2 text-xs text-muted-foreground">Click tags to toggle. Used for organizing modules on the home page.</p>
 						</div>
 					</div>
 
-					{type === 'exam' && (
-						<div className="space-y-2">
-							<Label>Time Limit (minutes)</Label>
-							<Input type="number" min={1} value={timeLimitMinutes} onChange={e => setTimeLimitMinutes(parseInt(e.target.value || '0', 10))} />
-						</div>
-					)}
 
 					{type === 'exam' && (
 						<div className="mt-4 border rounded-lg p-4 space-y-3 bg-muted/30">
@@ -488,11 +550,40 @@ export default function ModuleCreator() {
 				</Card>
 
 				<Card className="p-6 col-span-12 space-y-4 flex flex-col min-h-0 max-h-[80vh] overflow-hidden">
-					<div className="flex items-center justify-between">
-						<h3 className="font-medium">Select Questions</h3>
-						<div className="flex items-center gap-2 text-sm text-muted-foreground">
-							<div>Selected: <span className="font-medium text-foreground">{questionIds.length}</span></div>
-							<Button variant="outline" size="sm" onClick={toggleSelectAll}>{allSelected ? 'Unselect' : 'Select'} All</Button>
+					<div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+						<div className="space-y-0.5">
+							<h3 className="font-medium">Select Questions</h3>
+							<div className="text-xs text-muted-foreground">
+								Showing <span className="font-medium text-foreground">{displayedQuestions?.length ?? 0}</span>
+								{' '}· Visible selected <span className="font-medium text-foreground">{visibleSelectedCount}</span>
+								{' '}· Total selected <span className="font-medium text-foreground">{questionIds.length}</span>
+							</div>
+						</div>
+						<div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground justify-end">
+							<Button
+								variant="outline"
+								size="sm"
+								disabled={!displayedQuestions || displayedQuestions.length === 0 || allSelected === true}
+								onClick={selectVisible}
+							>
+								Select visible
+							</Button>
+							<Button
+								variant="outline"
+								size="sm"
+								disabled={!displayedQuestions || displayedQuestions.length === 0 || visibleSelectedCount === 0}
+								onClick={unselectVisible}
+							>
+								Unselect visible
+							</Button>
+							<Button
+								variant="outline"
+								size="sm"
+								disabled={!filterType && !filterTags.length && !searchInput.trim() && showOnlySelected !== true}
+								onClick={clearQuestionFilters}
+							>
+								Clear filters
+							</Button>
 						</div>
 					</div>
 					<div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">
@@ -511,7 +602,7 @@ export default function ModuleCreator() {
 								<SelectItem value="matching">Matching</SelectItem>
 							</SelectContent>
 						</Select>
-						<Input placeholder="Search..." value={filterSearch} onChange={e => setFilterSearch(e.target.value)} />
+						<Input placeholder="Search code or question text..." value={searchInput} onChange={e => setSearchInput(e.target.value)} />
 						<Select onValueChange={(v) => {
 							if (!v) return;
 							setFilterTags(prev => prev.includes(v) ? prev : [...prev, v]);
@@ -555,13 +646,31 @@ export default function ModuleCreator() {
 						{displayedQuestions?.map(q => {
 							const selected = questionIds.includes(q.id);
 							return (
-								<label key={q.id} className="flex items-start gap-3 p-3 cursor-pointer hover:bg-muted/50">
-									<Checkbox checked={selected} onCheckedChange={(v: CheckedState) => {
-											setQuestionIds(prev => v === true ? [...prev, q.id] : prev.filter(id => id !== q.id));
-									}} />
+								<label
+									key={q.id}
+									className={
+										"flex items-start gap-3 p-3 cursor-pointer hover:bg-muted/50 transition-colors " +
+										(selected ? 'bg-primary/5' : '')
+									}
+								>
+									<Checkbox
+										checked={selected}
+										onCheckedChange={(v: CheckedState) => {
+											setQuestionIds((prev) =>
+												v === true
+													? Array.from(new Set([...prev, q.id]))
+													: prev.filter((id) => id !== q.id)
+											);
+									}}
+									/>
 									<div className="space-y-1 flex-1 min-w-0">
 										<TruncatedQuestionText html={q.text} questionType={q.type} />
 										<div className="text-xs text-muted-foreground flex flex-wrap gap-2">
+											{q.code ? (
+												<span className="rounded-full border bg-muted/30 px-2 py-0.5 font-mono text-[11px] text-foreground">
+													{q.code}
+												</span>
+											) : null}
 											<Badge variant="outline">{q.type.toUpperCase()}</Badge>
 											{q.tags.slice(0, 3).map(t => <Badge key={t} variant="secondary">{t}</Badge>)}
 										</div>
@@ -581,7 +690,7 @@ export default function ModuleCreator() {
 						<DialogHeader>
 							<DialogTitle>Question Details</DialogTitle>
 						</DialogHeader>
-						{openQuestion && (
+						{openQuestion ? (
 							<ScrollArea className="h-[70vh]">
 								<div className="space-y-4 pr-2">
 									<div>
@@ -627,15 +736,14 @@ export default function ModuleCreator() {
 											</div>
 										</div>
 									)}
-									</div>
-								</ScrollArea>
-							)}
-						</DialogContent>
-					</Dialog>
+								</div>
+							</ScrollArea>
+						) : null}
+					</DialogContent>
+				</Dialog>
 				</div>
 			</div>
 		</div>
 	);
 }
-
 
