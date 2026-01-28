@@ -89,6 +89,34 @@ declare global {
 				progress?: number;
 			}) => void) => () => void;
 		};
+		longAnswer?: {
+			modelStatus?: () => Promise<{ ready: boolean; reason?: string }>;
+			embedText?: (payload: { text: string; modelId?: string }) => Promise<{ ok: boolean; vector?: number[]; dims?: number; modelId?: string; reason?: string }>;
+			computeScoreAndMetadata?: (payload: {
+				adminAnswerText: string;
+				studentAnswerText: string;
+				adminEmbedding?: number[];
+				keywords?: Array<{ keyword: string; weight?: number }>;
+				scoreMapping?: { minSimilarityForCredit?: number; fullCreditSimilarity?: number };
+				modelId?: string;
+			}) => Promise<{
+				ok: boolean;
+				similarity01?: number;
+				numericScore10?: number;
+				finalScore01?: number;
+				keywordScore01?: number;
+				keywordMatches?: Array<{ keyword: string; matched: boolean; weight?: number }>;
+				reason?: string;
+			}>;
+			generateFeedbackParagraph?: (payload: {
+				adminAnswerText: string;
+				studentAnswerText: string;
+				similarity01: number;
+				keywordMatches?: Array<{ keyword: string; matched: boolean; weight?: number }>;
+				numericScore10?: number;
+				modelId?: string;
+			}) => Promise<{ ok: boolean; feedback?: string; usedModel?: boolean; reason?: string }>;
+		};
 	}
 
 	namespace JSX {

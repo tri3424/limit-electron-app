@@ -100,6 +100,72 @@ function getEmbedPaths() {
 	return { cacheDir, modelCacheDir, tagIndexMetaPath, tagIndexBinPath, feedbackPath, logPath, manifestPath };
 }
 
+function getLongAnswerModelDirCandidates() {
+	const out = [];
+	try {
+		out.push(path.resolve(process.cwd(), 'models', 'embedding-model'));
+	} catch {
+		void 0;
+	}
+	try {
+		out.push(path.join(app.getAppPath(), 'models', 'embedding-model'));
+	} catch {
+		void 0;
+	}
+	try {
+		out.push(path.resolve(__dirname, '..', 'models', 'embedding-model'));
+	} catch {
+		void 0;
+	}
+	try {
+		out.push(path.resolve(app.getAppPath(), '..', 'models', 'embedding-model'));
+	} catch {
+		void 0;
+	}
+	try {
+		const { modelCacheDir } = getEmbedPaths();
+		out.push(modelCacheDir);
+	} catch {
+		void 0;
+	}
+	return out.filter((p) => typeof p === 'string' && p.length > 0);
+}
+
+function pickFirstExistingDir(candidates) {
+	for (const p of candidates) {
+		try {
+			if (!p) continue;
+			if (!fs.existsSync(p)) continue;
+			const st = fs.statSync(p);
+			if (st.isDirectory()) return p;
+		} catch {
+			// ignore
+		}
+	}
+	return null;
+}
+
+function pickLongAnswerModelDir(candidates, modelId) {
+	for (const base of candidates) {
+		try {
+			if (!base) continue;
+			if (!fs.existsSync(base)) continue;
+			const st = fs.statSync(base);
+			if (!st.isDirectory()) continue;
+			const dir = path.join(base, modelId);
+			const tok = path.join(dir, 'tokenizer.json');
+			const cfg = path.join(dir, 'config.json');
+			const onnx = path.join(dir, 'onnx', 'model.onnx');
+			if (fs.existsSync(tok) && fs.existsSync(cfg) && fs.existsSync(onnx)) {
+				return base;
+			}
+		} catch {
+			// ignore
+		}
+	}
+	return null;
+}
+
 function getDefaultModelCandidates() {
 	// transformers.js may support different namespaces depending on runtime/build.
 	// We try multi-qa-mpnet first, then fall back to MiniLM if not compatible/available.
@@ -375,6 +441,66 @@ async function embedTextLocalOnly(text, modelId, modelCacheDir) {
 	const vec = coerceEmbeddingVector(out);
 	if (!vec || vec.length === 0) throw new Error('Embedding output invalid');
 	return normalizeVector(vec);
+}
+
+function clamp01(x) {
+	if (!Number.isFinite(x)) return 0;
+	return Math.max(0, Math.min(1, x));
+}
+
+function mapSimilarityToScore10(sim01, mapping) {
+	const minSim = mapping && Number.isFinite(mapping.minSimilarityForCredit)
+		? Number(mapping.minSimilarityForCredit)
+		: 0.35;
+	const fullSim = mapping && Number.isFinite(mapping.fullCreditSimilarity)
+		? Number(mapping.fullCreditSimilarity)
+		: 0.82;
+	const s = clamp01(Number(sim01));
+	if (fullSim <= minSim) {
+		return Math.round(s * 10 * 1000) / 1000;
+	}
+	if (s <= minSim) return 0;
+	if (s >= fullSim) return 10;
+	const t = (s - minSim) / (fullSim - minSim);
+	return Math.round(t * 10 * 1000) / 1000;
+}
+
+function keywordMatchStats(adminText, studentText, keywords) {
+	const out = [];
+	const student = String(studentText || '').toLowerCase();
+	let totalW = 0;
+	let hitW = 0;
+	const list = Array.isArray(keywords) ? keywords : [];
+	for (const k of list) {
+		const kw = k && k.keyword ? String(k.keyword).trim() : '';
+		if (!kw) continue;
+		const w = k && Number.isFinite(k.weight) ? Math.max(0, Number(k.weight)) : 1;
+		const matched = student.includes(kw.toLowerCase());
+		out.push({ keyword: kw, matched, weight: w });
+		totalW += w;
+		if (matched) hitW += w;
+	}
+	const score01 = totalW > 0 ? clamp01(hitW / totalW) : undefined;
+	return { keywordMatches: out, keywordScore01: score01 };
+}
+
+function deterministicFeedbackFromMetadata(meta) {
+	const score10 = Number(meta?.numericScore10 ?? 0);
+	const sim = Number(meta?.similarity01 ?? 0);
+	const matches = Array.isArray(meta?.keywordMatches) ? meta.keywordMatches : [];
+	const missing = matches.filter((m) => m && !m.matched).slice(0, 2).map((m) => String(m.keyword));
+	const praise = score10 >= 7
+		? 'Good job — your answer captures the main idea.'
+		: score10 >= 4
+			? 'You have some correct elements, but the explanation is incomplete.'
+			: 'Your answer does not yet match the expected explanation.';
+	const missLine = missing.length
+		? `Missing / unclear points: ${missing.join(', ')}.`
+		: 'No missing keyword checks were detected.';
+	const improve = sim >= 0.75
+		? 'Improve by adding one clear concluding sentence that connects the key concepts.'
+		: 'Improve by stating the core definition first, then support it with one concrete example or step.';
+	return `${praise} ${missLine} ${improve}`.trim();
 }
 
 function getAppIconPath() {
@@ -948,6 +1074,101 @@ app.on('ready', () => {
 			cacheBytes: statSafe(tagIndexMetaPath) + statSafe(tagIndexBinPath),
 			logPath: fs.existsSync(logPath) ? logPath : undefined,
 		};
+	});
+
+	// Long answer grading IPC.
+	ipcMain.handle('longAnswer:modelStatus', async () => {
+		const modelId = EMBED_MODEL_FALLBACK;
+		const candidates = getLongAnswerModelDirCandidates();
+		const modelCacheDir = pickLongAnswerModelDir(candidates, modelId);
+		if (!modelCacheDir) {
+			return {
+				ready: false,
+				reason: `Long answer embedding model directory not found for ${modelId}. Run npm install without SKIP_MODEL_DOWNLOAD or bundle models. Tried: ${candidates.join(' | ')}`,
+			};
+		}
+		try {
+			// Long answers intentionally use the fallback model only to avoid
+			// local-only failures when the larger preferred model isn't present.
+			await chooseAndLoadModel({ candidates: [modelId], modelCacheDir, allowDownload: false });
+			return { ready: true };
+		} catch (e) {
+			const msg = String(e && e.message ? e.message : e);
+			return { ready: false, reason: msg };
+		}
+	});
+
+	ipcMain.handle('longAnswer:embedText', async (_event, payload) => {
+		const text = payload && typeof payload.text === 'string' ? payload.text : '';
+		if (!text.trim()) return { ok: false, reason: 'Empty text' };
+		const modelId = payload && typeof payload.modelId === 'string' && payload.modelId.trim()
+			? payload.modelId.trim()
+			: EMBED_MODEL_FALLBACK;
+		const candidates = getLongAnswerModelDirCandidates();
+		const modelCacheDir = pickLongAnswerModelDir(candidates, modelId);
+		if (!modelCacheDir) return { ok: false, reason: `Model directory not found for ${modelId}. Tried: ${candidates.join(' | ')}` };
+		try {
+			const vec = await embedTextLocalOnly(text, modelId, modelCacheDir);
+			return { ok: true, vector: vec, dims: vec.length, modelId };
+		} catch (e) {
+			return { ok: false, reason: String(e && e.message ? e.message : e) };
+		}
+	});
+
+	ipcMain.handle('longAnswer:computeScoreAndMetadata', async (_event, payload) => {
+		const adminAnswerText = payload && typeof payload.adminAnswerText === 'string' ? payload.adminAnswerText : '';
+		const studentAnswerText = payload && typeof payload.studentAnswerText === 'string' ? payload.studentAnswerText : '';
+		const adminEmbedding = payload && Array.isArray(payload.adminEmbedding) ? payload.adminEmbedding : null;
+		const keywords = payload && Array.isArray(payload.keywords) ? payload.keywords : [];
+		const scoreMapping = payload && typeof payload.scoreMapping === 'object' ? payload.scoreMapping : undefined;
+		if (!adminAnswerText.trim()) return { ok: false, reason: 'Missing adminAnswerText' };
+		if (!studentAnswerText.trim()) return { ok: false, reason: 'Missing studentAnswerText' };
+
+		const modelId = payload && typeof payload.modelId === 'string' && payload.modelId.trim()
+			? payload.modelId.trim()
+			: EMBED_MODEL_FALLBACK;
+		const modelCacheDir = pickFirstExistingDir(getLongAnswerModelDirCandidates());
+		if (!modelCacheDir) return { ok: false, reason: 'Model directory not found' };
+
+		let adminVec = adminEmbedding;
+		try {
+			if (!adminVec) {
+				adminVec = await embedTextLocalOnly(adminAnswerText, modelId, modelCacheDir);
+			}
+			const studentVec = await embedTextLocalOnly(studentAnswerText, modelId, modelCacheDir);
+			const cos = Number(cosineSimilarity(adminVec, studentVec));
+			const similarity01 = clamp01((cos + 1) / 2);
+			const numericScore10 = mapSimilarityToScore10(similarity01, scoreMapping);
+
+			const kw = keywordMatchStats(adminAnswerText, studentAnswerText, keywords);
+			const keywordScore01 = typeof kw.keywordScore01 === 'number' ? kw.keywordScore01 : undefined;
+			const finalScore01 = clamp01(similarity01 * 0.85 + (keywordScore01 ?? 0) * 0.15);
+			return {
+				ok: true,
+				similarity01,
+				numericScore10,
+				finalScore01,
+				keywordScore01,
+				keywordMatches: kw.keywordMatches,
+			};
+		} catch (e) {
+			return { ok: false, reason: String(e && e.message ? e.message : e) };
+		}
+	});
+
+	ipcMain.handle('longAnswer:generateFeedbackParagraph', async (_event, payload) => {
+		const adminAnswerText = payload && typeof payload.adminAnswerText === 'string' ? payload.adminAnswerText : '';
+		const studentAnswerText = payload && typeof payload.studentAnswerText === 'string' ? payload.studentAnswerText : '';
+		const similarity01 = payload && Number.isFinite(payload.similarity01) ? Number(payload.similarity01) : 0;
+		const keywordMatches = payload && Array.isArray(payload.keywordMatches) ? payload.keywordMatches : [];
+		const numericScore10 = payload && Number.isFinite(payload.numericScore10)
+			? Number(payload.numericScore10)
+			: mapSimilarityToScore10(similarity01, undefined);
+		if (!adminAnswerText.trim() || !studentAnswerText.trim()) {
+			return { ok: false, reason: 'Missing answers' };
+		}
+		const feedback = deterministicFeedbackFromMetadata({ similarity01, numericScore10, keywordMatches });
+		return { ok: true, feedback, usedModel: false };
 	});
 
 	ipcMain.handle('songs:saveAudioFile', async (_event, payload) => {

@@ -70,3 +70,18 @@ contextBridge.exposeInMainWorld('embedding', {
 		return () => ipcRenderer.removeListener('embed:prepareProgress', listener);
 	},
 });
+
+contextBridge.exposeInMainWorld('longAnswer', {
+	modelStatus: async () => {
+		return ipcRenderer.invoke('longAnswer:modelStatus');
+	},
+	embedText: async (payload) => {
+		return ipcRenderer.invoke('longAnswer:embedText', payload);
+	},
+	computeScoreAndMetadata: async (payload) => {
+		return ipcRenderer.invoke('longAnswer:computeScoreAndMetadata', payload);
+	},
+	generateFeedbackParagraph: async (payload) => {
+		return ipcRenderer.invoke('longAnswer:generateFeedbackParagraph', payload);
+	},
+});

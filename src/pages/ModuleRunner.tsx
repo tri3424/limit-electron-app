@@ -1131,6 +1131,7 @@ function ExamSession({
 	const [isFinalizing, setIsFinalizing] = useState(false);
 	const [showFeedback, setShowFeedback] = useState(false);
 	const [lastScorePercent, setLastScorePercent] = useState<number | null>(null);
+	const [lastLongAnswerFeedback, setLastLongAnswerFeedback] = useState<string>('');
 	const [finalGraceAnnounced, setFinalGraceAnnounced] = useState(false);
 	const bcRef = useRef<BroadcastChannel | null>(null);
 	const previousRemainingRef = useRef<number | null>(null);
@@ -1374,49 +1375,93 @@ function ExamSession({
 				? { ...latest.answers, ...currentAnswers } // Merge to ensure we have all answers
 				: currentAnswers;
 
-			const perQuestionAttempts = questions.map((q, idx) => {
+			const perQuestionAttempts: any[] = [];
+			for (let idx = 0; idx < questions.length; idx++) {
+				const q = questions[idx];
 				const ans = sourceAnswers[q.id];
-				// Check if answer exists and is not empty string
-				const hasAnswer = ans !== undefined && ans !== null && ans !== '' && 
-					(!Array.isArray(ans) || (ans as string[]).length > 0);
-				const scoring = hasAnswer 
-					? evaluateScore(q, ans) 
-					: { isCorrect: false, scorePercent: 0, correctParts: 0, totalParts: getTotalPartsForQuestion(q) };
-				// Mark unanswered questions as unattempted/autosubmitted
+				const hasAnswer = ans !== undefined && ans !== null &&
+					(Array.isArray(ans)
+						? (ans as string[]).length > 0
+						: String(ans).trim().length > 0);
+
 				const autosubmitted = !hasAnswer;
-				// For unattempted questions, ensure userAnswer is explicitly set to empty string/array
-				// This ensures the performance modal can properly display "unattempted" status
-				const userAnswer = hasAnswer 
+				const userAnswer = hasAnswer
 					? (Array.isArray(ans) ? ans : (ans ?? ''))
 					: (q.type === 'matching' || q.type === 'fill_blanks' ? [] : '');
-				// Get question start time from multiple sources, in order of preference:
-				// 1. questionTimeMap (tracks when questions were first viewed)
-				// 2. Existing perQuestionAttempt (if question was previously submitted)
-				// 3. currentQuestionTimerState (if this is the current question)
-				// 4. Fallback to attempt start time (least accurate)
+
 				const existingAttempt = latest.perQuestionAttempts?.find(pqa => pqa.questionId === q.id);
 				const questionStartedAt = questionTimeMap.current[q.id] ??
-					existingAttempt?.questionStartedAt ?? 
+					existingAttempt?.questionStartedAt ??
 					(attempt.currentQuestionTimerState?.questionId === q.id ? attempt.currentQuestionTimerState.startUtc : undefined) ??
 					attempt.startedAt;
-				return {
+
+				let scoring = hasAnswer
+					? evaluateScore(q, ans)
+					: { isCorrect: false, scorePercent: 0, correctParts: 0, totalParts: getTotalPartsForQuestion(q) };
+				let longAnswerScore: any = undefined;
+				let longAnswerFeedback: string | undefined = undefined;
+
+				if (hasAnswer && q.type === 'long_answer') {
+					try {
+						const la = await window.longAnswer?.computeScoreAndMetadata?.({
+							adminAnswerText: String((q as any).longAnswer?.idealAnswerText || ''),
+							studentAnswerText: String(ans ?? ''),
+							adminEmbedding: Array.isArray((q as any).longAnswer?.idealAnswerEmbedding)
+								? (q as any).longAnswer.idealAnswerEmbedding
+								: undefined,
+							keywords: Array.isArray((q as any).longAnswer?.keywordChecks) ? (q as any).longAnswer.keywordChecks : [],
+						});
+						if (la && la.ok) {
+							const scorePercent = Math.round(Number(la.finalScore01 ?? 0) * 100);
+							scoring = {
+								isCorrect: scorePercent >= 50,
+								scorePercent,
+								correctParts: Math.round(Number(la.finalScore01 ?? 0) * 10),
+								totalParts: 10,
+							};
+							longAnswerScore = {
+								similarity01: Number(la.similarity01 ?? 0),
+								numericScore10: Number(la.numericScore10 ?? 0),
+								keywordScore01: typeof la.keywordScore01 === 'number' ? la.keywordScore01 : undefined,
+								finalScore01: Number(la.finalScore01 ?? 0),
+							};
+							if ((q as any).longAnswer?.enableFeedback !== false) {
+								const fb = await window.longAnswer?.generateFeedbackParagraph?.({
+									adminAnswerText: String((q as any).longAnswer?.idealAnswerText || ''),
+									studentAnswerText: String(ans ?? ''),
+									similarity01: Number(la.similarity01 ?? 0),
+									keywordMatches: Array.isArray(la.keywordMatches) ? la.keywordMatches : [],
+									numericScore10: Number(la.numericScore10 ?? 0),
+								});
+								if (fb && fb.ok && typeof fb.feedback === 'string') {
+									longAnswerFeedback = fb.feedback;
+								}
+							}
+						}
+					} catch {
+						void 0;
+					}
+				}
+
+				perQuestionAttempts.push({
 					questionId: q.id,
-					userAnswer: userAnswer,
-					// For unattempted questions, isCorrect should be undefined, not false
+					userAnswer,
 					isCorrect: hasAnswer ? scoring.isCorrect : undefined,
 					timeTakenMs: 0,
-					timestamp: now, // Submit timestamp - precise to milliseconds
-					questionStartedAt: questionStartedAt, // Start timestamp - precise to milliseconds
+					timestamp: now,
+					questionStartedAt,
 					questionIndexInModule: idx,
 					attemptNumberForQuestion: 1,
 					integrityEvents: [],
 					status: (hasAnswer ? 'attempted' : 'unattempted') as 'attempted' | 'unattempted',
-					autosubmitted: autosubmitted,
+					autosubmitted,
 					scorePercent: scoring.scorePercent,
 					correctParts: scoring.correctParts,
 					totalParts: scoring.totalParts,
-				};
-			});
+					longAnswerScore,
+					longAnswerFeedback,
+				});
+			}
 
 			const scoredQuestions = perQuestionAttempts.filter((a) => typeof a.scorePercent === 'number');
 			const score = scoredQuestions.length > 0
@@ -2170,6 +2215,17 @@ function ExamSession({
 										/>
 									</div>
 								)}
+								{currentQuestion.type === 'long_answer' && (
+									<div className="w-full">
+										<Textarea
+											value={(answers[currentQuestion.id] as string) || ''}
+											onChange={(e) => handleAnswerChange(e.target.value)}
+											disabled={showFeedback}
+											placeholder="Type your answer here..."
+											className="min-h-[220px] w-full resize-y rounded-md border border-border bg-white px-4 py-3 text-base leading-relaxed shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
+										/>
+									</div>
+								)}
 								{currentQuestion.type === 'matching' && currentQuestion.matching && currentQuestion.matching.pairs.length > 0 && (
 									<MatchingQuestionSortable
 										question={currentQuestion}
@@ -2268,10 +2324,10 @@ function ExamSession({
 							<div className="flex items-center justify-between pt-6">
 								<div className="flex gap-2">
 									<Button
-										disabled={isFinalizing || !currentQuestion || !answers[currentQuestion.id] || showFeedback}
+										disabled={isFinalizing || !currentQuestion || !getIsAnswered(currentQuestion, answers[currentQuestion.id]) || showFeedback}
 										onClick={async () => {
 											if (isFinalizing || !currentQuestion || showFeedback) return;
-											if (!answers[currentQuestion.id]) return; // Require an answer
+											if (!getIsAnswered(currentQuestion, answers[currentQuestion.id])) return; // Require an answer
 											
 											// Mark this question as submitted
 											setSubmittedQuestionIds(prev => new Set([...prev, currentQuestion.id]));
@@ -2516,6 +2572,12 @@ function ExamSession({
 												<div className="prose prose-base md:prose-lg max-w-none content-html" dangerouslySetInnerHTML={{ __html: prepareContentForDisplay(q.explanation) }} />
 											</div>
 										)}
+										{q.type === 'long_answer' && perQuestionAttempt?.longAnswerFeedback && (
+											<div className="rounded-md border p-3 bg-white">
+												<div className="text-lg font-semibold mb-2">Feedback</div>
+												<div className="text-sm text-muted-foreground whitespace-pre-wrap">{perQuestionAttempt.longAnswerFeedback}</div>
+											</div>
+										)}
 									</div>
 									
 									{/* Navigation */}
@@ -2559,7 +2621,7 @@ function ExamSession({
 			{phase === 'review' && reviewExpired && (
 				<div className="space-y-4 pt-4">
 					<Card className="p-6">
-						<h2 className="text-xl font-semibold mb-2">Review period has ended</h2>
+						<h2 className="text-xl font-semibold">Review period has ended</h2>
 						<p className="text-sm text-muted-foreground">
 							{allQuestionsReviewed 
 								? "You have completed reviewing all questions." 
@@ -3024,8 +3086,10 @@ function PracticeRunner({ moduleData, baseQuestions, onExit, glossaryEntries, gl
 	const [questionStartRef, setQuestionStartRef] = useState(Date.now());
 	const [orderedQuestions, setOrderedQuestions] = useState<Question[]>([]);
 	const [showFeedback, setShowFeedback] = useState(false);
+	const [isGrading, setIsGrading] = useState(false);
 	const [lastWasCorrect, setLastWasCorrect] = useState<boolean | null>(null);
 	const [lastScorePercent, setLastScorePercent] = useState<number | null>(null);
+	const [lastLongAnswerFeedback, setLastLongAnswerFeedback] = useState('');
 	const [history, setHistory] = useState<{ id: string; correct: boolean; difficulty: Question['metadata']['difficulty'] | undefined }[]>([]);
 	const [windowExpired, setWindowExpired] = useState(false);
 	const practiceContentRef = useRef<HTMLDivElement | null>(null);
@@ -3215,12 +3279,86 @@ function PracticeRunner({ moduleData, baseQuestions, onExit, glossaryEntries, gl
 		setAnswers((prev) => ({ ...prev, [current.id]: value }));
 	};
 
+	const getIsAnswered = useCallback((q: Question | null | undefined, a: unknown) => {
+		if (!q) return false;
+		if (q.type === 'matching' || q.type === 'fill_blanks') {
+			return Array.isArray(a) && a.length > 0;
+		}
+		return typeof a === 'string' ? a.trim().length > 0 : a !== undefined && a !== null && String(a).trim().length > 0;
+	}, []);
+
 	const handleSubmitQuestion = async () => {
 		if (!current) return;
+		if (isGrading) return;
 		
 		const answer = answers[current.id];
-		const scoring = evaluateScore(current, answer);
-		const isCorrect = scoring.isCorrect;
+		let scoring = evaluateScore(current, answer);
+		let isCorrect = scoring.isCorrect;
+		let longAnswerScore: any = undefined;
+		let longAnswerFeedback: string | undefined = undefined;
+		if (current.type === 'long_answer') {
+			if (!window.longAnswer?.computeScoreAndMetadata) {
+				toast.error('Long Answer grading is unavailable in the browser. Please run the desktop app (Electron) so the offline model can score your answer.');
+				return;
+			}
+			setIsGrading(true);
+			try {
+				const status = await window.longAnswer.modelStatus?.();
+				if (status && status.ready === false) {
+					toast.error(status.reason || 'Long Answer model is not ready.');
+					return;
+				}
+				const la = await window.longAnswer?.computeScoreAndMetadata?.({
+					adminAnswerText: String((current as any).longAnswer?.idealAnswerText || ''),
+					studentAnswerText: String(answer ?? ''),
+					adminEmbedding: Array.isArray((current as any).longAnswer?.idealAnswerEmbedding)
+						? (current as any).longAnswer.idealAnswerEmbedding
+						: undefined,
+					keywords: Array.isArray((current as any).longAnswer?.keywordChecks) ? (current as any).longAnswer.keywordChecks : [],
+				});
+				if (la && la.ok) {
+					const scorePercent = Math.round(Number(la.finalScore01 ?? 0) * 100);
+					scoring = {
+						isCorrect: scorePercent >= 50,
+						scorePercent,
+						correctParts: Math.round(Number(la.finalScore01 ?? 0) * 10),
+						totalParts: 10,
+					};
+					isCorrect = scoring.isCorrect;
+					longAnswerScore = {
+						similarity01: Number(la.similarity01 ?? 0),
+						numericScore10: Number(la.numericScore10 ?? 0),
+						keywordScore01: typeof la.keywordScore01 === 'number' ? la.keywordScore01 : undefined,
+						finalScore01: Number(la.finalScore01 ?? 0),
+					};
+					if ((current as any).longAnswer?.enableFeedback !== false) {
+						const fb = await window.longAnswer?.generateFeedbackParagraph?.({
+							adminAnswerText: String((current as any).longAnswer?.idealAnswerText || ''),
+							studentAnswerText: String(answer ?? ''),
+							similarity01: Number(la.similarity01 ?? 0),
+							keywordMatches: Array.isArray(la.keywordMatches) ? la.keywordMatches : [],
+							numericScore10: Number(la.numericScore10 ?? 0),
+						});
+						if (fb && fb.ok && typeof fb.feedback === 'string') {
+							longAnswerFeedback = fb.feedback;
+							setLastLongAnswerFeedback(fb.feedback);
+						} else {
+							setLastLongAnswerFeedback('');
+						}
+					} else {
+						setLastLongAnswerFeedback('');
+					}
+				}
+			} catch (e) {
+				toast.error(`Failed to grade long answer: ${String((e as any)?.message || e)}`);
+				setLastLongAnswerFeedback('');
+				return;
+			} finally {
+				setIsGrading(false);
+			}
+		} else {
+			setLastLongAnswerFeedback('');
+		}
 		setCorrectMap((prev) => ({ ...prev, [current.id]: isCorrect }));
 		setLastScorePercent(scoring.scorePercent);
 		setHistory((prev) => [...prev, { id: current.id, correct: isCorrect, difficulty: current.metadata?.difficulty }]);
@@ -3248,6 +3386,8 @@ function PracticeRunner({ moduleData, baseQuestions, onExit, glossaryEntries, gl
 					scorePercent: scoring.scorePercent,
 					correctParts: scoring.correctParts,
 					totalParts: scoring.totalParts,
+					longAnswerScore,
+					longAnswerFeedback,
 				},
 			],
 			integrityEvents: [],
@@ -3414,21 +3554,12 @@ function PracticeRunner({ moduleData, baseQuestions, onExit, glossaryEntries, gl
 										: value === opt.id;
 									const multi = (current.correctAnswers?.length ?? 0) > 1;
 									const optionLabel = String.fromCharCode(65 + optIndex); // A, B, C, etc.
-									const isCorrectOpt = (current.correctAnswers || []).includes(opt.id);
-									// Highlight: green for correct, red for selected incorrect
-									const feedbackClass = isCorrectOpt
-										? 'border-green-600 bg-green-50'
-										: selected && !isCorrectOpt
-											? 'border-red-600 bg-red-50'
-											: '';
 									const borderClass = showFeedback
-										? isCorrectOpt
-											? 'border-green-600 bg-green-50'
-											: selected && !isCorrectOpt
-												? 'border-red-600 bg-red-50'
-												: 'border-border'
+										? selected
+											? 'border-muted-foreground/30 bg-muted/20 ring-1 ring-muted-foreground/20'
+											: 'border-border'
 										: selected
-											? 'border-primary bg-primary/5'
+											? 'border-primary bg-primary/5 ring-2 ring-primary/20'
 											: 'border-border hover:bg-white';
 									return (
 										<button
@@ -3457,7 +3588,7 @@ function PracticeRunner({ moduleData, baseQuestions, onExit, glossaryEntries, gl
 												}`}>
 													{optionLabel}
 												</span>
-												<span className="flex-1 min-w-0 text-lg leading-relaxed content-html" dangerouslySetInnerHTML={{ __html: prepareContentForDisplay(opt.text) }} />
+												<span className="flex-1 min-w-0 text-lg leading-relaxed content-html mcq-option-text" dangerouslySetInnerHTML={{ __html: prepareContentForDisplay(opt.text) }} />
 											</button>
 										);
 									})}
@@ -3473,6 +3604,17 @@ function PracticeRunner({ moduleData, baseQuestions, onExit, glossaryEntries, gl
 									/>
 								</div>
 							)}
+							{current.type === 'long_answer' && (
+								<div className="w-full">
+									<Textarea
+										value={(answers[current.id] as string) || ''}
+										onChange={(e) => handleAnswerChange(e.target.value)}
+										disabled={showFeedback}
+										placeholder="Type your answer here..."
+										className="min-h-[220px] w-full resize-y rounded-md border border-border bg-white px-4 py-3 text-base leading-relaxed shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
+									/>
+								</div>
+							)}
 								{current.type === 'matching' && current.matching && current.matching.pairs.length > 0 && (
 									<MatchingQuestionSortable
 										question={current}
@@ -3482,7 +3624,7 @@ function PracticeRunner({ moduleData, baseQuestions, onExit, glossaryEntries, gl
 									/>
 								)}
 					<div className="flex items-center justify-end pt-4">
-						<Button onClick={handleSubmitQuestion} disabled={showFeedback}>Submit</Button>
+						<Button onClick={handleSubmitQuestion} disabled={showFeedback || !getIsAnswered(current, answers[current.id])}>Submit</Button>
 					</div>
 						{showFeedback && (
 							<div className="space-y-3">
@@ -3510,6 +3652,7 @@ function PracticeRunner({ moduleData, baseQuestions, onExit, glossaryEntries, gl
 											}
 											
 											setShowFeedback(false);
+											setLastLongAnswerFeedback('');
 											const nextIdx = index + 1;
 
 											// If the module's availability window has ended while the learner
@@ -3567,12 +3710,18 @@ function PracticeRunner({ moduleData, baseQuestions, onExit, glossaryEntries, gl
 										Next
 									</Button>
 								</div>
+								{current.type === 'long_answer' && lastLongAnswerFeedback && (
+									<div className="bg-white border border-border rounded-md p-3">
+										<div className="text-sm font-semibold mb-2">Feedback</div>
+										<div className="text-sm text-muted-foreground whitespace-pre-wrap">{lastLongAnswerFeedback}</div>
+									</div>
+								)}
 								{current.type === 'mcq' && current.correctAnswers && current.correctAnswers.length > 0 && (
 									<div className="bg-white border border-border rounded-md p-3">
 										<div className="text-sm font-semibold text-green-700 mb-2">Correct Answer:</div>
 										<div className="text-lg">
-											{current.options
-												?.filter(opt => current.correctAnswers?.includes(opt.id))
+											{(current.options || [])
+												.filter((opt) => current.correctAnswers?.includes(opt.id))
 												.map((opt, idx) => {
 													const optIndex = current.options?.indexOf(opt) ?? 0;
 													const optionLabel = String.fromCharCode(65 + optIndex);
@@ -3587,21 +3736,21 @@ function PracticeRunner({ moduleData, baseQuestions, onExit, glossaryEntries, gl
 									</div>
 								)}
 								{current.type === 'text' && current.correctAnswers && current.correctAnswers.length > 0 && (
-								<div className="bg-white border border-border rounded-md p-3">
-									<div className="text-sm font-semibold text-green-700 mb-2">Correct Answer:</div>
-									<div className="text-lg">
-										{current.correctAnswers.map((ans, idx) => (
-											<span key={idx}>
-												{idx > 0 && ', '}
-												<span
-													className="font-semibold content-html"
-													dangerouslySetInnerHTML={{ __html: renderTypingAnswerMathToHtml(ans) }}
-												/>
-											</span>
-										))}
+									<div className="bg-white border border-border rounded-md p-3">
+										<div className="text-sm font-semibold text-green-700 mb-2">Correct Answer:</div>
+										<div className="text-lg">
+											{current.correctAnswers.map((ans, idx) => (
+												<span key={idx}>
+													{idx > 0 && ', '}
+													<span
+														className="font-semibold content-html"
+														dangerouslySetInnerHTML={{ __html: renderTypingAnswerMathToHtml(ans) }}
+													/>
+												</span>
+											))}
+										</div>
 									</div>
-								</div>
-							)}
+								)}
 								{current.explanation && (
 									<div className="bg-white border border-border rounded-md p-3">
 										<div className="text-base font-semibold mb-1">Explanation</div>

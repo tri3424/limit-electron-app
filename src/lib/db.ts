@@ -12,7 +12,7 @@ export interface Question {
   id: string;
   code?: string;
   text: string;
-  type: 'mcq' | 'text' | 'fill_blanks' | 'matching';
+  type: 'mcq' | 'text' | 'fill_blanks' | 'matching' | 'long_answer';
   questionImages?: string[];
   questionImageAssetIds?: string[];
   options?: Array<{
@@ -40,6 +40,22 @@ export interface Question {
       rightId: string;
       rightText: string;
     }[];
+  };
+  longAnswer?: {
+    idealAnswerText: string;
+    // Optional cached embedding of the ideal answer for fast scoring.
+    idealAnswerEmbedding?: number[];
+    idealAnswerTextHash?: string;
+    keywordChecks?: {
+      keyword: string;
+      weight?: number; // default 1
+    }[];
+    scoreMapping?: {
+      // similarity in [0,1] mapped to 0..10; defaults applied if missing
+      minSimilarityForCredit?: number; // e.g. 0.35
+      fullCreditSimilarity?: number; // e.g. 0.82
+    };
+    enableFeedback?: boolean;
   };
   tags: string[];
   modules: string[]; // module IDs
@@ -152,6 +168,14 @@ export interface PerQuestionAttempt {
   scorePercent?: number;
   correctParts?: number;
   totalParts?: number;
+  // For long_answer questions: persist grading metadata and feedback for review.
+  longAnswerScore?: {
+    similarity01: number;
+    numericScore10: number;
+    keywordScore01?: number;
+    finalScore01: number;
+  };
+  longAnswerFeedback?: string;
 }
 
 export type TimerState = {

@@ -26,13 +26,14 @@ import {
   mapLevelToSelectOptions,
 } from '@/lib/intelligenceEngine';
 
-const QUESTION_TYPES: Question['type'][] = ['mcq', 'text', 'fill_blanks', 'matching'];
+const QUESTION_TYPES: Question['type'][] = ['mcq', 'text', 'fill_blanks', 'matching', 'long_answer'];
 const DEFAULT_LEVEL = 6;
 const TYPE_LABELS: Record<Question['type'], string> = {
   mcq: 'Multiple Choice',
   text: 'Free Text',
   fill_blanks: 'Fill in the Blanks',
   matching: 'Matching',
+  long_answer: 'Long Answer',
 };
 
 async function blobToBase64(blob: Blob): Promise<string> {
@@ -120,7 +121,7 @@ export default function CreateQuestion() {
   const [initialized, setInitialized] = useState(!isEditing);
 
   // Form state
-  const [questionType, setQuestionType] = useState<'mcq' | 'text' | 'fill_blanks' | 'matching'>('mcq');
+  const [questionType, setQuestionType] = useState<'mcq' | 'text' | 'fill_blanks' | 'matching' | 'long_answer'>('mcq');
   const [questionText, setQuestionText] = useState('');
   const [questionImages, setQuestionImages] = useState<string[]>([]);
   const [options, setOptions] = useState([
@@ -131,6 +132,9 @@ export default function CreateQuestion() {
   const [fillBlanksMeta, setFillBlanksMeta] = useState<{ id: string; correct: string }[]>([]);
   const [matchingHeading, setMatchingHeading] = useState('');
   const [matchingPairs, setMatchingPairs] = useState<{ leftId: string; leftText: string; rightId: string; rightText: string }[]>([]);
+  const [longAnswerIdeal, setLongAnswerIdeal] = useState('');
+  const [longAnswerKeywords, setLongAnswerKeywords] = useState('');
+  const [longAnswerEnableFeedback, setLongAnswerEnableFeedback] = useState(true);
   const [explanation, setExplanation] = useState('');
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [newTag, setNewTag] = useState('');
@@ -317,6 +321,13 @@ export default function CreateQuestion() {
     setFillBlanksMeta(existingQuestion.fillBlanks?.blanks || []);
     setMatchingHeading(existingQuestion.matching?.headingHtml || '');
     setMatchingPairs(existingQuestion.matching?.pairs || []);
+    setLongAnswerIdeal((existingQuestion as any).longAnswer?.idealAnswerText || '');
+    setLongAnswerKeywords(
+      Array.isArray((existingQuestion as any).longAnswer?.keywordChecks)
+        ? ((existingQuestion as any).longAnswer.keywordChecks as any[]).map((k) => String(k?.keyword ?? '')).filter(Boolean).join('\n')
+        : ''
+    );
+    setLongAnswerEnableFeedback((existingQuestion as any).longAnswer?.enableFeedback !== false);
     setExplanation(existingQuestion.explanation || '');
     setSelectedTags(existingQuestion.tags || []);
     const restoredLevel =
@@ -410,6 +421,11 @@ export default function CreateQuestion() {
         toast.error('At least one acceptable answer is required');
         return;
       }
+    } else if (questionType === 'long_answer') {
+      if (!longAnswerIdeal.trim()) {
+        toast.error('Ideal answer is required for long answer questions');
+        return;
+      }
     } else if (questionType === 'fill_blanks') {
       // Re-scan the HTML for blanks to ensure metadata is up to date
       const parser = new DOMParser();
@@ -465,6 +481,18 @@ export default function CreateQuestion() {
       correctAnswers: questionType === 'mcq' || questionType === 'text' ? correctAnswers : undefined,
       fillBlanks: questionType === 'fill_blanks' ? { blanks: nextFillBlanksMeta } : undefined,
       matching: questionType === 'matching' ? { headingHtml: matchingHeading.trim() || undefined, pairs: matchingPairs } : undefined,
+      longAnswer:
+        questionType === 'long_answer'
+          ? {
+              idealAnswerText: longAnswerIdeal.trim(),
+              keywordChecks: longAnswerKeywords
+                .split(/\r?\n/)
+                .map((s) => s.trim())
+                .filter(Boolean)
+                .map((keyword) => ({ keyword })),
+              enableFeedback: !!longAnswerEnableFeedback,
+            }
+          : undefined,
       tags: selectedTags,
       modules: existingQuestion?.modules || [],
       explanation: explanation.trim() || undefined,
@@ -483,6 +511,7 @@ export default function CreateQuestion() {
           correctAnswers: questionData.correctAnswers,
           fillBlanks: questionData.fillBlanks,
           matching: questionData.matching,
+          longAnswer: (questionData as any).longAnswer,
           tags: questionData.tags,
           explanation: questionData.explanation,
           metadata: {
@@ -566,6 +595,10 @@ export default function CreateQuestion() {
               <div className="flex items-center space-x-2">
                 <RadioGroupItem value="text" id="text" disabled={wantsScreenshot} />
                 <Label htmlFor="text" className="cursor-pointer">Free Text Answer</Label>
+              </div>
+              <div className="flex items-center space-x-2">
+                <RadioGroupItem value="long_answer" id="long_answer" disabled={wantsScreenshot} />
+                <Label htmlFor="long_answer" className="cursor-pointer">Long Answer</Label>
               </div>
               <div className="flex items-center space-x-2">
                 <RadioGroupItem value="fill_blanks" id="fill_blanks" disabled={wantsScreenshot} />
@@ -741,6 +774,42 @@ export default function CreateQuestion() {
               <p className="text-sm text-muted-foreground">
                 Each row defines a matching pair. Left items will appear fixed, and right items will be draggable/selectable in the module runner.
               </p>
+            </div>
+          </Card>
+        )}
+
+        {questionType === 'long_answer' && (
+          <Card className="p-6 space-y-5">
+            <Label className="text-base font-semibold">Ideal Answer *</Label>
+            <Textarea
+              value={longAnswerIdeal}
+              onChange={(e) => setLongAnswerIdeal(e.target.value)}
+              placeholder="Paste the ideal answer here..."
+              className="min-h-[160px]"
+            />
+
+            <div className="space-y-1">
+              <Label className="text-sm">Keyword / Step Checks (Optional)</Label>
+              <Textarea
+                value={longAnswerKeywords}
+                onChange={(e) => setLongAnswerKeywords(e.target.value)}
+                placeholder="One keyword or step per line..."
+                className="min-h-[120px]"
+              />
+              <div className="text-xs text-muted-foreground">
+                These are deterministic checks to complement similarity scoring.
+              </div>
+            </div>
+
+            <div className="flex items-center space-x-2">
+              <Checkbox
+                id="long-answer-enable-feedback"
+                checked={longAnswerEnableFeedback}
+                onCheckedChange={(v) => setLongAnswerEnableFeedback(v === true)}
+              />
+              <Label htmlFor="long-answer-enable-feedback" className="cursor-pointer">
+                Enable offline feedback paragraph (optional)
+              </Label>
             </div>
           </Card>
         )}
