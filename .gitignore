@@ -31,6 +31,9 @@ native/offline-ai/models/*.gguf
 embedding_data/models/
 embedding_data/models/**/onnx/*.onnx
 
+# Long answer embedding model (downloaded in CI; do not commit)
+models/embedding-model/
+
 [A-Za-z]:*
 **/[A-Za-z]:*
 node_modules.tgz

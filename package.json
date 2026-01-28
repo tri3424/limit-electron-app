@@ -9,7 +9,7 @@
   "homepage": "./",
   "scripts": {
     "preinstall": "node scripts/install-offline.mjs",
-    "postinstall": "node scripts/postinstall-models.mjs",
+    "models:download": "node scripts/postinstall-models.mjs",
     "dev": "vite",
     "start": "vite",
     "build": "vite build",
