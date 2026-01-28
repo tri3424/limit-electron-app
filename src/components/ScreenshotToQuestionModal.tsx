@@ -15,8 +15,10 @@ import {
   parseScreenshotOcrToDraftsFromTesseract,
   type ScreenshotQuestionDraft,
 } from '@/lib/screenshotQuestionParser';
+import { autoAttachImagesFromTesseract } from '@/lib/autoAttachImages';
 import { ocrTextToRichHtml } from '@/lib/htmlDraft';
 import { normalizeOcrTextToParagraphs } from '@/lib/ocrTextNormalize';
+import { normalizeOcrLineArtifacts } from '@/lib/ocrTextNormalize';
 import type { RecognizeResult } from 'tesseract.js';
 
 type DraftOption = {
@@ -49,6 +51,83 @@ type Props = {
 };
 
 type CropRect = { x: number; y: number; w: number; h: number };
+
+type Bbox = { x0: number; y0: number; x1: number; y1: number };
+type TesseractLine = { text: string; bbox: Bbox };
+
+function bboxArea(b: Bbox): number {
+  return Math.max(0, b.x1 - b.x0) * Math.max(0, b.y1 - b.y0);
+}
+
+function bboxIntersectArea(a: Bbox, b: Bbox): number {
+  const x0 = Math.max(a.x0, b.x0);
+  const y0 = Math.max(a.y0, b.y0);
+  const x1 = Math.min(a.x1, b.x1);
+  const y1 = Math.min(a.y1, b.y1);
+  return Math.max(0, x1 - x0) * Math.max(0, y1 - y0);
+}
+
+function overlapsAnyImageRegion(bbox: Bbox, regions: Bbox[], minOverlapRatio: number): boolean {
+  if (!regions.length) return false;
+  const area = Math.max(1, bboxArea(bbox));
+  for (const r of regions) {
+    const inter = bboxIntersectArea(bbox, r);
+    if (inter / area >= minOverlapRatio) return true;
+  }
+  return false;
+}
+
+function tesseractLinesToParagraphText(lines: TesseractLine[]): string {
+  const sorted = [...lines]
+    .filter((l) => String(l.text || '').trim().length > 0)
+    .sort((a, b) => a.bbox.y0 - b.bbox.y0);
+  if (!sorted.length) return '';
+
+  const heights = sorted.map((l) => Math.max(1, l.bbox.y1 - l.bbox.y0)).sort((a, b) => a - b);
+  const medianH = heights[Math.floor(heights.length / 2)] || 14;
+  const paraGap = Math.max(6, medianH * 0.9);
+
+  const out: string[] = [];
+  let prev: TesseractLine | null = null;
+  for (const l of sorted) {
+    const text = normalizeOcrLineArtifacts(String(l.text || '')).replace(/\s+$/g, '');
+    if (!text.trim()) continue;
+    if (prev) {
+      const gap = l.bbox.y0 - prev.bbox.y1;
+      if (gap >= paraGap) out.push('');
+    }
+    out.push(text);
+    prev = l;
+  }
+  return normalizeOcrTextToParagraphs(out.join('\n'));
+}
+
+function buildInlineQuestionHtmlFromTesseract(args: {
+  rawLines: TesseractLine[];
+  excludeBboxes: Bbox[];
+  imageBbox: Bbox;
+  imageDataUrl: string;
+}): string {
+  const { rawLines, excludeBboxes, imageBbox, imageDataUrl } = args;
+  const kept = excludeBboxes.length
+    ? rawLines.filter((l) => !overlapsAnyImageRegion(l.bbox, excludeBboxes, 0.45))
+    : rawLines;
+
+  const above = kept.filter((l) => l.bbox.y1 <= imageBbox.y0);
+  const below = kept.filter((l) => l.bbox.y0 >= imageBbox.y1);
+
+  const topText = tesseractLinesToParagraphText(above);
+  const bottomText = tesseractLinesToParagraphText(below);
+
+  const topHtml = topText ? ocrTextToRichHtml(topText) : '';
+  const bottomHtml = bottomText ? ocrTextToRichHtml(bottomText) : '';
+  const imgHtml = `<p><img src="${imageDataUrl}" alt="attached" style="max-width:100%;height:auto;display:block;margin:0.5rem 0;" /></p>`;
+
+  if (topHtml && bottomHtml) return `${topHtml}${imgHtml}${bottomHtml}`;
+  if (topHtml) return `${topHtml}${imgHtml}`;
+  if (bottomHtml) return `${imgHtml}${bottomHtml}`;
+  return imgHtml;
+}
 
 function clamp01(n: number) {
   return Math.max(0, Math.min(1, n));
@@ -131,6 +210,24 @@ function escapeHtmlInline(s: string): string {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#039;');
+}
+
+function applyBasicSupSubInline(escaped: string): string {
+	let out = String(escaped || '');
+	out = out.replace(/[⁰¹²³⁴⁵⁶⁷⁸⁹]+/g, (m) => `<sup>${m.replace(/[⁰¹²³⁴⁵⁶⁷⁸⁹]/g, (c) => ({ '⁰': '0', '¹': '1', '²': '2', '³': '3', '⁴': '4', '⁵': '5', '⁶': '6', '⁷': '7', '⁸': '8', '⁹': '9' } as any)[c] ?? c)}</sup>`);
+	out = out.replace(/[₀₁₂₃₄₅₆₇₈₉]+/g, (m) => `<sub>${m.replace(/[₀₁₂₃⁴₅₆₇₈₉]/g, (c) => ({ '₀': '0', '₁': '1', '₂': '2', '₃': '3', '₄': '4', '₅': '5', '₆': '6', '₇': '7', '₈': '8', '₉': '9' } as any)[c] ?? c)}</sub>`);
+	out = out.replace(/([A-Za-z0-9\)\]\}])\s*\^\s*(\{([^{}]+)\}|\(([^()]+)\)|([A-Za-z0-9+\-]+))/g, (_m, base, _expAll, expBraces, expParens, expSimple) => {
+		const exp = (expBraces || expParens || expSimple || '').trim();
+		if (!exp) return _m;
+		return `${base}<sup>${exp}</sup>`;
+	});
+	out = out.replace(/([A-Za-z0-9\)\]\}])\s*_\s*(\{([^{}]+)\}|\(([^()]+)\)|([A-Za-z0-9+\-]+))/g, (_m, base, _subAll, subBraces, subParens, subSimple) => {
+		const sub = (subBraces || subParens || subSimple || '').trim();
+		if (!sub) return _m;
+		return `${base}<sub>${sub}</sub>`;
+	});
+	out = out.replace(/\b([A-Za-z])([0-9]{1,2})\b/g, (_m, a, d) => `${a}<sub>${d}</sub>`);
+	return out;
 }
 
 function richHtmlFromTesseractWithDecorations(
@@ -223,6 +320,7 @@ function richHtmlFromTesseractWithDecorations(
       }
 
       let content = escapeHtmlInline(rawText);
+		content = applyBasicSupSubInline(content);
 
       if (opts.inferUnderlineStrike) {
         const height = Math.max(1, w.bbox.y1 - w.bbox.y0);
@@ -428,15 +526,21 @@ function buildDefaultOptions(): DraftOption[] {
   ];
 }
 
+function buildDefaultNumericOptions(): DraftOption[] {
+  return [
+    { id: uuidv4(), label: '1', text: '1) Option 1' },
+    { id: uuidv4(), label: '2', text: '2) Option 2' },
+    { id: uuidv4(), label: '3', text: '3) Option 3' },
+    { id: uuidv4(), label: '4', text: '4) Option 4' },
+  ];
+}
+
 function normalizeOptionLabel(label: string): string {
   const s = String(label || '').trim();
   if (!s) return '';
   const upper = s.toUpperCase();
   if (/^[A-Z]$/.test(upper)) return upper;
-  if (/^[1-9]$/.test(s)) {
-    const n = Number(s);
-    if (n >= 1 && n <= 26) return String.fromCharCode(64 + n);
-  }
+  if (/^[1-9]$/.test(s)) return s;
   return upper;
 }
 
@@ -445,11 +549,28 @@ function isDefaultOptionText(text: string, label: string) {
   const t = String(text || '').trim().toLowerCase();
   const lbl = String(label || '').trim().toLowerCase();
   const lettered = `${lbl}) option ${lbl}`;
-  return t === `option ${lbl}` || t === lettered;
+  const numbered = `${lbl}) option ${lbl}`;
+  return t === `option ${lbl}` || t === lettered || t === numbered;
+}
+
+function isNumericOptionLabel(label: string): boolean {
+  return /^[1-9]$/.test(String(label || '').trim());
+}
+
+function compareOptionLabels(a: string, b: string): number {
+  const sa = String(a || '').trim();
+  const sb = String(b || '').trim();
+  const na = isNumericOptionLabel(sa) ? Number(sa) : NaN;
+  const nb = isNumericOptionLabel(sb) ? Number(sb) : NaN;
+  if (Number.isFinite(na) && Number.isFinite(nb)) return na - nb;
+  return sa.localeCompare(sb);
 }
 
 function buildOptionsFromParsed(parsed: ScreenshotQuestionDraft): DraftOption[] {
-  const defaults = buildDefaultOptions();
+  const parsedNormalizedLabels = (parsed.options ?? []).map((o) => normalizeOptionLabel(o.label));
+  const numericCount = parsedNormalizedLabels.filter((l) => isNumericOptionLabel(l)).length;
+  const useNumeric = numericCount >= 2;
+  const defaults = useNumeric ? buildDefaultNumericOptions() : buildDefaultOptions();
   if (!parsed.options || parsed.options.length < 2) return defaults;
 
   const fromParsed: DraftOption[] = parsed.options.map((o) => ({
@@ -459,8 +580,11 @@ function buildOptionsFromParsed(parsed: ScreenshotQuestionDraft): DraftOption[] 
     attachedImages: [],
   }));
 
+  fromParsed.sort((a, b) => compareOptionLabels(a.label, b.label));
+
   const parsedLabels = new Set(fromParsed.map((o) => o.label));
   const remainingDefaults = defaults.filter((d) => !parsedLabels.has(d.label));
+  remainingDefaults.sort((a, b) => compareOptionLabels(a.label, b.label));
   return [...fromParsed, ...remainingDefaults];
 }
 
@@ -491,7 +615,7 @@ export default function ScreenshotToQuestionModal({ files, onApply }: Props) {
   const [cropRect, setCropRect] = useState<CropRect | null>(null);
   const [cropAssignTarget, setCropAssignTarget] = useState<'question' | { optionId: string } | null>(null);
 
-  const [inferFormatting, setInferFormatting] = useState(true);
+  const [inferFormatting, setInferFormatting] = useState(false);
   const [experimentalBoldItalic, setExperimentalBoldItalic] = useState(false);
 
   const imgRef = useRef<HTMLImageElement | null>(null);
@@ -618,22 +742,61 @@ export default function ScreenshotToQuestionModal({ files, onApply }: Props) {
           onProgress: setProgress,
         });
         let nextDrafts: ScreenshotQuestionDraft[];
+        let auto: { questionImages: string[]; optionImagesByLabel: Record<string, string[]>; imageBboxes: Array<{ x0: number; y0: number; x1: number; y1: number }> } | null = null;
         try {
           const { data } = await blobToImageData(files[0]);
-          nextDrafts = parseScreenshotOcrToDraftsFromTesseract(res.raw as any, data);
+			  auto = await autoAttachImagesFromTesseract(res.raw as any, data);
+			  nextDrafts = parseScreenshotOcrToDraftsFromTesseract(res.raw as any, data, { excludeBboxes: auto?.imageBboxes ?? [] });
         } catch {
           nextDrafts = parseScreenshotOcrToDrafts(res.text);
         }
         setDrafts(nextDrafts);
         setDraftIndex(0);
-        const nextUi: DraftUiState[] = nextDrafts.map((d) => ({
-          question: ocrTextToRichHtml(d.questionText),
-          options: buildOptionsFromParsed(d),
-          correctOptionId: null,
-          rawLines: d.rawLines,
-          detectedMcq: d.options.length >= 2,
-          attachedImages: [],
-        }));
+        const nextUi: DraftUiState[] = nextDrafts.map((d, idx) => {
+          const baseOptions = buildOptionsFromParsed(d);
+          const existing = draftUi[idx];
+          const preserveExistingQuestionImages = !!existing?.attachedImages?.length;
+          const preserveExistingOptionImages = !!existing?.options?.some((o) => (o.attachedImages ?? []).length);
+
+          const applyAuto = !!auto && nextDrafts.length === 1;
+
+          const rawLines = ((res.raw as any)?.data?.lines ?? []) as TesseractLine[];
+          const shouldInlineQuestionImage =
+            applyAuto &&
+            !preserveExistingQuestionImages &&
+            (auto?.questionImages?.length ?? 0) === 1 &&
+            (auto?.imageBboxes?.length ?? 0) >= 1 &&
+            rawLines.length > 0;
+
+          const primaryImageBbox = shouldInlineQuestionImage
+            ? [...(auto?.imageBboxes ?? [])].sort((a, b) => bboxArea(b) - bboxArea(a))[0]
+            : null;
+
+          const optionsWithAuto = baseOptions;
+
+          const questionHtml = shouldInlineQuestionImage && primaryImageBbox
+            ? buildInlineQuestionHtmlFromTesseract({
+                rawLines,
+                excludeBboxes: auto?.imageBboxes ?? [],
+                imageBbox: primaryImageBbox,
+                imageDataUrl: auto?.questionImages?.[0] ?? '',
+              })
+            : ocrTextToRichHtml(d.questionText);
+
+          return {
+            question: questionHtml,
+            options: optionsWithAuto,
+            correctOptionId: existing?.correctOptionId ?? null,
+            rawLines: d.rawLines,
+            detectedMcq: d.options.length >= 2,
+            attachedImages:
+              shouldInlineQuestionImage
+                ? (existing?.attachedImages ?? [])
+                : (applyAuto && !preserveExistingQuestionImages && auto?.questionImages?.length
+                ? [...auto.questionImages]
+                : (existing?.attachedImages ?? [])),
+          };
+        });
         setDraftUi(nextUi);
         if (nextDrafts[0]) {
           setDraftQuestion(nextUi[0].question);
@@ -666,24 +829,63 @@ export default function ScreenshotToQuestionModal({ files, onApply }: Props) {
       });
 
       let nextDrafts: ScreenshotQuestionDraft[];
+      let auto: { questionImages: string[]; optionImagesByLabel: Record<string, string[]>; imageBboxes: Array<{ x0: number; y0: number; x1: number; y1: number }> } | null = null;
       try {
         const url = imageUrls[activeIndex];
         const b = await fetch(url).then((r) => r.blob());
         const { data } = await blobToImageData(b);
-        nextDrafts = parseScreenshotOcrToDraftsFromTesseract(res.raw as any, data);
+        auto = await autoAttachImagesFromTesseract(res.raw as any, data);
+        nextDrafts = parseScreenshotOcrToDraftsFromTesseract(res.raw as any, data, { excludeBboxes: auto?.imageBboxes ?? [] });
       } catch {
         nextDrafts = parseScreenshotOcrToDrafts(res.text);
       }
       setDrafts(nextDrafts);
       setDraftIndex(0);
-      const nextUi: DraftUiState[] = nextDrafts.map((d) => ({
-        question: ocrTextToRichHtml(d.questionText),
-        options: buildOptionsFromParsed(d),
-        correctOptionId: null,
-        rawLines: d.rawLines,
-        detectedMcq: d.options.length >= 2,
-        attachedImages: [],
-      }));
+      const nextUi: DraftUiState[] = nextDrafts.map((d, idx) => {
+        const baseOptions = buildOptionsFromParsed(d);
+        const existing = draftUi[idx];
+        const preserveExistingQuestionImages = !!existing?.attachedImages?.length;
+        const preserveExistingOptionImages = !!existing?.options?.some((o) => (o.attachedImages ?? []).length);
+
+        const applyAuto = !!auto && nextDrafts.length === 1;
+
+        const rawLines = ((res.raw as any)?.data?.lines ?? []) as TesseractLine[];
+        const shouldInlineQuestionImage =
+          applyAuto &&
+          !preserveExistingQuestionImages &&
+          (auto?.questionImages?.length ?? 0) === 1 &&
+          (auto?.imageBboxes?.length ?? 0) >= 1 &&
+          rawLines.length > 0;
+
+        const primaryImageBbox = shouldInlineQuestionImage
+          ? [...(auto?.imageBboxes ?? [])].sort((a, b) => bboxArea(b) - bboxArea(a))[0]
+          : null;
+
+        const optionsWithAuto = baseOptions;
+
+        const questionHtml = shouldInlineQuestionImage && primaryImageBbox
+          ? buildInlineQuestionHtmlFromTesseract({
+              rawLines,
+              excludeBboxes: auto?.imageBboxes ?? [],
+              imageBbox: primaryImageBbox,
+              imageDataUrl: auto?.questionImages?.[0] ?? '',
+            })
+          : ocrTextToRichHtml(d.questionText);
+
+        return {
+          question: questionHtml,
+          options: optionsWithAuto,
+          correctOptionId: existing?.correctOptionId ?? null,
+          rawLines: d.rawLines,
+          detectedMcq: d.options.length >= 2,
+          attachedImages:
+            shouldInlineQuestionImage
+              ? (existing?.attachedImages ?? [])
+              : (applyAuto && !preserveExistingQuestionImages && auto?.questionImages?.length
+              ? [...auto.questionImages]
+              : (existing?.attachedImages ?? [])),
+        };
+      });
       setDraftUi(nextUi);
       if (nextDrafts[0]) {
         setDraftQuestion(nextUi[0].question);
@@ -1188,75 +1390,108 @@ export default function ScreenshotToQuestionModal({ files, onApply }: Props) {
                         )}
                         </div>
                         {cropMode && cropRect && i === activeIndex && (
-                          <div className="mt-3 rounded-md bg-muted/10 p-3 space-y-2">
-                            <div className="text-xs text-muted-foreground">
-                              Region selected. Assign via buttons or shortcuts:
-                              <div className="mt-1">
-                                <span className="font-mono">Ctrl+1</span> Question
+                          <div className="mt-3 rounded-md border bg-muted/10 p-3 space-y-3">
+                            <div className="flex items-start justify-between gap-3">
+                              <div>
+                                <div className="text-sm font-medium">Region selected</div>
+                                <div className="text-xs text-muted-foreground mt-0.5">
+                                  Use buttons below or <span className="font-mono">Ctrl+1</span> to assign to the question.
+                                </div>
+                              </div>
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="outline"
+                                onClick={() => {
+                                  setCropMode(false);
+                                  setCropRect(null);
+                                  setCropAssignTarget(null);
+                                }}
+                              >
+                                Cancel
+                              </Button>
+                            </div>
+                          
+                            <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+                              <div className="rounded-md bg-background/40 border p-3 space-y-2">
+                                <div className="text-xs font-medium text-muted-foreground">Formatting (region OCR)</div>
+                                <div className="flex flex-col gap-2 text-xs text-muted-foreground">
+                                  <label className="flex items-center gap-2">
+                                    <input
+                                      type="checkbox"
+                                      checked={inferFormatting}
+                                      onChange={(e) => {
+                                        const next = e.target.checked;
+                                        setInferFormatting(next);
+                                        if (!next) setExperimentalBoldItalic(false);
+                                      }}
+                                    />
+                                    Infer underline/strike
+                                  </label>
+                                  <label className="flex items-center gap-2">
+                                    <input
+                                      type="checkbox"
+                                      checked={experimentalBoldItalic}
+                                      onChange={(e) => setExperimentalBoldItalic(e.target.checked)}
+                                      disabled={!inferFormatting}
+                                    />
+                                    Experimental: infer bold/italic
+                                  </label>
+                                </div>
+                              </div>
+                          
+                              <div className="rounded-md bg-background/40 border p-3 space-y-2">
+                                <div className="text-xs font-medium text-muted-foreground">Assign to question</div>
+                                <div className="flex flex-wrap gap-2">
+                                  <Button type="button" size="sm" onClick={() => void runCropOcrAndAssign('question')} disabled={busy}>
+                                    Replace
+                                  </Button>
+                                  <Button type="button" size="sm" variant="outline" onClick={() => void runCropOcrAndAppend('question')} disabled={busy}>
+                                    Append
+                                  </Button>
+                                  <Button type="button" size="sm" variant="outline" onClick={() => void insertCropIntoQuestionText()} disabled={busy}>
+                                    Insert image
+                                  </Button>
+                                  <Button type="button" size="sm" variant="outline" onClick={() => void attachCropAsQuestionImage()} disabled={busy}>
+                                    Attach image
+                                  </Button>
+                                </div>
                               </div>
                             </div>
-                            <div className="flex flex-wrap items-center gap-4 text-xs text-muted-foreground">
-                              <label className="flex items-center gap-2">
-                                <input
-                                  type="checkbox"
-                                  checked={inferFormatting}
-                                  onChange={(e) => setInferFormatting(e.target.checked)}
-                                />
-                                Infer underline/strike (region OCR)
-                              </label>
-                              <label className="flex items-center gap-2">
-                                <input
-                                  type="checkbox"
-                                  checked={experimentalBoldItalic}
-                                  onChange={(e) => setExperimentalBoldItalic(e.target.checked)}
-                                  disabled={!inferFormatting}
-                                />
-                                Experimental: infer bold/italic
-                              </label>
+                          
+                            <div className="rounded-md bg-background/40 border p-3 space-y-2">
+                              <div className="text-xs font-medium text-muted-foreground">Assign to options</div>
+                              <div className="grid grid-cols-1 lg:grid-cols-2 gap-2">
+                                <div className="flex flex-wrap gap-2">
+                                  {draftOptions.map((o) => (
+                                    <Button
+                                      key={`assign-${o.id}`}
+                                      type="button"
+                                      size="sm"
+                                      variant="outline"
+                                      onClick={() => void runCropOcrAndAssign({ optionId: o.id })}
+                                      disabled={busy}
+                                    >
+                                      Replace {o.label}
+                                    </Button>
+                                  ))}
+                                </div>
+                                <div className="flex flex-wrap gap-2">
+                                  {draftOptions.map((o) => (
+                                    <Button
+                                      key={`append-${o.id}`}
+                                      type="button"
+                                      size="sm"
+                                      variant="outline"
+                                      onClick={() => void runCropOcrAndAppend({ optionId: o.id })}
+                                      disabled={busy}
+                                    >
+                                      Append {o.label}
+                                    </Button>
+                                  ))}
+                                </div>
+                              </div>
                             </div>
-                            <div className="flex flex-wrap gap-2">
-                              <Button type="button" size="sm" onClick={() => void runCropOcrAndAssign('question')} disabled={busy}>
-                                Assign to question
-                              </Button>
-                              <Button type="button" size="sm" variant="outline" onClick={() => void runCropOcrAndAppend('question')} disabled={busy}>
-                                Append to question
-                              </Button>
-                              <Button type="button" size="sm" variant="outline" onClick={() => void attachCropAsQuestionImage()} disabled={busy}>
-                                Attach crop as image
-                              </Button>
-                              <Button type="button" size="sm" variant="outline" onClick={() => void insertCropIntoQuestionText()} disabled={busy}>
-                                Insert into question
-                              </Button>
-                            </div>
-
-							<div className="flex flex-wrap gap-2">
-								{draftOptions.map((o) => (
-									<Button
-										key={`assign-${o.id}`}
-										type="button"
-										size="sm"
-										variant="outline"
-										onClick={() => void runCropOcrAndAssign({ optionId: o.id })}
-										disabled={busy}
-									>
-										Assign to {o.label}
-									</Button>
-								))}
-							</div>
-							<div className="flex flex-wrap gap-2">
-								{draftOptions.map((o) => (
-									<Button
-										key={`append-${o.id}`}
-										type="button"
-										size="sm"
-										variant="outline"
-										onClick={() => void runCropOcrAndAppend({ optionId: o.id })}
-										disabled={busy}
-									>
-										Append to {o.label}
-									</Button>
-								))}
-							</div>
                           </div>
                         )}
                       </TabsContent>
@@ -1283,7 +1518,7 @@ export default function ScreenshotToQuestionModal({ files, onApply }: Props) {
 							</Button>
 						</div>
 						<div
-							className="rounded-md bg-background/60 border p-3 text-sm whitespace-pre-wrap select-text"
+							className="selection-visible rounded-md bg-background/60 border p-3 text-sm whitespace-pre-wrap select-text"
 							onMouseUp={() => {
 								const t = window.getSelection?.()?.toString() ?? '';
 								setSelectedOcrText(t);

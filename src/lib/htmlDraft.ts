@@ -75,6 +75,10 @@ function applyBasicSupSub(escaped: string): string {
     }
   );
 
+  // Common OCR output: P1, P2, V0 (no underscore). Convert single-letter tokens with trailing digits.
+  // Keep it conservative: only apply when the token is exactly one letter + 1-2 digits.
+  out = out.replace(/\b([A-Za-z])([0-9]{1,2})\b/g, (_m, a, d) => `${a}<sub>${d}</sub>`);
+
   return out;
 }
 

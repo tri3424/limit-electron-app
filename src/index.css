@@ -1114,6 +1114,16 @@ All colors MUST be HSL.
     color: inherit;
   }
 
+  .selection-visible::selection {
+    background: rgba(59, 130, 246, 0.35);
+    color: inherit;
+  }
+
+  .selection-visible::-moz-selection {
+    background: rgba(59, 130, 246, 0.35);
+    color: inherit;
+  }
+
   .is-admin input::selection,
   .is-admin textarea::selection,
   .is-admin [contenteditable='true']::selection,

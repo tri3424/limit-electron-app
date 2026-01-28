@@ -25,7 +25,11 @@ function stripOcrUnderscoreArtifacts(s: string): string {
 export function normalizeOcrLineArtifacts(line: string): string {
   const cleaned = String(line || '').replace(/\u00A0/g, ' ');
   const noUnderscores = stripOcrUnderscoreArtifacts(cleaned);
-  return fixCommonJoinedWords(noUnderscores);
+  let out = fixCommonJoinedWords(noUnderscores);
+  // Common OCR confusion in physics graphs: t (time) inside parentheses becomes currency symbols.
+  out = out.replace(/\btime\s*\(\s*[£€]\s*\)/gi, 'time (t)');
+  out = out.replace(/\b-\s*time\s*\(\s*[£€]\s*\)/gi, '-time (t)');
+  return out;
 }
 
 function normalizeSpaces(s: string): string {

@@ -1308,12 +1308,11 @@ export default function Settings() {
 				<Card className="p-6 space-y-4">
 					<div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
 						<div className="min-w-0">
-							<div className="flex items-center gap-2">
-								<Sparkles className="h-5 w-5 text-primary" />
+							<div className="flex items-center justify-between gap-2">
 								<h2 className="text-xl font-semibold text-foreground">Offline Tag Suggestions</h2>
 							</div>
 							<p className="text-sm text-muted-foreground mt-1">
-								One-time preparation downloads a MiniLM model and builds tag embeddings for offline cosine similarity.
+								One-time preparation downloads an embedding model and builds tag embeddings for offline cosine similarity.
 							</p>
 						</div>
 						<div className="shrink-0 flex items-center gap-2">
@@ -1340,8 +1339,7 @@ export default function Settings() {
 						<div className="rounded-md border bg-muted/20 p-3 lg:col-span-2">
 							<div className="text-xs text-muted-foreground">Paths</div>
 							<div className="mt-1 text-xs text-foreground break-all">
-								<div>Model: {embedStatus?.modelDir || '—'}</div>
-								<div>Cache: {embedStatus?.cacheDir || '—'}</div>
+								<div>Stored locally (paths hidden)</div>
 							</div>
 						</div>
 					</div>
@@ -1350,7 +1348,7 @@ export default function Settings() {
 						<label className="flex items-start gap-2 text-sm text-muted-foreground">
 							<Checkbox checked={embedAcceptLicense} onCheckedChange={(v) => setEmbedAcceptLicense(v === true)} />
 							<span>
-								I accept the Apache-2.0 license for <span className="font-medium text-foreground">Xenova/all-MiniLM-L6-v2</span>.
+								I accept the Apache-2.0 license for the local embedding model.
 							</span>
 						</label>
 						<div className="flex flex-wrap gap-2">

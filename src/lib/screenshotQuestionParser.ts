@@ -21,6 +21,28 @@ type TesseractRaw = {
   };
 };
 
+function bboxIntersectArea(a: TesseractBbox, b: TesseractBbox): number {
+  const x0 = Math.max(a.x0, b.x0);
+  const y0 = Math.max(a.y0, b.y0);
+  const x1 = Math.min(a.x1, b.x1);
+  const y1 = Math.min(a.y1, b.y1);
+  return Math.max(0, x1 - x0) * Math.max(0, y1 - y0);
+}
+
+function bboxArea(b: TesseractBbox): number {
+  return Math.max(0, b.x1 - b.x0) * Math.max(0, b.y1 - b.y0);
+}
+
+function overlapsAnyImageRegion(bbox: TesseractBbox, regions: TesseractBbox[], minOverlapRatio: number): boolean {
+  if (!regions.length) return false;
+  const area = Math.max(1, bboxArea(bbox));
+  for (const r of regions) {
+    const inter = bboxIntersectArea(bbox, r);
+    if (inter / area >= minOverlapRatio) return true;
+  }
+  return false;
+}
+
 function stripTrailingYearTag(s: string): string {
   // Common in past-paper scans: question line ends with a year tag like [2014]
   return String(s || '')
@@ -42,6 +64,41 @@ export type ScreenshotQuestionDraft = {
   optionLineIndexes: number[];
 };
 
+ export function mergeParsedOptionsByLabel(base: ParsedOption[], overrides: ParsedOption[]): ParsedOption[] {
+   const byLabel = new Map<string, ParsedOption>();
+   for (const o of base) {
+     const label = String(o.label || '').trim();
+     if (!label) continue;
+     byLabel.set(label, o);
+   }
+
+   for (const o of overrides) {
+     const label = String(o.label || '').trim();
+     if (!label) continue;
+     byLabel.set(label, o);
+   }
+
+   const out: ParsedOption[] = [];
+   const seen = new Set<string>();
+   for (const o of base) {
+     const label = String(o.label || '').trim();
+     if (!label || seen.has(label)) continue;
+     const merged = byLabel.get(label);
+     if (merged) out.push(merged);
+     seen.add(label);
+   }
+
+   for (const o of overrides) {
+     const label = String(o.label || '').trim();
+     if (!label || seen.has(label)) continue;
+     const merged = byLabel.get(label);
+     if (merged) out.push(merged);
+     seen.add(label);
+   }
+
+   return out;
+ }
+
 function normalizeLine(line: string): string {
   return line.replace(/\s+/g, ' ').trim();
 }
@@ -62,6 +119,15 @@ function matchStandaloneLetterOptionLabel(line: string): string | null {
   if (!s) return null;
   const m = s.match(/^\(?\s*([A-D])\s*\)?\s*$/i);
   return m ? m[1].toUpperCase() : null;
+}
+
+function matchLetteredStatementMarker(line: string): OptionMarkerMatch | null {
+  const s = normalizeLine(line);
+  if (!s) return null;
+  // Like options, but allow A-E since some questions list statements A-E then ask for combinations.
+  const m = s.match(/^\(?\s*([A-E])\s*\)?(?:\s*[\).:\-–—]\s*|\s+)(.+)$/i);
+  if (!m) return null;
+  return { label: String(m[1]).toUpperCase(), text: String(m[2] ?? '').trim() };
 }
 
 function clamp(n: number, min: number, max: number) {
@@ -263,6 +329,36 @@ function matchInlineLetterOptions(line: string): OptionMarkerMatch[] {
   return out;
 }
 
+function matchInlineParenthesizedNumericOptions(line: string): OptionMarkerMatch[] {
+  const s = normalizeLine(line);
+  if (!s) return [];
+
+  // Example OCR output (single line):
+  // "... (1) foo (2) bar (3) baz (4) qux"
+  const re = /(^|\s)\(\s*([1-9])\s*\)\s*/g;
+  const hits: Array<{ label: string; start: number; end: number }> = [];
+
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(s))) {
+    const label = String(m[2] ?? '').trim();
+    if (!label) continue;
+    const labelIdx = m.index + String(m[1] ?? '').length;
+    hits.push({ label, start: labelIdx, end: re.lastIndex });
+  }
+
+  if (hits.length < 2) return [];
+
+  const out: OptionMarkerMatch[] = [];
+  for (let i = 0; i < hits.length; i++) {
+    const cur = hits[i];
+    const next = hits[i + 1];
+    const text = s.slice(cur.end, next ? next.start : undefined).trim();
+    if (!text) continue;
+    out.push({ label: cur.label, text });
+  }
+  return out;
+}
+
 function matchInlineParenthesizedLetterOptions(line: string): OptionMarkerMatch[] {
   const s = normalizeLine(line);
   if (!s) return [];
@@ -334,6 +430,28 @@ function stripTrailingMarkTag(input: string): string {
   return String(input || '').replace(/\s*\[\s*\d{1,3}\s*\]\s*$/g, '').trimEnd();
 }
 
+function normalizeOptionBodyText(input: string): string {
+  let s = String(input || '');
+  // Normalize comma spacing.
+  s = s.replace(/\s*,\s*/g, ', ');
+  s = s.replace(/\s{2,}/g, ' ');
+
+  // Fix common OCR join artifacts for lists like "A,BandC" / "B,DandE".
+  // Only target short labels (A-E and 1-9) to avoid harming normal words.
+  s = s.replace(/\b([A-E1-9])\s*and\s*([A-E1-9])\b/gi, (_m, a, b) => `${String(a).toUpperCase()} and ${String(b).toUpperCase()}`);
+  s = s.replace(/\b([A-E1-9])\s*,\s*([A-E1-9])and([A-E1-9])\b/gi, (_m, a, b, c) => {
+    return `${String(a).toUpperCase()}, ${String(b).toUpperCase()} and ${String(c).toUpperCase()}`;
+  });
+  s = s.replace(/\b([A-E1-9])and([A-E1-9])\b/gi, (_m, a, b) => `${String(a).toUpperCase()} and ${String(b).toUpperCase()}`);
+  s = s.replace(/\b([A-E1-9])\s*,\s*([A-E1-9])\b/g, (_m, a, b) => `${a}, ${b}`);
+
+  // Ensure space after semicolons/colons when OCR collapses.
+  s = s.replace(/\s*([;:])\s*/g, '$1 ');
+  s = s.replace(/\s{2,}/g, ' ');
+
+  return s.trim();
+}
+
 function splitQuestionLineWithInlineOptions(line: string): { questionPart: string; optionPart: string } | null {
   const s = String(line || '');
   if (!s.trim()) return null;
@@ -344,6 +462,18 @@ function splitQuestionLineWithInlineOptions(line: string): { questionPart: strin
     const m = s.match(/\(\s*[A-D]\s*\)/i);
     if (!m || typeof m.index !== 'number') return null;
     const idx = m.index;
+    const questionPart = s.slice(0, idx).trimEnd();
+    const optionPart = s.slice(idx).trimStart();
+    if (!questionPart || !optionPart) return null;
+    return { questionPart, optionPart };
+  }
+
+  // Numeric markers: (1) ... (2) ...
+  // Be robust to OCR outputs that keep everything on a single line.
+  const n1 = s.match(/\(\s*1\s*\)/);
+  const n2 = s.match(/\(\s*2\s*\)/);
+  if (n1 && n2 && typeof n1.index === 'number' && typeof n2.index === 'number') {
+    const idx = n1.index;
     const questionPart = s.slice(0, idx).trimEnd();
     const optionPart = s.slice(idx).trimStart();
     if (!questionPart || !optionPart) return null;
@@ -412,9 +542,63 @@ export function parseScreenshotOcrToDraft(ocrText: string): ScreenshotQuestionDr
   // Also, if we have A-D options later, do NOT treat numbered statements (1,2,3,4)
   // as options. Those often belong to the question stem.
   let optionStartRawIdx = -1;
+
+  // If the block contains 2+ numeric option markers, prefer numeric options.
+  // This helps questions that list statements A-E and then provide answers as (1)-(4).
+  const numericOptionMarkersInBlock = trimmedNonBlank.filter((x) => !!matchNumericOptionMarker(x.text)).length;
+
   for (const x of trimmedNonBlank) {
     const m = matchOptionMarker(x.text);
     if (!m) continue;
+
+    // Guard against question stems that start with the article "A ...".
+    // When OCR collapses/normalizes, the first character may look like an option label.
+    // Only apply this guard to the first non-blank line to avoid breaking real option lines.
+    if (
+      x.idx === trimmedNonBlank[0]?.idx &&
+      String(m.label || '').toUpperCase() === 'A' &&
+      /^[a-z]/.test(String(m.text || '').trimStart())
+    ) {
+      continue;
+    }
+
+    // If we likely have numeric options later, treat letter markers (A-E) in the stem
+    // as statements rather than option starts.
+    if (numericOptionMarkersInBlock >= 2 && /^[A-E]$/i.test(String(m.label || '').trim())) {
+      continue;
+    }
+
+    // If the current line itself contains multiple inline markers (e.g. "... (a) ... (b) ...")
+    // treat it as an option start without requiring a later marker line.
+    // This is important for single-line question+options OCR outputs.
+    const inlineHere = matchInlineLetterOptions(x.text);
+    const inlineNeetHere = matchInlineParenthesizedLetterOptions(x.text);
+    const inlineNumHere = matchInlineParenthesizedNumericOptions(x.text);
+    if (inlineHere.length >= 2 || inlineNeetHere.length >= 2 || inlineNumHere.length >= 2) {
+      optionStartRawIdx = x.idx;
+      break;
+    }
+
+     // Guard: only accept an option start marker if there is at least one more
+     // marker of the SAME family (letters or numbers) later in the block.
+     // This prevents false-positives like a question stem starting with "A ...".
+     const isLetterMarker = /^[A-D]$/i.test(m.label);
+     const isNumericMarker = /^[1-9]$/.test(m.label);
+     let hasAnotherSameFamily = false;
+     for (const y of trimmedNonBlank) {
+       if (y.idx <= x.idx) continue;
+       const my = matchOptionMarker(y.text);
+       if (!my) continue;
+       if (isLetterMarker && /^[A-D]$/i.test(my.label)) {
+         hasAnotherSameFamily = true;
+         break;
+       }
+       if (isNumericMarker && /^[1-9]$/.test(my.label)) {
+         hasAnotherSameFamily = true;
+         break;
+       }
+     }
+     if (!hasAnotherSameFamily) continue;
 
     // If the marker is a letter A-D, require it to look like an option (short, no '?').
     const isLetter = /^[A-D]$/i.test(m.label);
@@ -422,7 +606,8 @@ export function parseScreenshotOcrToDraft(ocrText: string): ScreenshotQuestionDr
       // Special case: options are on the same line: "A ... B ... C ... D ...".
       // The first option's text will look very long, but we still want to treat this as options.
       const inline = matchInlineLetterOptions(x.text);
-      if (inline.length < 2) continue;
+      const inlineNeet = matchInlineParenthesizedLetterOptions(x.text);
+      if (inline.length < 2 && inlineNeet.length < 2) continue;
     }
 
     optionStartRawIdx = x.idx;
@@ -459,14 +644,17 @@ export function parseScreenshotOcrToDraft(ocrText: string): ScreenshotQuestionDr
   const optIdxs = optionStartRawIdx >= 0 ? optionLines.map((_, i) => optionStartRawIdx + i) : [];
 
   const hasLetterOptions = optionStartRawIdx >= 0 && optionLines.some((l) => !!matchLetterOptionMarker(l));
+  const hasNumericOptions = optionStartRawIdx >= 0 && optionLines.some((l) => !!matchNumericOptionMarker(l) || matchInlineParenthesizedNumericOptions(l).length >= 2);
   const numberedStatementsInQuestion = hasLetterOptions
     ? questionLines.filter((l) => !!matchNumericOptionMarker(l)).length
     : 0;
 
+  const letteredStatementsInQuestion = questionLines.filter((l) => !!matchLetteredStatementMarker(l)).length;
+
   // If the question contains multiple numbered statement lines and options are A-D,
   // keep each line as its own paragraph for clearer spacing.
   let questionText =
-    hasLetterOptions && numberedStatementsInQuestion >= 2
+    (hasLetterOptions && numberedStatementsInQuestion >= 2) || (hasNumericOptions && letteredStatementsInQuestion >= 2)
       ? joinLinesPreservingLineParagraphs(questionLines)
       : joinLinesAsPlainText(questionLines);
   const stripped = stripLeadingQuestionNumber(questionText);
@@ -513,7 +701,7 @@ export function parseScreenshotOcrToDraft(ocrText: string): ScreenshotQuestionDr
     if (!current) return;
     // Normalize the collected lines for this option: unwrap wrapped lines into spaces,
     // keep paragraph breaks only on blank lines.
-    current.text = stripTrailingMarkTag(normalizeOcrTextToParagraphs(current.sourceLines.join('\n')));
+    current.text = normalizeOptionBodyText(stripTrailingMarkTag(normalizeOcrTextToParagraphs(current.sourceLines.join('\n'))));
     options.push(current);
     current = null;
   };
@@ -530,7 +718,7 @@ export function parseScreenshotOcrToDraft(ocrText: string): ScreenshotQuestionDr
     if (inline.length) {
       finalizeCurrent();
       for (const o of inline) {
-        const t = stripTrailingMarkTag(o.text);
+        const t = normalizeOptionBodyText(stripTrailingMarkTag(o.text));
         options.push({ label: o.label, text: t, sourceLines: [t] });
       }
       current = null;
@@ -541,7 +729,18 @@ export function parseScreenshotOcrToDraft(ocrText: string): ScreenshotQuestionDr
     if (inlineNeet.length) {
       finalizeCurrent();
       for (const o of inlineNeet) {
-        const t = stripTrailingMarkTag(o.text);
+        const t = normalizeOptionBodyText(stripTrailingMarkTag(o.text));
+        options.push({ label: o.label, text: t, sourceLines: [t] });
+      }
+      current = null;
+      continue;
+    }
+
+    const inlineNum = matchInlineParenthesizedNumericOptions(line);
+    if (inlineNum.length) {
+      finalizeCurrent();
+      for (const o of inlineNum) {
+        const t = normalizeOptionBodyText(stripTrailingMarkTag(o.text));
         options.push({ label: o.label, text: t, sourceLines: [t] });
       }
       current = null;
@@ -620,10 +819,19 @@ export function parseScreenshotOcrToDrafts(ocrText: string): ScreenshotQuestionD
   return drafts.filter((d) => d.options.length >= 2);
 }
 
-export function parseScreenshotOcrToDraftsFromTesseract(raw: unknown, img: ImageData): ScreenshotQuestionDraft[] {
+export function parseScreenshotOcrToDraftsFromTesseract(
+  raw: unknown,
+  img: ImageData,
+  opts?: { excludeBboxes?: TesseractBbox[] }
+): ScreenshotQuestionDraft[] {
   const r = raw as TesseractRaw;
-  const lines = (r?.data?.lines ?? []) as TesseractLine[];
-  const words = (r?.data?.words ?? []) as TesseractWord[];
+  const exclude = (opts?.excludeBboxes ?? []) as TesseractBbox[];
+  const linesAll = (r?.data?.lines ?? []) as TesseractLine[];
+  const wordsAll = (r?.data?.words ?? []) as TesseractWord[];
+
+  // Drop text that belongs to detected diagram/image regions so it doesn't pollute the question/options.
+  const lines = exclude.length ? linesAll.filter((l) => !overlapsAnyImageRegion(l.bbox, exclude, 0.45)) : linesAll;
+  const words = exclude.length ? wordsAll.filter((w) => !overlapsAnyImageRegion(w.bbox, exclude, 0.55)) : wordsAll;
 
   if (!lines.length) {
     const fallbackText = String(r?.data?.text ?? '');
@@ -632,10 +840,31 @@ export function parseScreenshotOcrToDraftsFromTesseract(raw: unknown, img: Image
 
   const normalizedText = normalizeTesseractLinesToParagraphs(lines);
 
+  const minLineY0 = lines.reduce((m, l) => Math.min(m, l.bbox.y0), Number.POSITIVE_INFINITY);
+
   const parsedOptions: ParsedOption[] = [];
   for (const line of lines) {
     const text = normalizeLine(String(line.text || ''));
     if (!text) continue;
+
+    // Guard against question stems that begin with the article "A ...".
+    // In some scans, the first "A" is dark enough to be treated as a bold option marker,
+    // which then gets merged into option A.
+    const isTopLine = line.bbox.y0 <= minLineY0 + 10;
+    if (isTopLine) {
+      const m0 = matchOptionMarker(text);
+      if (m0 && String(m0.label || '').toUpperCase() === 'A' && /^[a-z]/.test(String(m0.text || '').trimStart())) {
+        continue;
+      }
+    }
+
+    const inlineNum = matchInlineParenthesizedNumericOptions(text);
+    if (inlineNum.length) {
+      for (const o of inlineNum) {
+        parsedOptions.push({ label: o.label, text: o.text, sourceLines: [o.text] });
+      }
+      continue;
+    }
 
     const inline = matchInlineLetterOptions(text);
     if (inline.length) {
@@ -647,6 +876,12 @@ export function parseScreenshotOcrToDraftsFromTesseract(raw: unknown, img: Image
           parsedOptions.push({ label: o.label, text: o.text, sourceLines: [o.text] });
         }
       }
+      continue;
+    }
+
+    const num = matchNumericOptionMarker(text);
+    if (num) {
+      parsedOptions.push({ label: num.label, text: '', sourceLines: [num.text] });
       continue;
     }
 
@@ -686,10 +921,12 @@ export function parseScreenshotOcrToDraftsFromTesseract(raw: unknown, img: Image
   }
   uniq.sort((a, b) => a.label.localeCompare(b.label));
 
+   const mergedOptions = draft.options.length >= 2 ? mergeParsedOptionsByLabel(draft.options, uniq) : uniq;
+
   return [
     {
       ...draft,
-      options: uniq.length >= 2 ? uniq : draft.options,
+      options: mergedOptions.length >= 2 ? mergedOptions : draft.options,
     },
   ];
 }
